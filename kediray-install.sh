@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.43 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.44 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.43"
+KR_VERSION="1.19.44"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -872,7 +872,7 @@ ver_gt() { # a b -> a, b'den yeni mi (1.19.36 > 1.19.9)
 upd_json() { # ok latest cur newer [hata]
 	printf '{"ok":%s,"current":"%s","latest":"%s","newer":%s,"error":"%s"}\n' "$1" "$3" "$2" "$4" "$5"
 }
-UPD_CACHE=/tmp/kediray-upd.json
+UPD_CACHE=/etc/kediray.upd.json   # günde bir kez yazılır; yeniden başlatmada kaybolmasın
 cmd_update() { # check [--json] | install | auto | cached
 	case "$1" in
 		auto) # cron: günde bir kez sessizce denetle (update_check=0 ise yapmaz); sonuç önbelleğe yazılır
@@ -880,8 +880,14 @@ cmd_update() { # check [--json] | install | auto | cached
 			cmd_update check --json > "$UPD_CACHE.$$" 2>/dev/null && mv "$UPD_CACHE.$$" "$UPD_CACHE" || rm -f "$UPD_CACHE.$$"
 			return 0 ;;
 		cached) # panel: son otomatik denetimin sonucu (yoksa boş)
+			local latest cur
 			[ "$(uget main.update_check)" = 0 ] && return 0
-			[ -s "$UPD_CACHE" ] && cat "$UPD_CACHE"; return 0 ;;
+			[ -s "$UPD_CACHE" ] || return 0
+			# önbellekteki "en son" sürümü şimdiki sürümle yeniden karşılaştır (güncelledikten sonra bayat uyarı kalmasın)
+			latest=$(sed -n 's/.*"latest":"\([0-9.]*\)".*/\1/p' "$UPD_CACHE" | head -n1); cur=$(kr_version)
+			[ -n "$latest" ] || return 0
+			if ver_gt "$latest" "$cur"; then upd_json true "$latest" "$cur" true ""; else upd_json true "$latest" "$cur" false ""; fi
+			return 0 ;;
 	esac
 	local act="${1:-check}" js=0 base cur latest t="/tmp/kediray-upd.$$" sum got ver
 	[ "$2" = --json ] || [ "$1" = --json ] && js=1
@@ -3228,7 +3234,7 @@ cmd_uninstall() {
 	fi
 	rm -f /etc/hotplug.d/firewall/99-kediray
 	sed -i '/kediray watchdog/d;/kediray update auto/d' /etc/crontabs/root 2>/dev/null
-	rm -f /tmp/kediray-upd.json
+	rm -f /tmp/kediray-upd.json /etc/kediray.upd.json
 	/etc/init.d/cron restart >/dev/null 2>&1
 	rm -rf "$SHARE" "$RUN" /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray \
 		/www/luci-static/resources/view/kediray /usr/share/luci/menu.d/luci-app-kediray.json \
@@ -9045,7 +9051,7 @@ return view.extend({
 		let m, s, o;
 
 		m = new form.Map('kediray', 'KediRay — Ayarlar',
-			'Kaydet & Uygula dediğinde VPN yeniden başlar. Çekirdekte direkt geçen uygulamalar (Metin2, Teams vb.) bundan etkilenmez.');
+			'Kaydet & Uygula dediğinde VPN yeniden başlar. Çekirdekte direkt geçen uygulamalar bundan etkilenmez.');
 
 		/* ---------------- Genel ---------------- */
 		s = m.section(form.NamedSection, 'main', 'main');
@@ -9100,7 +9106,7 @@ return view.extend({
 
 		o = s.taboption('general', form.Flag, 'update_check', 'Güncellemeleri kontrol et');
 		o.default = '1';
-		o.description = 'Günde bir kez GitHub\'da yeni bir sürüm çıkmış mı diye sorar ve Hakkında sayfasında söyler. Sen düğmeye basmadan hiçbir şey kurulmaz; bu yalnızca sorunun sorulup sorulmayacağına karar verir.';
+		o.description = 'Her gece 01:00\'de GitHub\'da yeni bir sürüm çıkmış mı diye sorar ve Hakkında sayfasında söyler. Sen düğmeye basmadan hiçbir şey kurulmaz; bu yalnızca sorunun sorulup sorulmayacağına karar verir.';
 
 		o = s.taboption('general', form.Value, 'update_repo', 'Güncelleme kaynağı');
 		o.placeholder = 'sabanvurgun03-ui/kediray';
@@ -10843,7 +10849,7 @@ touch /etc/crontabs/root
 sed -i '/kediray watchdog/d' /etc/crontabs/root
 echo '* * * * * /usr/bin/kediray watchdog >/dev/null 2>&1' >> /etc/crontabs/root
 sed -i '/kediray update auto/d' /etc/crontabs/root
-echo "$(( $(date +%s) % 50 + 5 )) 5 * * * /usr/bin/kediray update auto >/dev/null 2>&1" >> /etc/crontabs/root
+echo '0 1 * * * /usr/bin/kediray update auto >/dev/null 2>&1' >> /etc/crontabs/root
 grep -q '/usr/bin/aw1k-usage' /etc/crontabs/root || echo '*/2 * * * * /usr/bin/aw1k-usage >/dev/null 2>&1' >> /etc/crontabs/root
 /etc/init.d/cron enable >/dev/null 2>&1; /etc/init.d/cron restart >/dev/null 2>&1
 /usr/bin/aw1k-usage >/dev/null 2>&1
