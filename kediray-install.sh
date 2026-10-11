@@ -19,7 +19,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.37"
+KR_VERSION="1.19.38"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -10493,6 +10493,17 @@ chmod 755 /usr/bin/kediray /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray /
 # Güncelleme rpcd/arka plan üzerinden çalışırsa umask 077 olabilir: web'in sunduğu dosyalar 403 verir. Okunur yap.
 chmod 755 /www/luci-static/resources/view/kediray 2>/dev/null
 chmod 644 /www/luci-static/resources/view/kediray/*.js /www/luci-static/kedi-logo.svg /usr/share/luci/menu.d/luci-app-kediray.json /usr/share/rpcd/acl.d/luci-app-kediray.json /usr/share/rpcd/acl.d/aw1k-panel.json 2>/dev/null
+# Tarayıcı önbelleği: LuCI görünüm dosyalarını sürüm etiketli adla da yayınla ve menüyü ona yönlendir.
+# (Aynı adlı .js dosyasını tarayıcı bir saat saklar; güncellemeden sonra eski sayfa görünüyordu. Yeni ad = yeni adres.)
+KR_TAG=$(echo "$KR_VERSION" | tr . _)
+KR_VD=/www/luci-static/resources/view/kediray
+rm -f "$KR_VD"/*-r[0-9]*.js 2>/dev/null
+for v in status trafik ayir settings log about; do
+	[ -f "$KR_VD/$v.js" ] || continue
+	cp "$KR_VD/$v.js" "$KR_VD/$v-r$KR_TAG.js" && \
+		sed -i "s#\"path\": \"kediray/$v[^\"]*\"#\"path\": \"kediray/$v-r$KR_TAG\"#" /usr/share/luci/menu.d/luci-app-kediray.json
+done
+chmod 644 "$KR_VD"/*.js 2>/dev/null
 chmod 755 /usr/share/kediray 2>/dev/null; chmod 644 /usr/share/kediray/*.uc 2>/dev/null
 printf '%s\n' "$KR_VERSION" > /usr/share/kediray/version
 if [ -f /etc/config/kediray ]; then
