@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.57 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.58 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.57"
+KR_VERSION="1.19.58"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -831,29 +831,42 @@ ver_gt() { # a b -> a, b'den yeni mi (1.19.36 > 1.19.9)
 	awk -v a="$1" -v b="$2" 'BEGIN { na = split(a, x, "."); nb = split(b, y, "."); n = (na > nb ? na : nb)
 		for (i = 1; i <= n; i++) { p = x[i] + 0; q = y[i] + 0; if (p > q) exit 0; if (p < q) exit 1 } exit 1 }'
 }
-upd_json() { # ok latest cur newer [hata]
-	printf '{"ok":%s,"current":"%s","latest":"%s","newer":%s,"error":"%s"}\n' "$1" "$3" "$2" "$4" "$5"
+upd_json() { # ok latest cur newer [hata] [denetim_zamanı(epoch)] [kaynak: manual|auto]
+	local extra=""
+	[ -n "$6" ] && extra=",\"checked\":$6,\"src\":\"${7:-manual}\""
+	printf '{"ok":%s,"current":"%s","latest":"%s","newer":%s,"error":"%s"%s}\n' "$1" "$3" "$2" "$4" "$5" "$extra"
 }
 UPD_CACHE=/etc/kediray.upd.json   # günde bir kez yazılır; yeniden başlatmada kaybolmasın
+UPD_LAST=/tmp/kediray.upd.last    # son başarılı denetim: "epoch|kaynak|en_son_sürüm" (RAM'de; flash'ı yıpratmaz)
 cmd_update() { # check [--json] | install | auto | cached
 	case "$1" in
 		auto) # cron: günde bir kez sessizce denetle (update_check=0 ise yapmaz); sonuç önbelleğe yazılır
 			[ "$(uget main.update_check)" = 0 ] && { rm -f "$UPD_CACHE"; return 0; }
-			cmd_update check --json > "$UPD_CACHE.$$" 2>/dev/null && mv "$UPD_CACHE.$$" "$UPD_CACHE" || { rm -f "$UPD_CACHE.$$"; return 0; }
+			KR_UPD_SRC=auto cmd_update check --json > "$UPD_CACHE.$$" 2>/dev/null && mv "$UPD_CACHE.$$" "$UPD_CACHE" || { rm -f "$UPD_CACHE.$$"; return 0; }
 			# "Otomatik kur" işaretliyse ve yeni sürüm varsa kur (indirme SHA256 ile doğrulanır; hata olursa mevcut sürüm kalır)
 			if [ "$(uget main.update_auto_install)" = 1 ] && grep -q '"newer":true' "$UPD_CACHE"; then
 				logger -t kediray "otomatik güncelleme başlıyor: $(sed -n 's/.*"latest":"\([0-9.]*\)".*/\1/p' "$UPD_CACHE")"
 				cmd_update install 2>&1 | logger -t kediray
 			fi
 			return 0 ;;
-		cached) # panel: son otomatik denetimin sonucu (yoksa boş)
-			local latest cur
+		cached) # panel: son denetimin sonucu — elle ya da otomatik, hangisi daha yeniyse (yoksa boş)
+			local latest cur ts src
 			[ "$(uget main.update_check)" = 0 ] && return 0
-			[ -s "$UPD_CACHE" ] || return 0
-			# önbellekteki "en son" sürümü şimdiki sürümle yeniden karşılaştır (güncelledikten sonra bayat uyarı kalmasın)
-			latest=$(sed -n 's/.*"latest":"\([0-9.]*\)".*/\1/p' "$UPD_CACHE" | head -n1); cur=$(kr_version)
+			if [ -s "$UPD_LAST" ]; then
+				# RAM'deki kayıt (elle denetim de buraya yazar)
+				ts=$(cut -d'|' -f1 "$UPD_LAST"); src=$(cut -d'|' -f2 "$UPD_LAST"); latest=$(cut -d'|' -f3 "$UPD_LAST")
+			elif [ -s "$UPD_CACHE" ]; then
+				# yeniden başlatma sonrası: günlük otomatik denetimin önbelleği
+				latest=$(sed -n 's/.*"latest":"\([0-9.]*\)".*/\1/p' "$UPD_CACHE" | head -n1)
+				ts=$(sed -n 's/.*"checked":\([0-9]*\).*/\1/p' "$UPD_CACHE" | head -n1)
+				src=$(sed -n 's/.*"src":"\([a-z]*\)".*/\1/p' "$UPD_CACHE" | head -n1)
+			else
+				return 0
+			fi
 			[ -n "$latest" ] || return 0
-			if ver_gt "$latest" "$cur"; then upd_json true "$latest" "$cur" true ""; else upd_json true "$latest" "$cur" false ""; fi
+			cur=$(kr_version)
+			# kayıttaki "en son" sürümü şimdiki sürümle yeniden karşılaştır (güncelledikten sonra bayat uyarı kalmasın)
+			if ver_gt "$latest" "$cur"; then upd_json true "$latest" "$cur" true "" "$ts" "$src"; else upd_json true "$latest" "$cur" false "" "$ts" "$src"; fi
 			return 0 ;;
 	esac
 	local act="${1:-check}" js=0 base cur latest t="/tmp/kediray-upd.$$" sum got ver
@@ -870,10 +883,13 @@ cmd_update() { # check [--json] | install | auto | cached
 	[ -n "$latest" ] || { [ $js = 1 ] && upd_json false "" "$cur" false "VERSION okunamadı" || echo "VERSION dosyası okunamadı"; return 1; }
 	case "$act" in
 		check)
+			local now src="${KR_UPD_SRC:-manual}"
+			now=$(date +%s)
+			printf '%s|%s|%s\n' "$now" "$src" "$latest" > "$UPD_LAST" 2>/dev/null
 			if ver_gt "$latest" "$cur"; then
-				[ $js = 1 ] && upd_json true "$latest" "$cur" true "" || echo "Yeni sürüm var: $cur -> $latest"
+				[ $js = 1 ] && upd_json true "$latest" "$cur" true "" "$now" "$src" || echo "Yeni sürüm var: $cur -> $latest"
 			else
-				[ $js = 1 ] && upd_json true "$latest" "$cur" false "" || echo "Güncelsin ($cur)"
+				[ $js = 1 ] && upd_json true "$latest" "$cur" false "" "$now" "$src" || echo "Güncelsin ($cur)"
 			fi
 			return 0 ;;
 		install)
@@ -9632,6 +9648,7 @@ return view.extend({
 		return fs.exec(CLI, ['update', 'cached']).then(r => {
 			let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
 			const msg = document.getElementById('ka-upd-msg'), go = document.getElementById('ka-upd-go');
+			this.setLast(j);
 			if (j && j.ok && j.newer && msg && !msg.textContent) { msg.textContent = 'Yeni sürüm var: ' + j.current + ' → ' + j.latest; if (go) go.style.display = ''; }
 		}).catch(() => null);
 	},
@@ -9670,7 +9687,8 @@ return view.extend({
 				h('div', { 'id': 'ka-upd-msg', 'style': 'margin-bottom:10px;font-weight:600' }, ''),
 				h('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, 'doCheck') }, 'Güncellemeyi denetle'),
 				' ',
-				h('button', { 'id': 'ka-upd-go', 'class': 'btn cbi-button cbi-button-action', 'style': 'display:none', 'click': ui.createHandlerFn(this, 'doOnline') }, 'Şimdi güncelle')
+				h('button', { 'id': 'ka-upd-go', 'class': 'btn cbi-button cbi-button-action', 'style': 'display:none', 'click': ui.createHandlerFn(this, 'doOnline') }, 'Şimdi güncelle'),
+				h('div', { 'id': 'ka-upd-last', 'class': 'ka-k', 'style': 'margin-top:10px' }, '')
 			]),
 			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
 				title('backup', 'Yedekle / geri yükle'),
@@ -9684,6 +9702,13 @@ return view.extend({
 		]);
 	},
 
+	setLast(j) {
+		const el = document.getElementById('ka-upd-last');
+		if (!el || !j || !j.checked) return;
+		const d = new Date(j.checked * 1000), p = n => String(n).padStart(2, '0');
+		el.textContent = 'Son denetleme: ' + p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ' (' + (j.src === 'auto' ? 'otomatik' : 'manuel') + ')';
+	},
+
 	doCheck() {
 		const msg = document.getElementById('ka-upd-msg'), go = document.getElementById('ka-upd-go');
 		if (msg) msg.textContent = 'Denetleniyor…';
@@ -9691,6 +9716,7 @@ return view.extend({
 		return fs.exec(CLI, ['update', 'check', '--json']).then(r => {
 			let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
 			if (!msg) return;
+			this.setLast(j);
 			if (!j || !j.ok) msg.textContent = 'Denetlenemedi: ' + ((j && j.error) || 'GitHub\'a ulaşılamadı') + '.';
 			else if (j.newer) { msg.textContent = 'Yeni sürüm var: ' + j.current + ' → ' + j.latest; if (go) go.style.display = ''; }
 			else msg.textContent = 'Güncelsin (' + j.current + ').';
