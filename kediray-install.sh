@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.39 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.40 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Kurulum:   sh kediray-install.sh
 #  Sessiz:    sh kediray-install.sh -y --metin2 direct --teams direct --sub 'https://...'
@@ -19,7 +19,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.39"
+KR_VERSION="1.19.40"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -867,7 +867,17 @@ ver_gt() { # a b -> a, b'den yeni mi (1.19.36 > 1.19.9)
 upd_json() { # ok latest cur newer [hata]
 	printf '{"ok":%s,"current":"%s","latest":"%s","newer":%s,"error":"%s"}\n' "$1" "$3" "$2" "$4" "$5"
 }
-cmd_update() { # check [--json] | install
+UPD_CACHE=/tmp/kediray-upd.json
+cmd_update() { # check [--json] | install | auto | cached
+	case "$1" in
+		auto) # cron: günde bir kez sessizce denetle (update_check=0 ise yapmaz); sonuç önbelleğe yazılır
+			[ "$(uget main.update_check)" = 0 ] && { rm -f "$UPD_CACHE"; return 0; }
+			cmd_update check --json > "$UPD_CACHE.$$" 2>/dev/null && mv "$UPD_CACHE.$$" "$UPD_CACHE" || rm -f "$UPD_CACHE.$$"
+			return 0 ;;
+		cached) # panel: son otomatik denetimin sonucu (yoksa boş)
+			[ "$(uget main.update_check)" = 0 ] && return 0
+			[ -s "$UPD_CACHE" ] && cat "$UPD_CACHE"; return 0 ;;
+	esac
 	local act="${1:-check}" js=0 base cur latest t="/tmp/kediray-upd.$$" sum got ver
 	[ "$2" = --json ] || [ "$1" = --json ] && js=1
 	[ "$act" = --json ] && act=check
@@ -899,7 +909,7 @@ cmd_update() { # check [--json] | install
 			[ "$ver" = "$latest" ] || { echo "Dosya sürümü ($ver) VERSION ($latest) ile uyuşmuyor; kurulmadı."; rm -f /tmp/kediray-update.sh; return 1; }
 			cmd_selfupdate /tmp/kediray-update.sh
 			return $? ;;
-		*) echo "kullanım: kediray update check [--json] | install [force]" >&2; return 1 ;;
+		*) echo "kullanım: kediray update check [--json] | install [force] | auto | cached" >&2; return 1 ;;
 	esac
 }
 
@@ -3212,7 +3222,8 @@ cmd_uninstall() {
 		/etc/init.d/firewall reload >/dev/null 2>&1
 	fi
 	rm -f /etc/hotplug.d/firewall/99-kediray
-	sed -i '/kediray watchdog/d' /etc/crontabs/root 2>/dev/null
+	sed -i '/kediray watchdog/d;/kediray update auto/d' /etc/crontabs/root 2>/dev/null
+	rm -f /tmp/kediray-upd.json
 	/etc/init.d/cron restart >/dev/null 2>&1
 	rm -rf "$SHARE" "$RUN" /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray \
 		/www/luci-static/resources/view/kediray /usr/share/luci/menu.d/luci-app-kediray.json \
@@ -9082,6 +9093,16 @@ return view.extend({
 		o.default = 'lan';
 		o.description = 'Trafiği yakalanacak ağlar (misafir ağı eklemek için guest yaz).';
 
+		o = s.taboption('general', form.Flag, 'update_check', 'Güncellemeleri kontrol et');
+		o.default = '1';
+		o.description = 'Günde bir kez GitHub\'da yeni bir sürüm çıkmış mı diye sorar ve Hakkında sayfasında söyler. Sen düğmeye basmadan hiçbir şey kurulmaz; bu yalnızca sorunun sorulup sorulmayacağına karar verir.';
+
+		o = s.taboption('general', form.Value, 'update_repo', 'Güncelleme kaynağı');
+		o.placeholder = 'sabanvurgun03-ui/kediray';
+		o.rmempty = true;
+		o.description = 'Sürümlerin alınacağı GitHub deposu, sahip/depo biçiminde. Yalnızca bir fork\'tan kuruyorsan değiştir; boş bırakırsan varsayılan kullanılır.';
+		o.validate = (sid, v) => (!v || /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(v)) ? true : 'sahip/depo biçiminde yaz';
+
 		o = s.taboption('dns', form.ListValue, 'dns_mode', 'DNS modu');
 		o.value('private', 'Tünelden — dnsmasq sorguları çekirdeğe, çekirdek tünele verir  [önerilen]');
 		o.value('fast', 'Direkt — sorgular çekirdekten ama tünele girmeden çıkar');
@@ -9597,8 +9618,17 @@ return view.extend({
 			.catch(() => null);
 	},
 
+	showCachedUpdate() {
+		return fs.exec(CLI, ['update', 'cached']).then(r => {
+			let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
+			const msg = document.getElementById('ka-upd-msg'), go = document.getElementById('ka-upd-go');
+			if (j && j.ok && j.newer && msg && !msg.textContent) { msg.textContent = 'Yeni sürüm var: ' + j.current + ' → ' + j.latest; if (go) go.style.display = ''; }
+		}).catch(() => null);
+	},
+
 	render(d) {
 		d = d || {};
+		setTimeout(() => this.showCachedUpdate(), 400);
 		const row = (k, v) => [h('div', { 'class': 'ka-k' }, k), h('div', { 'class': 'ka-v' }, v || '—')];
 		return h('div', {}, [
 			h('style', {}, CSS),
@@ -10793,6 +10823,8 @@ step "Servis ve arayüz etkinleştiriliyor"
 touch /etc/crontabs/root
 sed -i '/kediray watchdog/d' /etc/crontabs/root
 echo '* * * * * /usr/bin/kediray watchdog >/dev/null 2>&1' >> /etc/crontabs/root
+sed -i '/kediray update auto/d' /etc/crontabs/root
+echo "$(( $(date +%s) % 50 + 5 )) 5 * * * /usr/bin/kediray update auto >/dev/null 2>&1" >> /etc/crontabs/root
 grep -q '/usr/bin/aw1k-usage' /etc/crontabs/root || echo '*/2 * * * * /usr/bin/aw1k-usage >/dev/null 2>&1' >> /etc/crontabs/root
 /etc/init.d/cron enable >/dev/null 2>&1; /etc/init.d/cron restart >/dev/null 2>&1
 /usr/bin/aw1k-usage >/dev/null 2>&1
