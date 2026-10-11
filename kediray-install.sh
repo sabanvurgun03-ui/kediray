@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.45 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.46 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.45"
+KR_VERSION="1.19.46"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -303,57 +303,8 @@ config main 'main'
 	option probe_url2 'https://cp.cloudflare.com/generate_204'
 	option probe_interval '2m'
 
-# Uygulamalar: her biri için route 'vpn' veya 'direct' seçilir
-config app 'whatsapp'
-	option name 'WhatsApp'
-	option enabled '1'
-	option route 'vpn'
-	option ports '5222'
-	list domain 'geosite:whatsapp'
-	list domain 'domain:whatsapp.com'
-	list domain 'domain:whatsapp.net'
-	list domain 'domain:wa.me'
-	list ip 'geoip:facebook'
-
-config app 'metin2'
-	option name 'Metin2'
-	option enabled '1'
-	option route 'direct'
-	# Kanal/ışınlanma çekirdekleri 11000-13999 arasında dağılır (11xxx giriş, 12xxx/13xxx kanallar).
-	# Aralığı bölmeyin: ışınlanırken oyun başka bir porta bağlanıyorsa VPN'e düşer ve sunucu IP değişti sanıp atar.
-	option ports '11000-13999'
-	# Eklenen tek IP'ler komşularıyla (aynı /24) birlikte direkt geçer: yeni kanal sunucusu da kapsanır
-	option expand '24'
-	list domain 'domain:gameforge.com'
-	list domain 'domain:metin2.gameforge.com'
-	list domain 'domain:gameforge.io'
-	list domain 'domain:gameforge.net'
-	# Gameforge'un kendi ağı (AS47195, 79.110.80.0-79.110.95.255): tüm kanal, giriş ve yama sunucuları
-	list ip '79.110.80.0/20'
-	# Kullanıcının bildirdiği kanal sunucuları (yukarıdaki blok bunları da kapsar)
-	list ip '79.110.87.192/32'
-	list ip '79.110.92.148/32'
-	list ip '79.110.90.244/32'
-	list ip '79.110.90.99/32'
-	list ip '79.110.91.96/32'
-	list ip '79.110.91.98/32'
-	list ip '79.110.92.117/32'
-	list ip '79.110.92.96/32'
-	list ip '79.110.92.97/32'
-	list ip '79.110.92.98/32'
-
-config app 'teams'
-	option name 'Microsoft Teams'
-	option enabled '1'
-	option route 'direct'
-	list domain 'domain:teams.microsoft.com'
-	list domain 'domain:teams.live.com'
-	list domain 'domain:teams.cloud.microsoft'
-	list domain 'domain:skype.com'
-	list domain 'domain:lync.com'
-	list ip '13.107.64.0/18'
-	list ip '52.112.0.0/14'
-	list ip '52.122.0.0/15'
+# Uygulamalar: başlangıçta boş. VPN Ayırma sayfasındaki "Hazır uygulamalar"dan (WhatsApp, Metin2, Teams, YouTube...)
+# ya da "Yeni uygulama ekle"den eklenir. Her biri için route 'vpn' veya 'direct' seçilir.
 
 config rule
 	option name 'Discord (liste modu için örnek)'
@@ -1039,9 +990,10 @@ cmd_engine_log() {
 	tail -n 60 /tmp/kediray-engine.log 2>/dev/null
 	return 0
 }
-cmd_app_add() { # <ad> <vpn|direct> <portlar> <alan adları (virgüllü)> <IP'ler (virgüllü)> [dns]
-	local name route ports doms ips id base n x tdns
-	name=$(printf '%s' "$1" | tr -d '\r\n' | cut -c1-40); route="$2"; ports="$3"; doms="$4"; ips="$5"; tdns="$6"
+cmd_app_add() { # <ad> <vpn|direct> <portlar> <alan adları (virgüllü)> <IP'ler (virgüllü)> [dns] [komşu /24 genişletme: 24]
+	local name route ports doms ips id base n x tdns expand
+	name=$(printf '%s' "$1" | tr -d '\r\n' | cut -c1-40); route="$2"; ports="$3"; doms="$4"; ips="$5"; tdns="$6"; expand="$7"
+	case "$expand" in ''|16|24) ;; *) echo "genişletme 16 ya da 24 olmalı" >&2; return 1 ;; esac
 	[ -n "$name" ] || { echo "ad gerekli" >&2; return 1; }
 	case "$route" in vpn|direct|warp|frag) ;; *) echo "yol vpn, direct, warp ya da frag olmalı" >&2; return 1 ;; esac
 	[ -n "$ports$doms$ips" ] || { echo "en az bir port, alan adı ya da IP gir" >&2; return 1; }
@@ -1065,6 +1017,7 @@ cmd_app_add() { # <ad> <vpn|direct> <portlar> <alan adları (virgüllü)> <IP'le
 	uci set "$CONF.$id.route=$route"
 	[ -n "$ports" ] && uci set "$CONF.$id.ports=$ports"
 	[ "$tdns" = dns ] && [ -n "$doms" ] && uci set "$CONF.$id.tunnel_dns=1"
+	[ -n "$expand" ] && uci set "$CONF.$id.expand=$expand"
 	for x in $(echo "$doms" | tr ',' ' '); do
 		case "$x" in *:*) ;; *) x="domain:$x" ;; esac
 		uci add_list "$CONF.$id.domain=$x"
@@ -9868,6 +9821,11 @@ function runJson(args) {
 function outOf(r) { return ((r.stdout || '') + (r.stderr || '')).trim(); }
 
 const PRESETS = [
+	{ name: 'WhatsApp', route: 'vpn', ports: '5222', domains: ['geosite:whatsapp', 'domain:whatsapp.com', 'domain:whatsapp.net', 'domain:wa.me'], ips: ['geoip:facebook'] },
+	{ name: 'Metin2', route: 'direct', ports: '11000-13999', expand: '24',
+	  domains: ['domain:gameforge.com', 'domain:metin2.gameforge.com', 'domain:gameforge.io', 'domain:gameforge.net'],
+	  ips: ['79.110.80.0/20', '79.110.87.192/32', '79.110.92.148/32', '79.110.90.244/32', '79.110.90.99/32', '79.110.91.96/32', '79.110.91.98/32', '79.110.92.117/32', '79.110.92.96/32', '79.110.92.97/32', '79.110.92.98/32'] },
+	{ name: 'Microsoft Teams', route: 'direct', domains: ['domain:teams.microsoft.com', 'domain:teams.live.com', 'domain:teams.cloud.microsoft', 'domain:skype.com', 'domain:lync.com'], ips: ['13.107.64.0/18', '52.112.0.0/14', '52.122.0.0/15'] },
 	{ name: 'YouTube', domains: ['geosite:youtube', 'domain:googlevideo.com', 'domain:ytimg.com'] },
 	{ name: 'Netflix', domains: ['geosite:netflix', 'domain:nflxvideo.net', 'domain:nflximg.net'] },
 	{ name: 'Telegram', domains: ['geosite:telegram'], ips: ['geoip:telegram'] },
@@ -10076,7 +10034,7 @@ return view.extend({
 		dom.content(this.elApps, [
 			h('h3', {}, 'Uygulamalar (' + apps.length + ')'),
 			...rows,
-			chips.length ? h('div', { 'class': 'ka-sub', 'style': 'margin-top:10px' }, 'Hazır uygulamalar (varsayılan: VPN):') : '',
+			chips.length ? h('div', { 'class': 'ka-sub', 'style': 'margin-top:10px' }, 'Hazır uygulamalar (Metin2 ve Teams direkt, diğerleri VPN gelir):') : '',
 			chips.length ? h('div', { 'class': 'ka-chips' }, chips) : '',
 			h('div', { 'class': 'ka-sub', 'style': 'margin-top:8px' }, 'Direkt: çekirdekte bypass, VPN yeniden başlasa bile bağlantı kopmaz.')
 		]);
@@ -10154,7 +10112,7 @@ return view.extend({
 	},
 
 	preset(p) {
-		return this.app(['app-add', p.name, 'vpn', '', (p.domains || []).join(','), (p.ips || []).join(','), p.dns ? 'dns' : '']);
+		return this.app(['app-add', p.name, p.route || 'vpn', p.ports || '', (p.domains || []).join(','), (p.ips || []).join(','), p.dns ? 'dns' : '', p.expand || '']);
 	},
 
 	buildAdd() {
@@ -10826,7 +10784,7 @@ choose_route() { # uygulama soru varsayılan argüman
 }
 choose_route metin2 "Metin2 nasıl bağlansın?" 1 "$ARG_METIN2"
 choose_route teams "Microsoft Teams (sesli/görüntülü görüşme) nasıl bağlansın?" 1 "$ARG_TEAMS"
-if [ "${FRESH_CONF:-0}" = 1 ] || [ -z "$(uci -q get kediray.whatsapp.route)" ]; then
+if [ "$(uci -q get kediray.whatsapp)" = app ] && { [ "${FRESH_CONF:-0}" = 1 ] || [ -z "$(uci -q get kediray.whatsapp.route)" ]; }; then
 	uci set kediray.whatsapp.route=vpn
 	ok "WhatsApp: VPN"
 fi
