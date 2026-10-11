@@ -58,6 +58,10 @@ Yedek dosyası sunucu kimliklerini (UUID) içerir. **Kimseyle paylaşma, GitHub'
 - Modemin GitHub'a erişebilmesi gerekir (`raw.githubusercontent.com`).
 - Kurulum, aynı anda çalışan başka bir transparan proxy ile (örneğin xDivine-Ray) çakışabilir. Geçiş için: `kediray takeover`.
 
+## Lisans
+
+KediRay, [GNU GPL 3.0](LICENSE) (veya sonrası) ile lisanslanmıştır. © 2026 Şaban Vurgun. Değiştirip dağıtırsan kaynağı açık tutmalı ve telif bildirimini korumalısın.
+
 ---
 
 <a name="english"></a>
@@ -114,3 +118,7 @@ The backup file contains server IDs (UUIDs). **Do not share it or upload it to G
 
 - The router must be able to reach GitHub (`raw.githubusercontent.com`).
 - It can conflict with another transparent proxy running at the same time (e.g. xDivine-Ray). To switch: `kediray takeover`.
+
+### License
+
+KediRay is licensed under the [GNU GPL 3.0](LICENSE) or later. © 2026 Şaban Vurgun. If you modify and distribute it, keep the source open and preserve the copyright notice.
