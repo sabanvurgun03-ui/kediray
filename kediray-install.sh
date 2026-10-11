@@ -19,7 +19,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.36"
+KR_VERSION="1.19.37"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -901,6 +901,41 @@ cmd_update() { # check [--json] | install
 			return $? ;;
 		*) echo "kullanım: kediray update check [--json] | install [force]" >&2; return 1 ;;
 	esac
+}
+
+# ---- Yedek: kediray backup [dosya] | restore <dosya> ---------------------------------------------------
+# Yedek = /etc/config/kediray (sunucular, uygulama kuralları, cihaz yönleri, ayarlar) düz uci metni.
+# DİKKAT: sunucu kimlikleri (UUID/şifre) içerir; yedek dosyasını kimseyle paylaşma, GitHub'a yükleme.
+cmd_backup() { # [dosya]  (dosya verilmezse stdout'a yazar)
+	local out="$1" tmp="/tmp/kediray-backup.$$"
+	[ -s /etc/config/kediray ] || { echo "Yedeklenecek ayar yok (/etc/config/kediray boş)" >&2; return 1; }
+	uci export kediray > "$tmp" 2>/dev/null && head -n1 "$tmp" | grep -q '^package kediray' || { rm -f "$tmp"; echo "Yedek alınamadı" >&2; return 1; }
+	if [ -n "$out" ]; then
+		mv "$tmp" "$out" || { rm -f "$tmp"; echo "Yazılamadı: $out" >&2; return 1; }
+		echo "Yedek yazıldı: $out ($(uci show kediray 2>/dev/null | grep -c '=node$') sunucu)"
+	else
+		cat "$tmp"; rm -f "$tmp"
+	fi
+	return 0
+}
+cmd_restore() { # <dosya>
+	local f="$1" d="/tmp/kediray-restore.chk" nn na
+	[ -f "$f" ] || { echo "Dosya bulunamadı: $f" >&2; return 1; }
+	[ "$(wc -c < "$f")" -lt 1048576 ] || { echo "Dosya çok büyük; KediRay yedeği değil." >&2; return 1; }
+	head -n1 "$f" | grep -q '^package kediray' || { echo "Bu dosya bir KediRay yedeği değil (ilk satır 'package kediray' olmalı)." >&2; return 1; }
+	grep -q '^config ' "$f" || { echo "Yedekte hiç ayar yok." >&2; return 1; }
+	# önce geçici bir yerde dene: bozuksa gerçek ayarlara dokunma
+	rm -rf "$d"; mkdir -p "$d"; : > "$d/kediray"
+	uci -q -c "$d" import kediray < "$f" || { rm -rf "$d"; echo "Yedek okunamadı (bozuk dosya); mevcut ayarlar değişmedi." >&2; return 1; }
+	nn=$(uci -q -c "$d" show kediray | grep -c '=node$'); na=$(uci -q -c "$d" show kediray | grep -c '=app$')
+	rm -rf "$d"
+	# geri dönüş için mevcut ayarı sakla
+	cp /etc/config/kediray /etc/kediray.pre-restore 2>/dev/null
+	uci -q import kediray < "$f" || { cp /etc/kediray.pre-restore /etc/config/kediray 2>/dev/null; echo "Geri yükleme başarısız; eski ayarlar korundu." >&2; return 1; }
+	uci commit kediray
+	apply_changes >/dev/null 2>&1
+	echo "Yedek geri yüklendi: $nn sunucu, $na uygulama kuralı. (Önceki ayarlar: /etc/kediray.pre-restore)"
+	return 0
 }
 cmd_engines() { # JSON: KediRay + kurulu diğer VPN motorları ve çalışma durumu
 	local s name first=1 r
@@ -3291,6 +3326,8 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray selfupdate <dosya>         Kurulum dosyasıyla güncelle (panel: Hakkında > Güncelle)
   kediray update check [--json]      GitHub'da yeni sürüm var mı
   kediray update install             GitHub'dan indir (SHA256 doğrulamalı) ve kur
+  kediray backup [dosya]             Sunucu ve ayarları yedekle (UUID içerir, paylaşma)
+  kediray restore <dosya>            Yedeği geri yükle (önce denenir, bozuksa dokunmaz)
   kediray fixboot                    QModem açılış yavaşlığı yamasını uygula (otomatik de yapılır)
   kediray uninstall [--purge]
 EOF
@@ -3355,6 +3392,8 @@ case "$cmd" in
 	fixboot) cmd_fixboot "$@" ;;
 	selfupdate) cmd_selfupdate "$@" ;;
 	update) cmd_update "$@" ;;
+	backup) cmd_backup "$@" ;;
+	restore) cmd_restore "$@" ;;
 	hunt) cmd_hunt "$@" ;;
 	dialtest) cmd_dialtest "$@" ;;
 	version|-V|--version) cmd_version "$@" ;;
@@ -9593,6 +9632,14 @@ return view.extend({
 				' ',
 				h('button', { 'id': 'ka-upd-go', 'class': 'btn cbi-button cbi-button-action', 'style': 'display:none', 'click': ui.createHandlerFn(this, 'doOnline') }, 'Şimdi güncelle')
 			]),
+			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
+				h('h3', { 'style': 'margin:0 0 6px' }, 'Yedekle / geri yükle'),
+				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, 'Sunucuların, uygulama kuralların ve ayarların tek dosyada. Modemi sıfırlarsan bu dosyayla geri getirirsin. Dosya sunucu kimliklerini (UUID) içerir: kimseyle paylaşma, GitHub\'a yükleme.'),
+				h('div', { 'id': 'ka-bk-msg', 'style': 'margin-bottom:10px;font-weight:600' }, ''),
+				h('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'doBackup') }, 'Yedek al'),
+				' ',
+				h('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, 'doRestore') }, 'Yedekten geri yükle')
+			]),
 			h('div', { 'class': 'ka-note' }, 'Çekirdeği güncellemek için SSH: kediray update-core · Coğrafi veriler: kediray update-geo')
 		]);
 	},
@@ -9608,6 +9655,51 @@ return view.extend({
 			else if (j.newer) { msg.textContent = 'Yeni sürüm var: ' + j.current + ' → ' + j.latest; if (go) go.style.display = ''; }
 			else msg.textContent = 'Güncelsin (' + j.current + ').';
 		}).catch(() => { if (msg) msg.textContent = 'Denetlenemedi: panel yanıt vermedi.'; });
+	},
+
+	doBackup() {
+		const msg = document.getElementById('ka-bk-msg');
+		return fs.exec(CLI, ['backup']).then(r => {
+			const txt = r.stdout || '';
+			if (r.code !== 0 || !/^package kediray/.test(txt)) { if (msg) msg.textContent = 'Yedek alınamadı: ' + ((r.stderr || '').trim() || 'ayar boş'); return; }
+			const d = new Date(), p = n => String(n).padStart(2, '0');
+			const name = 'kediray-yedek-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + '.conf';
+			const a = document.createElement('a');
+			a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain' }));
+			a.download = name;
+			document.body.appendChild(a); a.click(); a.remove();
+			setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+			const n = (txt.match(/^config node\b/mg) || []).length;
+			if (msg) msg.textContent = 'Yedek indirildi: ' + name + ' (' + n + ' sunucu)';
+		}).catch(() => { if (msg) msg.textContent = 'Yedek alınamadı: panel yanıt vermedi.'; });
+	},
+
+	doRestore(ev) {
+		const UP = '/tmp/kediray-restore.conf', msg = document.getElementById('ka-bk-msg');
+		return ui.uploadFile(UP, ev.target).then(() => {
+			return new Promise(resolve => {
+				ui.showModal('Yedekten geri yükle', [
+					h('p', {}, 'Mevcut sunucuların ve ayarların yedekteki ile DEĞİŞTİRİLECEK. Önceki ayar modemde /etc/kediray.pre-restore olarak saklanır. Devam edilsin mi?'),
+					h('div', { 'class': 'right' }, [
+						h('button', { 'class': 'btn cbi-button', 'click': () => { ui.hideModal(); resolve(false); } }, 'Vazgeç'),
+						' ',
+						h('button', { 'class': 'btn cbi-button cbi-button-negative', 'click': () => { ui.hideModal(); resolve(true); } }, 'Geri yükle')
+					])
+				]);
+			});
+		}, e => {
+			const m = (e && e.message) || String(e || '');
+			if (!/cancel|iptal/i.test(m) && msg) msg.textContent = 'Dosya yüklenemedi: ' + m;
+			return null;
+		}).then(go => {
+			if (go === null) return;
+			if (!go) { if (msg) msg.textContent = 'Vazgeçildi.'; return; }
+			return fs.exec(CLI, ['restore', UP]).then(r => {
+				const out = ((r.stdout || '') + (r.stderr || '')).trim();
+				if (msg) msg.textContent = out || (r.code === 0 ? 'Geri yüklendi.' : 'Geri yüklenemedi.');
+				if (r.code === 0) setTimeout(() => location.reload(), 2500);
+			}).catch(() => { if (msg) msg.textContent = 'Panel yanıt vermedi; birkaç saniye sonra sayfayı yenile.'; });
+		});
 	},
 
 	doOnline() {
@@ -10097,7 +10189,8 @@ cat > '/usr/share/rpcd/acl.d/luci-app-kediray.json' <<'KEDIRAY_EOF_18'
 		"write": {
 			"cgi-io": [ "upload" ],
 			"file": {
-				"/tmp/kediray-update.sh": [ "write" ]
+				"/tmp/kediray-update.sh": [ "write" ],
+				"/tmp/kediray-restore.conf": [ "write" ]
 			},
 			"uci": [ "kediray" ]
 		}
