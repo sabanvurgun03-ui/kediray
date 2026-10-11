@@ -1,5 +1,7 @@
 <p align="center"><img src="docs/banner.png" alt="KediRay" width="640"></p>
 
+<p align="center"><a href="https://buymeacoffee.com/sabanvurgun"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-sabanvurgun-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy me a coffee"></a></p>
+
 # KediRay
 
 **Türkçe** · [English](#english)
