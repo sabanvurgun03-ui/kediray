@@ -45,6 +45,9 @@ Bakım
 GitHub’dan güncelleme (SHA256 doğrulamalı), dosyayla güncelleme
 Xray çekirdeği ve coğrafi veri güncelleme
 AW1K Panel Android uygulamasıyla uyumlu
+
+#English
+
 Features
 
 VPN and servers
@@ -99,5 +102,16 @@ Modemde SSH ile:
 ## Güncelleme
 
 LuCI > KediRay > Hakkında > **GitHub'dan güncelle**, ya da SSH: `kediray update install`
+
+## Install
+
+Over SSH on the router:
+
+wget -O /tmp/kediray.sh https://raw.githubusercontent.com/sabanvurgun03-ui/kediray/main/kediray-install.sh
+sh /tmp/kediray.sh
+
+## Update
+
+LuCI > KediRay > About > Update from GitHub, or over SSH: kediray update install
 
 Geliştirici: Şaban Vurgun
