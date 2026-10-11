@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.51 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.52 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.51"
+KR_VERSION="1.19.52"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -880,7 +880,9 @@ cmd_update() { # check [--json] | install | auto | cached
 			got=$(sha256sum /tmp/kediray-update.sh | awk '{print $1}')
 			[ "$got" = "$sum" ] || { echo "SHA256 uyuşmuyor (indirme bozuk ya da dosya değişmiş); kurulmadı."; rm -f /tmp/kediray-update.sh; return 1; }
 			ver=$(sed -n 's/^KR_VERSION="\(.*\)"/\1/p' /tmp/kediray-update.sh | head -1)
-			[ "$ver" = "$latest" ] || { echo "Dosya sürümü ($ver) VERSION ($latest) ile uyuşmuyor; kurulmadı."; rm -f /tmp/kediray-update.sh; return 1; }
+			# GitHub önbelleği dosyaları farklı anlarda yenileyebilir: VERSION eski, betik yeni olabilir (sorun değil, SHA256 betikle eşleşti).
+			# Betik duyurulandan ESKİYSE (bayat önbellek) kurma.
+			[ -n "$ver" ] && ! ver_gt "$latest" "$ver" || { echo "Dosya sürümü ($ver) duyurulan sürümden ($latest) eski; GitHub önbelleği henüz yenilenmemiş olabilir, birkaç dakika sonra tekrar dene. Kurulmadı."; rm -f /tmp/kediray-update.sh; return 1; }
 			cmd_selfupdate /tmp/kediray-update.sh
 			return $? ;;
 		*) echo "kullanım: kediray update check [--json] | install [force] | auto | cached" >&2; return 1 ;;
