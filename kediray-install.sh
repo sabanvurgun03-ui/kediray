@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.59 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.60 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.59"
+KR_VERSION="1.19.60"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -3036,6 +3036,15 @@ cmd_watchdog() {
 	local last now iv
 	traffic_sample
 	ucode "$SHARE/cli.uc" devices >/dev/null 2>&1   # cihaz yoklaması: "bağlı süre" güncel kalsın
+	# Panel/uygulama girişi rpcd'ye bağlı. Kurulum yeniden başlatma isteği bıraktıysa burada (cron altında) yap; rpcd ölmüşse kaldır
+	if [ -f /tmp/kediray.rpcd-restart ]; then
+		rm -f /tmp/kediray.rpcd-restart
+		log "watchdog: rpcd yeniden başlatılıyor (eklenti güncellendi)"
+		/etc/init.d/rpcd restart >/dev/null 2>&1
+	elif [ -x /etc/init.d/rpcd ] && ! pidof rpcd >/dev/null 2>&1; then
+		log "watchdog: rpcd çalışmıyor, başlatılıyor"
+		/etc/init.d/rpcd start >/dev/null 2>&1
+	fi
 	[ "$(uget main.enabled)" = 1 ] || return 0
 	[ -f /tmp/kediray.waiting ] && return 0   # açılışta WAN bekleniyor: müdahale etme
 	# Modem açılırken cron, KediRay'in kendi açılış başlatması gelmeden watchdog'u çalıştırıyordu: "Xray çalışmıyor"
@@ -10897,7 +10906,14 @@ for f in /usr/share/luci/menu.d/*.json; do
 done
 sed -i 's#admin/services/kediray#admin/vpn/kediray#g' /usr/share/luci/menu.d/luci-app-kediray.json
 rm -f /tmp/luci-indexcache* 2>/dev/null; rm -rf /tmp/luci-modulecache 2>/dev/null
-if [ "$AW_RESTART" = 1 ]; then /etc/init.d/rpcd restart >/dev/null 2>&1; else /etc/init.d/rpcd reload >/dev/null 2>&1; fi   # eklenti ilk kez/değişerek geldiyse restart gerekir; aksi halde reload (restart oturumları düşürür)
+/etc/init.d/rpcd reload >/dev/null 2>&1
+# rpcd eklentisi ilk kez/değişerek geldiyse rpcd'nin yeniden başlaması gerekir. Kurulum panelden (rpcd üzerinden) çalışıyorsa
+# rpcd'nin kendi cgroup'u altındadır: burada restart edince kurulumun kendisi de (ve rc betiğinin "başlat" adımı) ölür, rpcd
+# kapalı kalır ve girişte "İzin Gerekli" döner. O durumda istek bırakılır; cron'daki watchdog (rpcd dışında) en geç 1 dk içinde yapar.
+if [ "$AW_RESTART" = 1 ]; then
+	if grep -q rpcd /proc/$$/cgroup 2>/dev/null; then : > /tmp/kediray.rpcd-restart
+	else /etc/init.d/rpcd restart >/dev/null 2>&1; fi
+fi
 ok "LuCI menüsü: VPN → KediRay VPN (görmezsen LuCI’den çıkış yapıp tekrar gir)"
 
 rm -f /etc/rc.d/S??kediray /etc/rc.d/K??kediray 2>/dev/null   # eski sıra numarası (S99) kalmasın
