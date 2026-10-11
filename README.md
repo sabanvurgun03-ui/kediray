@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/banner.png" alt="KediRay" width="640"></p>
+
 # KediRay
 
 **Türkçe** · [English](#english)
@@ -15,6 +17,12 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 - **Yedekle / geri yükle:** sunucular, uygulama kuralları ve ayarlar tek dosyada (modemi sıfırlayınca geri getir)
 - GitHub'dan güncelleme (SHA256 doğrulamalı)
 - [AW1K Panel](https://github.com/sabanvurgun03-ui/aw1kpanel) Android uygulamasıyla uyumlu
+
+## Ekran görüntüleri
+
+<p align="center"><img src="docs/ekranlar.jpg" alt="AW1K Panel ekranları"></p>
+
+*AW1K Panel Android uygulaması: ana sayfa, VPN, Wi-Fi, ağ ve cihazlar.*
 
 ## Kurulum
 
@@ -66,6 +74,12 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 - **Backup / restore:** servers, app rules and settings in one file (bring them back after a router reset)
 - Update from GitHub (SHA256 verified)
 - Works with the [AW1K Panel](https://github.com/sabanvurgun03-ui/aw1kpanel) Android app
+
+### Screenshots
+
+<p align="center"><img src="docs/ekranlar.jpg" alt="AW1K Panel screens"></p>
+
+*AW1K Panel Android app: home, VPN, Wi-Fi, network and devices.*
 
 ### Install
 
