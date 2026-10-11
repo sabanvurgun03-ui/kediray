@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.46 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.47 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.46"
+KR_VERSION="1.19.47"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -9021,8 +9021,9 @@ return view.extend({
 		s.tab('sub', 'Abonelik');
 		s.tab('adv', 'Gelişmiş');
 
-		o = s.taboption('general', form.Flag, 'enabled', 'VPN açık');
+		o = s.taboption('general', form.Flag, 'enabled', 'VPN açık · açılışta otomatik bağlan');
 		o.rmempty = false;
+		o.description = 'İşaretliyken VPN şimdi çalışır ve modem her açıldığında internet gelince kendiliğinden bağlanır (seçili sunucuya, "Sunucu: Auto" ise en hızlısına). İşareti kaldırırsan VPN durur ve açılışta başlamaz; internet doğrudan çıkar.';
 
 		o = s.taboption('general', form.ListValue, 'mode', 'Yönlendirme modu');
 		o.value('global', 'Tümü VPN (yerel ağ hariç)');
