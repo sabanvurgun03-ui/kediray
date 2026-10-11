@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.19 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.39 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Kurulum:   sh kediray-install.sh
 #  Sessiz:    sh kediray-install.sh -y --metin2 direct --teams direct --sub 'https://...'
@@ -19,7 +19,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.38"
+KR_VERSION="1.19.39"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
