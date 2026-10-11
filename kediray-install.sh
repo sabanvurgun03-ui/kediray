@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.40 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.41 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Kurulum:   sh kediray-install.sh
 #  Sessiz:    sh kediray-install.sh -y --metin2 direct --teams direct --sub 'https://...'
@@ -19,7 +19,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.40"
+KR_VERSION="1.19.41"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -9650,7 +9650,7 @@ return view.extend({
 				h('div', { 'class': 'ka-k', 'style': 'margin-top:10px' }, 'Bağışlarınız için teşekkürler, bu iş için harcanan emek için ufak bir hediye.')
 			]),
 			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
-				h('h3', { 'style': 'margin:0 0 6px' }, 'Güncelle'),
+				h('h3', { 'style': 'margin:0 0 6px' }, 'Elle güncelle'),
 				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, 'Yeni kediray-…-install.sh dosyasını seç; yüklenir ve otomatik kurulur.'),
 				h('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'doUpdate') }, 'Dosya seç ve güncelle')
 			]),
