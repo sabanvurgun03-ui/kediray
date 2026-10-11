@@ -1,7 +1,7 @@
 <img width="1280" height="640" alt="Adsız" src="https://github.com/user-attachments/assets/8e70a937-f925-4329-a42f-e500c324ed05" />
 # KediRay
 
-OpenWrt için Xray tabanlı VPN (LuCI arayüzü + `kediray` komutu).
+OpenWrt için Xray tabanlı VPN
 Özellikler
 
 VPN ve sunucular
