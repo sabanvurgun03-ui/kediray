@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.49 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.51 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.49"
+KR_VERSION="1.19.51"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -857,7 +857,7 @@ cmd_update() { # check [--json] | install | auto | cached
 	[ "$act" = --json ] && act=check
 	cur=$(kr_version); base=$(upd_base)
 	mkdir -p /tmp
-	if ! fetch "$base/VERSION?t=$(date +%s)" "$t.v"; then
+	if ! ufetch "$base/VERSION?t=$(date +%s)" "$t.v" 7; then
 		rm -f "$t.v"
 		[ $js = 1 ] && upd_json false "" "$cur" false "GitHub'a ulaşılamadı" || echo "GitHub'a ulaşılamadı: $base"
 		return 1
@@ -874,9 +874,9 @@ cmd_update() { # check [--json] | install | auto | cached
 			return 0 ;;
 		install)
 			ver_gt "$latest" "$cur" || [ "$3" = force ] || [ "$2" = force ] || { echo "Zaten güncel ($cur). Zorla kurmak için: kediray update install force"; return 0; }
-			fetch "$base/kediray-install.sh.sha256?t=$(date +%s)" "$t.s" && sum=$(awk '{print $1}' "$t.s" | head -n1); rm -f "$t.s"
+			ufetch "$base/kediray-install.sh.sha256?t=$(date +%s)" "$t.s" 7 && sum=$(awk '{print $1}' "$t.s" | head -n1); rm -f "$t.s"
 			echo "$sum" | grep -Eq '^[0-9a-f]{64}$' || { echo "SHA256 dosyası okunamadı; güvenlik için kurulmadı."; return 1; }
-			fetch "$base/kediray-install.sh?t=$(date +%s)" /tmp/kediray-update.sh || { echo "Kurulum dosyası indirilemedi."; rm -f /tmp/kediray-update.sh; return 1; }
+			ufetch "$base/kediray-install.sh?t=$(date +%s)" /tmp/kediray-update.sh 15 || { echo "Kurulum dosyası indirilemedi."; rm -f /tmp/kediray-update.sh; return 1; }
 			got=$(sha256sum /tmp/kediray-update.sh | awk '{print $1}')
 			[ "$got" = "$sum" ] || { echo "SHA256 uyuşmuyor (indirme bozuk ya da dosya değişmiş); kurulmadı."; rm -f /tmp/kediray-update.sh; return 1; }
 			ver=$(sed -n 's/^KR_VERSION="\(.*\)"/\1/p' /tmp/kediray-update.sh | head -1)
@@ -2149,6 +2149,14 @@ cmd_add() { # link/JSON ekle (argüman, dosya veya stdin)
 fetch() { # url dosya
 	curl -fsSL --noproxy '' -m 30 -A "v2rayNG/1.10" -o "$2" "$1" 2>/dev/null && return 0
 	running && curl -fsSL --noproxy '' -m 30 -A "v2rayNG/1.10" -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" -o "$2" "$1" 2>/dev/null
+}
+
+# Güncelleme denetimi için kısa zaman aşımlı indirme: panel (rpcd) ~20 sn içinde yanıt bekler; eski 30+30 sn "panel yanıt vermedi" diyordu.
+ufetch() { # url dosya [saniye]
+	local t="${3:-7}"
+	# VPN çalışıyorsa önce tünelden dene: modemin doğrudan GitHub çıkışı bazı hatlarda 30 sn askıda kalıp zaman aşımına uğruyor
+	running && curl -fsSL --noproxy '' -m "$t" -A "v2rayNG/1.10" -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" -o "$2" "$1" 2>/dev/null && return 0
+	curl -fsSL --noproxy '' -m "$t" -A "v2rayNG/1.10" -o "$2" "$1" 2>/dev/null
 }
 
 cmd_sub() {
