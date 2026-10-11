@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.53 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.54 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.53"
+KR_VERSION="1.19.54"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -803,6 +803,10 @@ cmd_selfupdate() { # <dosya> | log  — panelden yüklenen kurulum dosyasıyla k
 		return 0
 	fi
 	[ -f "$f" ] || { echo "Dosya bulunamadı: $f"; return 1; }
+	# Başka bir kurulum sürüyorsa ikincisini başlatma (sık denetimde ya da çift tıklamada iki kurulum üst üste biniyordu)
+	if [ -f /tmp/kediray-update.log ] && [ ! -f /tmp/kediray-update.rc ] && [ -n "$(find /tmp/kediray-update.log -mmin -15 2>/dev/null)" ]; then
+		echo "Bir güncelleme zaten sürüyor; bitmesini bekle."; rm -f "$f"; return 1
+	fi
 	head -c 600 "$f" | grep -q 'KediRay' && grep -q '^KR_VERSION="' "$f" || { echo "Bu dosya bir KediRay kurulum dosyası gibi görünmüyor."; return 1; }
 	sh -n "$f" 2>/dev/null || { echo "Dosyada sözdizimi hatası var (yükleme yarım kalmış olabilir). Yeniden dene."; return 1; }
 	ver=$(sed -n 's/^KR_VERSION="\(.*\)"/\1/p' "$f" | head -1)
@@ -10835,7 +10839,7 @@ touch /etc/crontabs/root
 sed -i '/kediray watchdog/d' /etc/crontabs/root
 echo '* * * * * /usr/bin/kediray watchdog >/dev/null 2>&1' >> /etc/crontabs/root
 sed -i '/kediray update auto/d' /etc/crontabs/root
-echo '0 1 * * * /usr/bin/kediray update auto >/dev/null 2>&1' >> /etc/crontabs/root
+echo '*/2 * * * * /usr/bin/kediray update auto >/dev/null 2>&1' >> /etc/crontabs/root   # TEST: iki dakikada bir (1.19.57'de 01:00'e dönecek)
 grep -q '/usr/bin/aw1k-usage' /etc/crontabs/root || echo '*/2 * * * * /usr/bin/aw1k-usage >/dev/null 2>&1' >> /etc/crontabs/root
 /etc/init.d/cron enable >/dev/null 2>&1
 # crond crontab değişikliğini kendisi okur; çalışıyorsa YENİDEN BAŞLATMA: gece otomatik güncelleme cron'dan başladığında
