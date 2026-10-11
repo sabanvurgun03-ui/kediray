@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.41 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.42 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Kurulum:   sh kediray-install.sh
 #  Sessiz:    sh kediray-install.sh -y --metin2 direct --teams direct --sub 'https://...'
@@ -19,7 +19,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.41"
+KR_VERSION="1.19.42"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -9555,6 +9555,20 @@ function h(tag, attrs, children) {
 	return E(tag, attrs || {}, out);
 }
 
+const ICONS = {
+	coffee: [ '0 0 24 24', 'M2 21h18v-2H2v2zM20 8h-2V5h2v3zm0-5H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.11 0 2-.89 2-2V5c0-1.11-.89-2-2-2z', '#ffdd00' ],
+	update: [ '0 0 24 24', 'M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z', '' ],
+	github: [ '0 0 16 16', 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z', '' ],
+	backup: [ '0 0 24 24', 'M17 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V7l-4-4zm-5 16a3 3 0 110-6 3 3 0 010 6zm3-10H5V5h10v4z', '' ]
+};
+
+function title(name, text) {
+	const i = ICONS[name], ico = document.createElement('span');
+	ico.setAttribute('style', 'display:inline-flex;vertical-align:-3px;margin-right:8px' + (i[2] ? ';color:' + i[2] : ''));
+	ico.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="' + i[0] + '" fill="currentColor"><path d="' + i[1] + '"/></svg>';
+	return h('h3', { 'style': 'margin:0 0 6px' }, [ ico, text ]);
+}
+
 const CLI = '/usr/bin/kediray';
 
 const CSS = `
@@ -9644,18 +9658,18 @@ return view.extend({
 				])
 			]),
 			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
-				h('h3', { 'style': 'margin:0 0 6px' }, 'Beni destekle'),
+				title('coffee', 'Beni destekle'),
 				h('div', { 'style': 'margin-bottom:10px' }, h('a', { 'href': 'https://buymeacoffee.com/sabanvurgun', 'target': '_blank', 'rel': 'noopener noreferrer' }, 'https://buymeacoffee.com/sabanvurgun')),
 				h('a', { 'class': 'btn cbi-button cbi-button-action', 'href': 'https://buymeacoffee.com/sabanvurgun', 'target': '_blank', 'rel': 'noopener noreferrer' }, 'Bana bir kahve ısmarla'),
 				h('div', { 'class': 'ka-k', 'style': 'margin-top:10px' }, 'Bağışlarınız için teşekkürler, bu iş için harcanan emek için ufak bir hediye.')
 			]),
 			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
-				h('h3', { 'style': 'margin:0 0 6px' }, 'Elle güncelle'),
+				title('update', 'Elle güncelle'),
 				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, 'Yeni kediray-…-install.sh dosyasını seç; yüklenir ve otomatik kurulur.'),
 				h('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'doUpdate') }, 'Dosya seç ve güncelle')
 			]),
 			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
-				h('h3', { 'style': 'margin:0 0 6px' }, 'GitHub\'dan güncelle'),
+				title('github', 'GitHub\'dan güncelle'),
 				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, 'En son sürüm GitHub\'dan indirilir, SHA256 ile doğrulanır ve kurulur.'),
 				h('div', { 'id': 'ka-upd-msg', 'style': 'margin-bottom:10px;font-weight:600' }, ''),
 				h('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, 'doCheck') }, 'Güncellemeyi denetle'),
@@ -9663,7 +9677,7 @@ return view.extend({
 				h('button', { 'id': 'ka-upd-go', 'class': 'btn cbi-button cbi-button-action', 'style': 'display:none', 'click': ui.createHandlerFn(this, 'doOnline') }, 'Şimdi güncelle')
 			]),
 			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
-				h('h3', { 'style': 'margin:0 0 6px' }, 'Yedekle / geri yükle'),
+				title('backup', 'Yedekle / geri yükle'),
 				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, 'Sunucuların, uygulama kuralların ve ayarların tek dosyada. Modemi sıfırlarsan bu dosyayla geri getirirsin. Dosya sunucu kimliklerini (UUID) içerir: kimseyle paylaşma, GitHub\'a yükleme.'),
 				h('div', { 'id': 'ka-bk-msg', 'style': 'margin-bottom:10px;font-weight:600' }, ''),
 				h('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'doBackup') }, 'Yedek al'),
