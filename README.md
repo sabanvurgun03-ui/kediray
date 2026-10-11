@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/banner.png" alt="KediRay" width="640"></p>
 
-<p align="center"><a href="https://buymeacoffee.com/sabanvurgun"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-sabanvurgun-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy me a coffee"></a></p>
+<p align="center"><a href="https://buymeacoffee.com/sabanvurgun"><img src="https://img.buymeacoffee.com/button-api/?text=Bana%20bir%20kahve%20%C4%B1smarla&emoji=%E2%98%95&slug=sabanvurgun&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" alt="Buy me a coffee" height="60"></a></p>
 
 # KediRay
 
