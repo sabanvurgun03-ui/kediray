@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.58 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.59 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.58"
+KR_VERSION="1.19.59"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -10289,6 +10289,11 @@ cat > '/usr/bin/aw1k-usage' <<'KEDIRAY_EOF_20'
 #!/bin/sh
 # Günlük mobil veri kaydı. Satır biçimi: YYYY-MM-DD rx_bayt tx_bayt
 DEV="wwan0_1"
+# Bu ad yoksa (AW1000 dışı ya da farklı modem arayüzü) wan arayüzünün cihazına, o da yoksa "wan"a düş
+if ! ubus call network.device status "{\"name\":\"$DEV\"}" >/dev/null 2>&1; then
+    DEV=$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.l3_device')
+    [ -n "$DEV" ] || DEV="wan"
+fi
 PERSIST="/etc/aw1k-usage.db"   # kalıcı kopya (flash), saatte bir yazılır
 RUN="/tmp/aw1k-usage.db"       # çalışma kopyası (RAM)
 LAST="/tmp/aw1k-usage.last"    # önceki sayaç değerleri
@@ -10329,6 +10334,14 @@ KEDIRAY_EOF_20
 cat > '/usr/libexec/rpcd/aw1k' <<'KEDIRAY_EOF_21'
 #!/bin/sh
 # rpcd eklentisi: ubus call aw1k usage | kediray | kediray_ctl | kediray_devices | wifi_clients
+# Mobil/WAN cihaz adı: wwan0_1 varsa o, yoksa wan arayüzünün cihazı, o da yoksa "wan"
+aw1k_wandev() {
+    local d=wwan0_1
+    if ubus call network.device status "{\"name\":\"$d\"}" >/dev/null 2>&1; then echo "$d"; return; fi
+    d=$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.l3_device')
+    [ -n "$d" ] && { echo "$d"; return; }
+    echo wan
+}
 case "$1" in
 list)
     echo '{ "usage": {}, "kediray": {}, "kediray_ctl": { "action": "str" }, "kediray_devices": {}, "wifi_clients": {}, "guest_get": {}, "guest_set": { "enabled": true, "ssid": "str", "key": "str" }, "wan_info": {}, "bandpw_write": { "pw": "str" }, "kediray_device": { "mac": "str", "mode": "str", "name": "str" } }'
@@ -10489,7 +10502,7 @@ call)
         printf '{"ok":true}'
         ;;
     wan_info)
-        dev=wwan0_1
+        dev=$(aw1k_wandev)
         up=$(ubus call network.interface dump 2>/dev/null | jsonfilter -e "@.interface[@.l3_device='$dev'].uptime" | head -n1)
         [ -n "$up" ] || up=$(ubus call network.interface dump 2>/dev/null | jsonfilter -e "@.interface[@.device='$dev'].uptime" | head -n1)
         [ -n "$up" ] || up=-1
