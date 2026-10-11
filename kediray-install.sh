@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.60 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.61 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.60"
+KR_VERSION="1.19.61"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -792,11 +792,27 @@ cmd_fixboot() { # QModem açılışta USB kök hub'larını (usbN) modem diye de
 	rm -f "$t"
 	return 0
 }
+# Kurulum gerçekten çalışıyor mu? Kurulum yarıda ölürse (ör. rpcd yeniden başlarken) bitiş dosyası (.rc) hiç yazılmaz;
+# yalnızca log dosyasına bakmak 15 dk boyunca yanlış "güncelleme sürüyor" dedirtiyordu. Çalışan işlem aranır;
+# işlem listesi okunamazsa ya da kurulum henüz başlıyorsa log'un son 1 dk içinde yazılmış olması da "çalışıyor" sayılır.
+upd_alive() { # /proc taranır (ps seçenekleri BusyBox/procps arasında değişiyor)
+	local d
+	for d in /proc/[0-9]*; do
+		[ "$d" = "/proc/$$" ] && continue
+		tr '\0' ' ' < "$d/cmdline" 2>/dev/null | grep -q 'kediray-update\.run\.sh' && return 0
+	done
+	return 1
+}
+upd_busy() {
+	[ -f /tmp/kediray-update.log ] && [ ! -f /tmp/kediray-update.rc ] || return 1
+	upd_alive && return 0
+	[ -n "$(find /tmp/kediray-update.log -mmin -1 2>/dev/null)" ]
+}
 cmd_selfupdate() { # <dosya> | log  — panelden yüklenen kurulum dosyasıyla kendini günceller
 	local f="${1:-}" ver
 	if [ "$f" = log ]; then
 		if [ -f /tmp/kediray-update.rc ]; then echo "DONE $(cat /tmp/kediray-update.rc)"
-		elif [ -f /tmp/kediray-update.log ]; then echo RUNNING
+		elif upd_busy; then echo RUNNING
 		else echo "DONE 1"; fi
 		echo "STEPS $(grep -c '^==> ' /tmp/kediray-update.log 2>/dev/null)|$(grep '^==> ' /tmp/kediray-update.log 2>/dev/null | tail -n 1 | sed 's/^==> //')"
 		tail -n 80 /tmp/kediray-update.log 2>/dev/null
@@ -804,7 +820,7 @@ cmd_selfupdate() { # <dosya> | log  — panelden yüklenen kurulum dosyasıyla k
 	fi
 	[ -f "$f" ] || { echo "Dosya bulunamadı: $f"; return 1; }
 	# Başka bir kurulum sürüyorsa ikincisini başlatma (sık denetimde ya da çift tıklamada iki kurulum üst üste biniyordu)
-	if [ -f /tmp/kediray-update.log ] && [ ! -f /tmp/kediray-update.rc ] && [ -n "$(find /tmp/kediray-update.log -mmin -15 2>/dev/null)" ]; then
+	if upd_busy; then
 		echo "Bir güncelleme zaten sürüyor; bitmesini bekle."; rm -f "$f"; return 1
 	fi
 	head -c 600 "$f" | grep -q 'KediRay' && grep -q '^KR_VERSION="' "$f" || { echo "Bu dosya bir KediRay kurulum dosyası gibi görünmüyor."; return 1; }
