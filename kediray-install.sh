@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.44 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.45 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.44"
+KR_VERSION="1.19.45"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -877,7 +877,12 @@ cmd_update() { # check [--json] | install | auto | cached
 	case "$1" in
 		auto) # cron: günde bir kez sessizce denetle (update_check=0 ise yapmaz); sonuç önbelleğe yazılır
 			[ "$(uget main.update_check)" = 0 ] && { rm -f "$UPD_CACHE"; return 0; }
-			cmd_update check --json > "$UPD_CACHE.$$" 2>/dev/null && mv "$UPD_CACHE.$$" "$UPD_CACHE" || rm -f "$UPD_CACHE.$$"
+			cmd_update check --json > "$UPD_CACHE.$$" 2>/dev/null && mv "$UPD_CACHE.$$" "$UPD_CACHE" || { rm -f "$UPD_CACHE.$$"; return 0; }
+			# "Otomatik kur" işaretliyse ve yeni sürüm varsa kur (indirme SHA256 ile doğrulanır; hata olursa mevcut sürüm kalır)
+			if [ "$(uget main.update_auto_install)" = 1 ] && grep -q '"newer":true' "$UPD_CACHE"; then
+				logger -t kediray "otomatik güncelleme başlıyor: $(sed -n 's/.*"latest":"\([0-9.]*\)".*/\1/p' "$UPD_CACHE")"
+				cmd_update install 2>&1 | logger -t kediray
+			fi
 			return 0 ;;
 		cached) # panel: son otomatik denetimin sonucu (yoksa boş)
 			local latest cur
@@ -9107,6 +9112,11 @@ return view.extend({
 		o = s.taboption('general', form.Flag, 'update_check', 'Güncellemeleri kontrol et');
 		o.default = '1';
 		o.description = 'Her gece 01:00\'de GitHub\'da yeni bir sürüm çıkmış mı diye sorar ve Hakkında sayfasında söyler. Sen düğmeye basmadan hiçbir şey kurulmaz; bu yalnızca sorunun sorulup sorulmayacağına karar verir.';
+
+		o = s.taboption('general', form.Flag, 'update_auto_install', 'Otomatik kur');
+		o.default = '0';
+		o.depends('update_check', '1');
+		o.description = 'Gece denetiminde yeni sürüm çıkmışsa kendiliğinden indirilir (SHA256 ile doğrulanır) ve kurulur; kurulum sırasında VPN kısa süre yeniden başlar. Ayarların ve sunucuların korunur. Kapalıysa yalnızca haber verilir.';
 
 		o = s.taboption('general', form.Value, 'update_repo', 'Güncelleme kaynağı');
 		o.placeholder = 'sabanvurgun03-ui/kediray';
