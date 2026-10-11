@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.47 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.49 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,7 +24,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.47"
+KR_VERSION="1.19.49"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -115,6 +115,11 @@ fi
 # ---------------------------------------------------------------- 2. çakışmalar
 step "Çakışan VPN servisleri aranıyor"
 CONFLICTS=""
+# Güncelleme mi? Önceden kurulu ve AÇIK bir KediRay'in durumu güncellemeyle değişmemeli (eskiden -y ile
+# gelen güncelleme diğer VPN servisi kayıtlıysa KediRay'i kapatıyordu).
+PREV_CONF=0; [ -f /etc/config/kediray ] && PREV_CONF=1
+PREV_ENABLED=$(uci -q get kediray.main.enabled)
+WAS_ON=0; [ "$PREV_CONF" = 1 ] && [ "$PREV_ENABLED" = 1 ] && WAS_ON=1
 for s in xwrt passwall passwall2 openclash nikki mihomo homeproxy v2raya xray v2ray sing-box neko xlite shadowsocksr ssrplus bypass vssr; do
 	[ -x "/etc/init.d/$s" ] || continue
 	if /etc/init.d/"$s" enabled 2>/dev/null || /etc/init.d/"$s" running 2>/dev/null; then
@@ -123,7 +128,9 @@ for s in xwrt passwall passwall2 openclash nikki mihomo homeproxy v2raya xray v2
 done
 IMPORT_XWRT=0
 KEEP_OTHER=0
-if [ -n "$CONFLICTS" ]; then
+if [ -n "$CONFLICTS" ] && [ "$WAS_ON" = 1 ]; then
+	ok "Güncelleme: KediRay zaten açıktı; diğer servislere ($CONFLICTS ) dokunulmuyor, KediRay açık kalacak"
+elif [ -n "$CONFLICTS" ]; then
 	warn "Çalışan/etkin VPN servisleri:$CONFLICTS"
 	case " $CONFLICTS " in *" xwrt "*)
 		yesno "xDivine-Ray (xwrt) sunucuları/abonelikleri KediRay'e aktarılsın mı?" E && IMPORT_XWRT=1 ;;
@@ -10820,7 +10827,10 @@ echo '* * * * * /usr/bin/kediray watchdog >/dev/null 2>&1' >> /etc/crontabs/root
 sed -i '/kediray update auto/d' /etc/crontabs/root
 echo '0 1 * * * /usr/bin/kediray update auto >/dev/null 2>&1' >> /etc/crontabs/root
 grep -q '/usr/bin/aw1k-usage' /etc/crontabs/root || echo '*/2 * * * * /usr/bin/aw1k-usage >/dev/null 2>&1' >> /etc/crontabs/root
-/etc/init.d/cron enable >/dev/null 2>&1; /etc/init.d/cron restart >/dev/null 2>&1
+/etc/init.d/cron enable >/dev/null 2>&1
+# crond crontab değişikliğini kendisi okur; çalışıyorsa YENİDEN BAŞLATMA: gece otomatik güncelleme cron'dan başladığında
+# restart, kurulumu yarıda öldürüyordu (menü yolu/servis adımları atlanıyor, VPN bir dakika kapalı kalıyordu)
+/etc/init.d/cron running >/dev/null 2>&1 || /etc/init.d/cron start >/dev/null 2>&1
 /usr/bin/aw1k-usage >/dev/null 2>&1
 ok "Watchdog (dakikalık kontrol + abonelik güncelleme)"
 case "$(uci -q get kediray.main.capture)" in
@@ -10841,7 +10851,7 @@ rm -f /etc/rc.d/S??kediray /etc/rc.d/K??kediray 2>/dev/null   # eski sıra numar
 /etc/init.d/kediray enable >/dev/null 2>&1
 /usr/bin/kediray fixboot -v 2>/dev/null
 STILL=$(/usr/bin/kediray conflicts)
-if [ -n "$STILL" ]; then
+if [ -n "$STILL" ] && [ "$WAS_ON" != 1 ]; then
 	uci set kediray.main.enabled=0; uci commit kediray
 	ok "KediRay kuruldu ve kapalı bekliyor ($STILL çalışmaya devam ediyor, internetin kesilmedi)"
 	if uci show kediray 2>/dev/null | grep -q '=node$'; then
@@ -10850,6 +10860,8 @@ if [ -n "$STILL" ]; then
 	else
 		echo "  Önce panelden sunucu ekle, sonra 'Güvenli geçiş' butonuna bas."
 	fi
+elif [ "$PREV_CONF" = 1 ] && [ "$PREV_ENABLED" != 1 ]; then
+	ok "KediRay güncellendi; VPN daha önce kapalıydı, kapalı bırakıldı (açmak için Ayarlar → VPN açık)"
 elif uci show kediray 2>/dev/null | grep -q '=node$'; then
 	uci set kediray.main.enabled=1; uci commit kediray
 	# procd servis kayıtlı değilken zararsız bir "Command failed: Not found" yazar; süz
