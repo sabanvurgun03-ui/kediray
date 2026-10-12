@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.61 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.62 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -20,12 +20,13 @@
 #    --core-version vX  Belirli Xray sürümü (varsayılan: en son)
 #    --force-core       Xray kurulu olsa da yeniden indir
 #    --gh-proxy URL     GitHub indirmeleri için ayna/önek
+#    --license KEY      Lisans anahtarı (modem IMEI'sine göre; IMEI: kediray license id)
 #
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.61"
-AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; CORE_VER="latest"; FORCE_CORE=0
+KR_VERSION="1.19.62"
+AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; ARG_LICENSE=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -34,10 +35,11 @@ while [ $# -gt 0 ]; do
 		--teams) ARG_TEAMS="$2"; shift ;;
 		--sub) ARG_SUB="$2"; shift ;;
 		--link) ARG_LINK="$2"; shift ;;
+		--license) ARG_LICENSE="$2"; shift ;;
 		--core-version) CORE_VER="$2"; shift ;;
 		--force-core) FORCE_CORE=1 ;;
 		--gh-proxy) export GH_PROXY="$2"; shift ;;
-		-h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,21p' "$0"; exit 0 ;;
 	esac
 	shift
 done
@@ -2972,6 +2974,175 @@ cmd_version() { # [--json]
 	return 0
 }
 
+# ---- Lisans: kediray license status [--json] | id | activate <anahtar> | remove --------------------------
+# Anahtar biçimi: KR1.<yük>.<imza>   yük = "<modem IMEI, 15 hane>|<bitiş YYYYMMDD ya da 0 = süresiz>" (base64url)
+# İmza: Ed25519 (openssl). Anahtar yalnızca IMEI'si yazılı modemde çalışır: IMEI'nin tek hanesi farklıysa geçersizdir.
+# Üretici araç depoda DEĞİL, sahibindedir. Lisanssızken VPN çalışmaya devam eder; yalnızca sunucu / uygulama /
+# cihaz ayarı değiştiren komutlar kilitlenir.
+LIC_FILE=/etc/kediray.license
+LIC_IMEI_CACHE=/tmp/kediray.imei
+LIC_PUB='-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAhi19Va+hGurNKdiSvVg0mzUR1Up8joh3aCVoEo3y58k=
+-----END PUBLIC KEY-----'
+
+# 15 hane + Luhn sağlaması (gerçek IMEI'ler geçer; çöp sayıları ve ICCID parçalarını eler)
+lic_luhn() {
+	printf '%s' "$1" | awk '{ n = length($0); if (n != 15 || $0 !~ /^[0-9]+$/) exit 1; s = 0
+		for (i = 1; i <= n; i++) { d = substr($0, n - i + 1, 1) + 0; if (i % 2 == 0) { d *= 2; if (d > 9) d -= 9 } s += d }
+		exit (s % 10 == 0 ? 0 : 1) }'
+}
+lic_imei_find() { # stdin'deki ilk geçerli 15 haneli IMEI
+	local c
+	for c in $(grep -o '[0-9]\{15,16\}' | cut -c1-15); do
+		lic_luhn "$c" && { echo "$c"; return 0; }
+	done
+	return 1
+}
+# Modemin IMEI'sini QModem'den oku: önce ubus (base_info), olmazsa AT+CGSN (sms_tool ya da seri port)
+lic_imei_read() {
+	local sec js m port out t pid
+	sec=$(band_sec)
+	[ -n "$sec" ] || return 1
+	if ubus list qmodem >/dev/null 2>&1; then
+		for m in base_info get_info; do
+			js=$(band_qm "$m" "{\"config_section\":\"$sec\"}")
+			[ -n "$js" ] || continue
+			out=$(printf '%s' "$js" | tr ',{}[]' '\n\n\n\n\n' | grep -i -A3 imei | lic_imei_find) && { echo "$out"; return 0; }
+		done
+	fi
+	port=$(uci -q get "qmodem.$sec.at_port")
+	[ -c "$port" ] || return 1
+	if command -v sms_tool >/dev/null 2>&1; then
+		out=$(sms_tool -d "$port" at 'AT+CGSN' 2>/dev/null | lic_imei_find) && { echo "$out"; return 0; }
+	fi
+	t=/tmp/kr-imei.$$
+	cat "$port" > "$t" 2>/dev/null &
+	pid=$!
+	printf 'AT+CGSN\r' > "$port" 2>/dev/null
+	sleep 2; kill "$pid" 2>/dev/null
+	out=$(lic_imei_find < "$t"); rm -f "$t"
+	[ -n "$out" ] && { echo "$out"; return 0; }
+	return 1
+}
+# IMEI, 10 dk önbellekten gelir (her panel yenilemesinde modeme AT göndermemek için). Okuma o an başarısız olursa
+# (modem meşgul / açılıyor) en çok 24 saatlik eski değer kullanılır; okunan IMEI FARKLIYSA anında o geçerlidir.
+lic_imei() {
+	local i
+	if [ -s "$LIC_IMEI_CACHE" ] && [ -n "$(find "$LIC_IMEI_CACHE" -mmin -10 2>/dev/null)" ]; then
+		cat "$LIC_IMEI_CACHE"; return 0
+	fi
+	if i=$(lic_imei_read) && [ -n "$i" ]; then
+		printf '%s\n' "$i" > "$LIC_IMEI_CACHE" 2>/dev/null
+		echo "$i"; return 0
+	fi
+	if [ -s "$LIC_IMEI_CACHE" ] && [ -n "$(find "$LIC_IMEI_CACHE" -mmin -1440 2>/dev/null)" ]; then
+		cat "$LIC_IMEI_CACHE"; return 0
+	fi
+	return 1
+}
+lic_b64d() { # base64url -> ham bayt (stdout)
+	local s m
+	s=$(printf '%s' "$1" | tr '_-' '/+')
+	m=$(( ${#s} % 4 ))
+	[ "$m" = 2 ] && s="$s=="
+	[ "$m" = 3 ] && s="$s="
+	printf '%s\n' "$s" | openssl base64 -d -A 2>/dev/null
+}
+lic_date() { echo "$1" | sed 's/\(....\)\(..\)\(..\)/\1-\2-\3/'; }
+# <anahtar> -> LIC_STATE=ok|invalid|mismatch|expired|noopenssl|noimei, LIC_EXP
+lic_verify() {
+	local key t pl sg id exp now me
+	LIC_STATE=invalid; LIC_EXP=0
+	command -v openssl >/dev/null 2>&1 || { LIC_STATE=noopenssl; return 1; }
+	key=$(printf '%s' "$1" | tr -d ' \t\r\n')
+	printf '%s' "$key" | grep -Eq '^KR1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' || return 1
+	pl=$(printf '%s' "$key" | cut -d. -f2); sg=$(printf '%s' "$key" | cut -d. -f3)
+	t=/tmp/kr-lic.$$; rm -rf "$t"; mkdir -m 700 "$t" 2>/dev/null || return 1
+	lic_b64d "$pl" > "$t/p"; lic_b64d "$sg" > "$t/s"
+	printf '%s\n' "$LIC_PUB" > "$t/k.pem"
+	if [ "$(wc -c < "$t/s" | tr -d ' ')" != 64 ] || ! openssl pkeyutl -verify -rawin -pubin -inkey "$t/k.pem" -in "$t/p" -sigfile "$t/s" >/dev/null 2>&1; then
+		rm -rf "$t"; return 1
+	fi
+	pl=$(cat "$t/p"); rm -rf "$t"
+	id=${pl%%|*}; exp=${pl#*|}
+	printf '%s' "$id" | grep -Eq '^[0-9]{15}$' || return 1
+	printf '%s' "$exp" | grep -Eq '^(0|[0-9]{8})$' || return 1
+	me=$(lic_imei) || { LIC_STATE=noimei; return 1; }
+	# IMEI birebir aynı olmalı; tek hane farkı bile lisansı geçersiz kılar
+	[ "$id" = "$me" ] || { LIC_STATE=mismatch; return 1; }
+	LIC_EXP=$exp
+	if [ "$exp" != 0 ]; then
+		now=$(date +%Y%m%d)
+		# saat henüz ayarlanmamışsa (1970 gibi) süreyi dolmuş sayma
+		if [ "$now" -ge 20260101 ] && [ "$now" -gt "$exp" ]; then LIC_STATE=expired; return 1; fi
+	fi
+	LIC_STATE=ok
+	return 0
+}
+lic_state() { # kayıtlı anahtarı denetle (0 = geçerli)
+	local k
+	LIC_STATE=none; LIC_EXP=0
+	[ -s "$LIC_FILE" ] || return 1
+	k=$(head -n1 "$LIC_FILE")
+	lic_verify "$k"
+}
+lic_msg() {
+	case "$LIC_STATE" in
+		ok) if [ "$LIC_EXP" = 0 ]; then echo "Lisans geçerli (süresiz)"; else echo "Lisans geçerli (bitiş: $(lic_date "$LIC_EXP"))"; fi ;;
+		none) echo "Lisans girilmemiş" ;;
+		mismatch) echo "Bu anahtar bu modemin IMEI numarası için üretilmemiş" ;;
+		expired) echo "Lisansın süresi dolmuş ($(lic_date "$LIC_EXP"))" ;;
+		noimei) echo "Modem IMEI numarası okunamadı (modem hazır değil ya da QModem yok)" ;;
+		noopenssl) echo "openssl-util kurulu değil (apk add openssl-util ya da opkg install openssl-util)" ;;
+		*) echo "Anahtar geçersiz (yanlış yazılmış ya da imzası tutmuyor)" ;;
+	esac
+}
+# Ayar değiştiren komutlar lisanssızken burada durur (çıkış kodu 7). VPN'in kendisi (başlat/durdur, sunucu seçimi,
+# abonelik yenileme, watchdog) lisanssız da çalışır: güncelleme sonrası internet kesilmesin.
+lic_gate() {
+	lic_state && return 0
+	echo "Lisans gerekli: $(lic_msg). VPN çalışmaya devam eder; sunucu, uygulama ve cihaz ayarları lisans girilene kadar değiştirilemez." >&2
+	echo "Modem IMEI: $(lic_imei 2>/dev/null || echo okunamadı)   →   kediray license activate <anahtar>   (panel: Hakkında → Lisans)" >&2
+	exit 7
+}
+cmd_license() { # status [--json] | id | activate <anahtar|-> | remove
+	local act="${1:-status}" id k js=0 rc=0
+	id=$(lic_imei) || id=""
+	case "$act" in
+		id)
+			[ -n "$id" ] || { echo "Modem IMEI numarası okunamadı (modem hazır değil ya da QModem yok)" >&2; return 1; }
+			echo "$id" ;;
+		status|--json)
+			[ "$act" = --json ] || [ "$2" = --json ] && js=1
+			lic_state || rc=1
+			if [ $js = 1 ]; then
+				printf '{"licensed":%s,"state":"%s","imei":"%s","exp":%s,"msg":"%s"}\n' \
+					"$([ $rc = 0 ] && echo true || echo false)" "$LIC_STATE" "$id" "$LIC_EXP" "$(lic_msg)"
+			else
+				lic_msg
+				echo "Modem IMEI: ${id:-okunamadı}"
+			fi
+			return $rc ;;
+		activate)
+			k="$2"; [ "$k" = - ] && k=$(cat)
+			k=$(printf '%s' "$k" | tr -d ' \t\r\n')
+			[ -n "$k" ] || { echo "kullanım: kediray license activate <anahtar>   (bu modemin IMEI numarası: ${id:-okunamadı})" >&2; return 1; }
+			if lic_verify "$k"; then
+				( umask 077; printf '%s\n' "$k" > "$LIC_FILE" )
+				log "lisans etkinleştirildi (${LIC_EXP:-0})"
+				lic_msg
+			else
+				lic_msg >&2
+				[ "$LIC_STATE" = mismatch ] && echo "Bu modemin IMEI numarası: ${id:-okunamadı}" >&2
+				return 1
+			fi ;;
+		remove)
+			rm -f "$LIC_FILE"
+			echo "Lisans kaldırıldı" ;;
+		*) echo "kullanım: kediray license status [--json] | id | activate <anahtar> | remove" >&2; return 1 ;;
+	esac
+}
+
 cmd_watch() { # [ip] [saniye] [--json]  -> bağlantıları kaydet: hangi yoldan gitti, ne zaman koptu
 	local ip="" secs=180 json=0 a
 	for a in "$@"; do
@@ -3368,6 +3539,7 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray selfupdate <dosya>         Kurulum dosyasıyla güncelle (panel: Hakkında > Güncelle)
   kediray update check [--json]      GitHub'da yeni sürüm var mı
   kediray update install             GitHub'dan indir (SHA256 doğrulamalı) ve kur
+  kediray license status|id|activate <anahtar>|remove   Lisans (modem IMEI'si: kediray license id)
   kediray backup [dosya]             Sunucu ve ayarları yedekle (UUID içerir, paylaşma)
   kediray restore <dosya>            Yedeği geri yükle (önce denenir, bozuksa dokunmaz)
   kediray fixboot                    QModem açılış yavaşlığı yamasını uygula (otomatik de yapılır)
@@ -3376,7 +3548,15 @@ EOF
 }
 
 cmd="$1"; [ $# -gt 0 ] && shift
+# Lisanssızken kilitli olanlar: sunucu/uygulama/cihaz/band ayarını değiştirenler (okuma ve VPN işletimi serbest)
 case "$cmd" in
+	add|app|app-add|app-del|device|node-enable|import-xwrt|restore|autodirect) lic_gate ;;
+	node) case "$1" in save|del) lic_gate ;; esac ;;
+	warp) case "$1" in status|"") ;; *) lic_gate ;; esac ;;
+	band) case "$1" in status|info|scan|"") ;; *) lic_gate ;; esac ;;
+esac
+case "$cmd" in
+	license) cmd_license "$@" ;;
 	gen) cmd_gen ;;
 	fw-up) with_lock fw_up_real ;;
 	fw-down) with_lock fw_down_real ;;
@@ -6242,6 +6422,27 @@ function krTheme() {
 }
 krTheme();
 
+/* Lisans uyarısı: lisanssızsa sayfanın üstünde bant gösterir (VPN çalışmaya devam eder; ayar değişiklikleri kilitlidir) */
+function krLicBanner() {
+	const box = document.createElement('div');
+	fs.exec('/usr/bin/kediray', ['license', 'status', '--json']).then(r => {
+		let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
+		if (!j || j.licensed) return;
+		const d = document.createElement('div'), b = document.createElement('b'), c = document.createElement('code'), a = document.createElement('a');
+		d.setAttribute('style', 'margin:0 0 14px;padding:12px 16px;border:1px solid #e0a020;border-left-width:5px;border-radius:10px;background:rgba(224,160,32,.12);max-width:900px;line-height:1.5');
+		b.textContent = 'Lisans gerekli. ';
+		c.textContent = j.imei || '—';
+		a.href = L.url('admin', 'vpn', 'kediray', 'about'); a.textContent = 'Lisansı gir';
+		d.appendChild(b);
+		d.appendChild(document.createTextNode('VPN çalışmaya devam ediyor; ancak sunucu, uygulama ve cihaz ayarları lisans girilene kadar değiştirilemez. Modem IMEI: '));
+		d.appendChild(c);
+		d.appendChild(document.createTextNode(' · '));
+		d.appendChild(a);
+		box.appendChild(d);
+	}).catch(() => { });
+	return box;
+}
+
 return view.extend({
 	/* Kart: başlığa tıklayınca içerik katlanır (tercih tarayıcıda saklanır) */
 	card(el, key, title, children, right) {
@@ -7239,6 +7440,7 @@ return view.extend({
 		return h('div', {}, [
 			h('style', {}, CSS),
 			h('h2', {}, [h('img', { 'src': '/luci-static/kedi-logo.svg', 'style': 'height:1.3em;vertical-align:-0.25em;margin-right:8px;border-radius:6px' }), 'KediRay VPN']),
+			krLicBanner(),
 			h('div', { 'class': 'kr-grid' }, [this.elStatus, this.elNode, this.elApps]),
 			this.elNodes,
 			this.elDevs
@@ -8783,6 +8985,37 @@ cat > '/www/luci-static/resources/view/kediray/settings.js' <<'KEDIRAY_EOF_14'
 
 /* KediRay - Ayarlar */
 
+/* Lisans uyarısı: lisanssızsa sayfanın üstünde bant gösterir (VPN çalışmaya devam eder; ayar değişiklikleri kilitlidir) */
+function krLicBanner() {
+	const box = document.createElement('div');
+	fs.exec('/usr/bin/kediray', ['license', 'status', '--json']).then(r => {
+		let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
+		if (!j || j.licensed) return;
+		const d = document.createElement('div'), b = document.createElement('b'), c = document.createElement('code'), a = document.createElement('a');
+		d.setAttribute('style', 'margin:0 0 14px;padding:12px 16px;border:1px solid #e0a020;border-left-width:5px;border-radius:10px;background:rgba(224,160,32,.12);max-width:900px;line-height:1.5');
+		b.textContent = 'Lisans gerekli. ';
+		c.textContent = j.imei || '—';
+		a.href = L.url('admin', 'vpn', 'kediray', 'about'); a.textContent = 'Lisansı gir';
+		d.appendChild(b);
+		d.appendChild(document.createTextNode('VPN çalışmaya devam ediyor; ancak sunucu, uygulama ve cihaz ayarları lisans girilene kadar değiştirilemez. Modem IMEI: '));
+		d.appendChild(c);
+		d.appendChild(document.createTextNode(' · '));
+		d.appendChild(a);
+		box.appendChild(d);
+	}).catch(() => { });
+	return box;
+}
+
+/* Lisanssızken ayarlar kaydedilmez (panel yanıt vermezse engellenmez) */
+function krLicGuard() {
+	return fs.exec('/usr/bin/kediray', ['license', 'status', '--json']).then(r => {
+		let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
+		if (!j || j.licensed) return true;
+		ui.addNotification(null, E('p', {}, 'Lisans gerekli: ayarlar lisans girilene kadar kaydedilemez (Hakkında → Lisans). Modem IMEI: ' + (j.imei || '—')), 'warning');
+		return false;
+	}).catch(() => true);
+}
+
 const callHostHints = rpc.declare({ object: 'luci-rpc', method: 'getHostHints', expect: { '': {} } });
 
 // Tarayıcıda saklanan eski menüyü (Hizmetler altındaki kayıt) bir kez temizle
@@ -9335,7 +9568,17 @@ return view.extend({
 			return root;
 		};
 
-		return m.render();
+		return m.render().then(n => { const w = document.createElement('div'); w.appendChild(krLicBanner()); w.appendChild(n); return w; });
+	},
+
+	handleSave: function () {
+		const a = arguments;
+		return krLicGuard().then(ok => ok ? this.super('handleSave', a) : null);
+	},
+
+	handleSaveApply: function () {
+		const a = arguments;
+		return krLicGuard().then(ok => ok ? this.super('handleSaveApply', a) : null);
 	}
 });
 KEDIRAY_EOF_14
@@ -9596,6 +9839,7 @@ const ICONS = {
 	coffee: [ '0 0 24 24', 'M2 21h18v-2H2v2zM20 8h-2V5h2v3zm0-5H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.11 0 2-.89 2-2V5c0-1.11-.89-2-2-2z', '#ffdd00' ],
 	update: [ '0 0 24 24', 'M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z', '' ],
 	github: [ '0 0 16 16', 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z', '' ],
+	license: [ '0 0 24 24', 'M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z', '' ],
 	backup: [ '0 0 24 24', 'M17 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V7l-4-4zm-5 16a3 3 0 110-6 3 3 0 010 6zm3-10H5V5h10v4z', '' ]
 };
 
@@ -9681,6 +9925,7 @@ return view.extend({
 	render(d) {
 		d = d || {};
 		setTimeout(() => this.showCachedUpdate(), 400);
+		setTimeout(() => this.showLicense(), 300);
 		const row = (k, v) => [h('div', { 'class': 'ka-k' }, k), h('div', { 'class': 'ka-v' }, v || '—')];
 		return h('div', {}, [
 			h('style', {}, CSS),
@@ -9694,6 +9939,18 @@ return view.extend({
 					h('div', { 'class': 'ka-sep' }),
 					h('div', { 'class': 'ka-dev' }, [h('span', { 'class': 'ka-k' }, 'Geliştirici: '), h('b', {}, 'Şaban Vurgun'), ' · 2026'])
 				])
+			]),
+			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
+				title('license', 'Lisans'),
+				h('div', { 'id': 'ka-lic-state', 'style': 'margin-bottom:8px;font-weight:600' }, 'Denetleniyor…'),
+				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, [ 'Modem IMEI: ', h('b', { 'id': 'ka-lic-id', 'style': 'font-family:monospace' }, '—'), ' (lisans anahtarı bu IMEI numarasına göre üretilir; tek hanesi değişirse geçersiz olur)' ]),
+				h('textarea', { 'id': 'ka-lic-key', 'rows': 3, 'style': 'width:100%;max-width:560px;font-family:monospace', 'placeholder': 'KR1.…' }),
+				h('div', { 'style': 'margin-top:8px' }, [
+					h('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'doLicense') }, 'Etkinleştir'),
+					' ',
+					h('button', { 'id': 'ka-lic-rm', 'class': 'btn cbi-button', 'style': 'display:none', 'click': ui.createHandlerFn(this, 'doLicenseRemove') }, 'Lisansı kaldır')
+				]),
+				h('div', { 'id': 'ka-lic-msg', 'class': 'ka-k', 'style': 'margin-top:8px' }, '')
 			]),
 			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
 				title('coffee', 'Beni destekle'),
@@ -9725,6 +9982,42 @@ return view.extend({
 			]),
 			h('div', { 'class': 'ka-note' }, 'Çekirdeği güncellemek için SSH: kediray update-core · Coğrafi veriler: kediray update-geo')
 		]);
+	},
+
+	showLicense() {
+		return fs.exec(CLI, ['license', 'status', '--json']).then(r => {
+			let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
+			const st = document.getElementById('ka-lic-state'), id = document.getElementById('ka-lic-id'), rm = document.getElementById('ka-lic-rm');
+			if (!st) return;
+			if (!j) { st.textContent = 'Lisans durumu okunamadı.'; return; }
+			st.textContent = j.msg || (j.licensed ? 'Lisans geçerli' : 'Lisans gerekli');
+			st.style.color = j.licensed ? '#22a355' : '#e0a020';
+			if (id) id.textContent = j.imei || '—';
+			if (rm) rm.style.display = (j.state && j.state !== 'none') ? '' : 'none';
+			if (!j.licensed) {
+				const note = document.getElementById('ka-lic-msg');
+				if (note && !note.textContent) note.textContent = 'VPN çalışmaya devam eder; sunucu, uygulama ve cihaz ayarları lisans girilene kadar değiştirilemez.';
+			}
+		}).catch(() => null);
+	},
+
+	doLicense() {
+		const key = document.getElementById('ka-lic-key'), msg = document.getElementById('ka-lic-msg');
+		const v = key ? key.value.trim() : '';
+		if (!v) { if (msg) msg.textContent = 'Önce lisans anahtarını yapıştır.'; return Promise.resolve(); }
+		return fs.exec(CLI, ['license', 'activate', v]).then(r => {
+			const out = ((r.stdout || '') + (r.stderr || '')).trim();
+			if (msg) msg.textContent = out || (r.code === 0 ? 'Lisans etkinleştirildi.' : 'Etkinleştirilemedi.');
+			if (r.code === 0) setTimeout(() => location.reload(), 1500);
+		}).catch(() => { if (msg) msg.textContent = 'Panel yanıt vermedi; birkaç saniye sonra tekrar dene.'; });
+	},
+
+	doLicenseRemove() {
+		const msg = document.getElementById('ka-lic-msg');
+		return fs.exec(CLI, ['license', 'remove']).then(r => {
+			if (msg) msg.textContent = ((r.stdout || '') + (r.stderr || '')).trim() || 'Lisans kaldırıldı.';
+			setTimeout(() => location.reload(), 1200);
+		}).catch(() => { if (msg) msg.textContent = 'Panel yanıt vermedi.'; });
 	},
 
 	setLast(j) {
@@ -9873,6 +10166,27 @@ cat > '/www/luci-static/resources/view/kediray/ayir.js' <<'KEDIRAY_EOF_23'
 
 /* KediRay - VPN Ayırma: hangi motor çalışsın, hangi uygulama VPN'den / direkt gitsin */
 
+/* Lisans uyarısı: lisanssızsa sayfanın üstünde bant gösterir (VPN çalışmaya devam eder; ayar değişiklikleri kilitlidir) */
+function krLicBanner() {
+	const box = document.createElement('div');
+	fs.exec('/usr/bin/kediray', ['license', 'status', '--json']).then(r => {
+		let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
+		if (!j || j.licensed) return;
+		const d = document.createElement('div'), b = document.createElement('b'), c = document.createElement('code'), a = document.createElement('a');
+		d.setAttribute('style', 'margin:0 0 14px;padding:12px 16px;border:1px solid #e0a020;border-left-width:5px;border-radius:10px;background:rgba(224,160,32,.12);max-width:900px;line-height:1.5');
+		b.textContent = 'Lisans gerekli. ';
+		c.textContent = j.imei || '—';
+		a.href = L.url('admin', 'vpn', 'kediray', 'about'); a.textContent = 'Lisansı gir';
+		d.appendChild(b);
+		d.appendChild(document.createTextNode('VPN çalışmaya devam ediyor; ancak sunucu, uygulama ve cihaz ayarları lisans girilene kadar değiştirilemez. Modem IMEI: '));
+		d.appendChild(c);
+		d.appendChild(document.createTextNode(' · '));
+		d.appendChild(a);
+		box.appendChild(d);
+	}).catch(() => { });
+	return box;
+}
+
 function h(tag, attrs, children) {
 	if (attrs != null && (typeof attrs !== 'object' || Array.isArray(attrs) || attrs.nodeType)) { children = attrs; attrs = {}; }
 	const out = [];
@@ -9981,6 +10295,7 @@ return view.extend({
 		const root = h('div', {}, [
 			h('style', {}, CSS),
 			h('h2', {}, 'VPN Ayırma'),
+			krLicBanner(),
 			h('p', { 'class': 'ka-sub' }, 'Hangi VPN motorunun çalışacağını seç ve hangi uygulamaların VPN\'den, hangilerinin direkt gideceğini belirle.'),
 			this.elEng, this.elWarp, this.elApps, this.buildAdd()
 		]);
@@ -10876,6 +11191,26 @@ if [ "$(uci -q get kediray.whatsapp)" = app ] && { [ "${FRESH_CONF:-0}" = 1 ] ||
 fi
 uci commit kediray
 
+# ---------------------------------------------------------------- lisans
+LICENSED=0
+if /usr/bin/kediray license status >/dev/null 2>&1; then
+	LICENSED=1; ok "Lisans geçerli"
+else
+	LIC_ID=$(/usr/bin/kediray license id 2>/dev/null)
+	[ -n "$ARG_LICENSE" ] && /usr/bin/kediray license activate "$ARG_LICENSE"
+	if /usr/bin/kediray license status >/dev/null 2>&1; then LICENSED=1
+	else
+		warn "Lisans yok (modem IMEI: ${LIC_ID:-okunamadı}). VPN çalışmaya devam eder; ayar değişikliği için lisans gerekir."
+		if [ "$AUTO" != 1 ]; then
+			ask "Lisans anahtarı (boş bırakırsan sonra: kediray license activate <anahtar>)" ""
+			[ -n "$REPLY" ] && /usr/bin/kediray license activate "$REPLY" && LICENSED=1
+		fi
+	fi
+fi
+
+if [ "$LICENSED" != 1 ]; then
+	warn "Lisans olmadan sunucu/abonelik eklenmez (varsa mevcut sunucular çalışmaya devam eder). Lisansı girince: kediray add <link>"
+else
 [ "$IMPORT_XWRT" = 1 ] && /usr/bin/kediray import-xwrt
 
 if [ -n "$ARG_SUB" ]; then
@@ -10895,6 +11230,7 @@ elif [ "$AUTO" != 1 ] && [ -z "$(uci show kediray 2>/dev/null | grep '=node$')" 
 	echo "  (JSON eklemek için panelde 'Link / JSON ekle' butonunu kullan.)"
 	ask "Link" ""
 	[ -n "$REPLY" ] && /usr/bin/kediray add "$REPLY"
+fi
 fi
 
 # ---------------------------------------------------------------- 7. servis
@@ -10968,3 +11304,9 @@ printf "\n${C_G}KediRay %s kuruldu.${C_0}\n" "$KR_VERSION"
 echo "  Panel : http://${LANIP:-192.168.1.1}/cgi-bin/luci/admin/vpn/kediray"
 echo "  Komut : kediray help"
 echo
+if [ "${LICENSED:-0}" != 1 ]; then
+	printf "${C_Y}Lisans gerekli.${C_0} VPN çalışmaya devam eder; ayar değişikliği için lisans gir.\n"
+	echo "  Modem IMEI    : $(/usr/bin/kediray license id 2>/dev/null || echo okunamadı)"
+	echo "  Etkinleştir   : kediray license activate <anahtar>   (panel: Hakkında → Lisans)"
+	echo
+fi

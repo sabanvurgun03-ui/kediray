@@ -44,6 +44,16 @@ LuCI → KediRay → **Hakkında → GitHub'dan güncelle**, ya da SSH:
 
 Dosya GitHub'dan indirilir ve `kediray-install.sh.sha256` ile doğrulanır. Uyuşmazsa kurulmaz.
 
+## Lisans anahtarı
+
+1.19.62 ve sonrası sürümlerde lisans anahtarı gerekir. Anahtar modemin 15 haneli IMEI numarasına göre üretilir ve yalnızca o modemde çalışır; IMEI'nin tek hanesi bile farklıysa geçersiz olur. IMEI, QModem üzerinden okunur.
+
+    kediray license id                  # modemin IMEI numarasını göster (panel: Hakkında → Lisans)
+    kediray license activate KR1....    # anahtarı etkinleştir
+    kediray license status              # durum
+
+Lisans yokken VPN çalışmaya devam eder; yalnızca sunucu, uygulama ve cihaz ayarlarını değiştirmek kilitlenir. Anahtar güncellemelerde korunur (`/etc/kediray.license`).
+
 ## Yedekleme
 
 LuCI → KediRay → **Hakkında → Yedekle / geri yükle**, ya da SSH:
@@ -104,6 +114,16 @@ LuCI → KediRay → **About → Update from GitHub**, or over SSH:
     kediray update install
 
 The file is downloaded from GitHub and checked against `kediray-install.sh.sha256`. It is not installed if they don't match.
+
+### License key
+
+From 1.19.62 on, a license key is required. The key is generated for the modem's 15-digit IMEI and only works on that modem; if even one digit of the IMEI differs, it is invalid. The IMEI is read through QModem.
+
+    kediray license id                  # show the modem IMEI (panel: About → License)
+    kediray license activate KR1....    # activate the key
+    kediray license status              # status
+
+Without a license the VPN keeps running; only changing server, app and device settings is locked. The key survives updates (`/etc/kediray.license`).
 
 ### Backup
 
