@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.62 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.63 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -25,7 +25,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.62"
+KR_VERSION="1.19.63"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; ARG_LICENSE=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -2980,6 +2980,8 @@ cmd_version() { # [--json]
 # Üretici araç depoda DEĞİL, sahibindedir. Lisanssızken VPN çalışmaya devam eder; yalnızca sunucu / uygulama /
 # cihaz ayarı değiştiren komutlar kilitlenir.
 LIC_FILE=/etc/kediray.license
+# 1 = lisans zorunlu (ayar değiştiren komutlar lisanssızken kilitlenir); 0 = denetim kapalı, her şey serbest
+LIC_ENFORCE=0
 LIC_IMEI_CACHE=/tmp/kediray.imei
 LIC_PUB='-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAhi19Va+hGurNKdiSvVg0mzUR1Up8joh3aCVoEo3y58k=
@@ -3082,6 +3084,7 @@ lic_verify() {
 lic_state() { # kayıtlı anahtarı denetle (0 = geçerli)
 	local k
 	LIC_STATE=none; LIC_EXP=0
+	[ "$LIC_ENFORCE" = 1 ] || { LIC_STATE=off; return 0; }
 	[ -s "$LIC_FILE" ] || return 1
 	k=$(head -n1 "$LIC_FILE")
 	lic_verify "$k"
@@ -3089,6 +3092,7 @@ lic_state() { # kayıtlı anahtarı denetle (0 = geçerli)
 lic_msg() {
 	case "$LIC_STATE" in
 		ok) if [ "$LIC_EXP" = 0 ]; then echo "Lisans geçerli (süresiz)"; else echo "Lisans geçerli (bitiş: $(lic_date "$LIC_EXP"))"; fi ;;
+		off) echo "Lisans şu an gerekmiyor" ;;
 		none) echo "Lisans girilmemiş" ;;
 		mismatch) echo "Bu anahtar bu modemin IMEI numarası için üretilmemiş" ;;
 		expired) echo "Lisansın süresi dolmuş ($(lic_date "$LIC_EXP"))" ;;
@@ -3107,7 +3111,8 @@ lic_gate() {
 }
 cmd_license() { # status [--json] | id | activate <anahtar|-> | remove
 	local act="${1:-status}" id k js=0 rc=0
-	id=$(lic_imei) || id=""
+	# denetim kapalıyken durum sorgusu (panel her sayfada sorar) modeme IMEI sormaz
+	if [ "$LIC_ENFORCE" != 1 ] && { [ "$act" = status ] || [ "$act" = --json ]; }; then id=""; else id=$(lic_imei) || id=""; fi
 	case "$act" in
 		id)
 			[ -n "$id" ] || { echo "Modem IMEI numarası okunamadı (modem hazır değil ya da QModem yok)" >&2; return 1; }
@@ -9990,6 +9995,7 @@ return view.extend({
 			const st = document.getElementById('ka-lic-state'), id = document.getElementById('ka-lic-id'), rm = document.getElementById('ka-lic-rm');
 			if (!st) return;
 			if (!j) { st.textContent = 'Lisans durumu okunamadı.'; return; }
+			if (j.state === 'off') { const c = st.closest('.ka-card'); if (c) c.style.display = 'none'; return; }
 			st.textContent = j.msg || (j.licensed ? 'Lisans geçerli' : 'Lisans gerekli');
 			st.style.color = j.licensed ? '#22a355' : '#e0a020';
 			if (id) id.textContent = j.imei || '—';
@@ -11194,7 +11200,7 @@ uci commit kediray
 # ---------------------------------------------------------------- lisans
 LICENSED=0
 if /usr/bin/kediray license status >/dev/null 2>&1; then
-	LICENSED=1; ok "Lisans geçerli"
+	LICENSED=1; ok "Lisans denetimi tamam"
 else
 	LIC_ID=$(/usr/bin/kediray license id 2>/dev/null)
 	[ -n "$ARG_LICENSE" ] && /usr/bin/kediray license activate "$ARG_LICENSE"
