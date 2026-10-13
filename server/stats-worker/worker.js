@@ -21,6 +21,7 @@ async function ping(req, env) {
 	const app = String(d.app || ''), id = String(d.id || ''), v = String(d.v || '');
 	if (!APPS.includes(app) || !/^[0-9a-f]{16,64}$/.test(id) || !/^[0-9A-Za-z._-]{1,20}$/.test(v)) return json({ ok: false }, 400);
 	const key = 'u:' + app + ':' + id, now = Date.now();
+	if (!env.STATS) return json({ ok: false }, 500);
 	const cur = await env.STATS.getWithMetadata(key);
 	if (cur.metadata && cur.metadata.v === v && now - cur.metadata.t < 20 * 3600 * 1000) return json({ ok: true }); // günde bir yazma yeter
 	await env.STATS.put(key, '1', { expirationTtl: TTL, metadata: { v, t: now } });
@@ -53,7 +54,7 @@ button{cursor:pointer;background:#3b7;border:0;color:#052}.c{background:#1e2127;
 <h2>KediRay sayaç</h2><div id=lg><input id=t type=password placeholder="yönetici şifresi"> <button onclick=go()>Gir</button></div><div id=o></div>
 <script>
 async function go(){const t=document.getElementById('t')?document.getElementById('t').value:sessionStorage.k;
-const r=await fetch('/api/stats',{headers:{authorization:'Bearer '+t}});if(!r.ok){document.getElementById('o').textContent='Şifre yanlış';return}
+const r=await fetch('/api/stats',{headers:{authorization:'Bearer '+t}});if(!r.ok){let m='Şifre yanlış';if(r.status==500){try{m=(await r.json()).error}catch(e){m='Sunucu hatası'}}document.getElementById('o').textContent=m;return}
 sessionStorage.k=t;document.getElementById('lg').style.display='none';const d=await r.json();let h='';
 for(const a in d){const x=d[a];h+='<div class=c><b>'+a+'</b><div class=g><div><div class=n>'+x.d1+'</div><small>son 1 gün</small></div><div><div class=n>'+x.d7+'</div><small>son 7 gün</small></div><div><div class=n>'+x.d30+'</div><small>son 30 gün</small></div></div><small>Sürümler (30 gün): '+(Object.entries(x.versions).sort().map(e=>e[0]+': '+e[1]).join(' · ')||'—')+'</small></div>'}
 document.getElementById('o').innerHTML=h+'<small>Yalnızca izin veren kullanıcılar sayılır.</small>'}
@@ -68,7 +69,8 @@ export default {
 		if (req.method === 'GET' && u.pathname === '/api/stats') {
 			const t = (req.headers.get('authorization') || '').replace(/^Bearer /, '');
 			if (!env.ADMIN_TOKEN || !safeEq(t, env.ADMIN_TOKEN)) return json({ ok: false }, 401);
-			return json(await stats(env));
+			if (!env.STATS) return json({ ok: false, error: 'KV bağlı değil: Settings → Bindings → KV namespace, değişken adı STATS' }, 500);
+			try { return json(await stats(env)); } catch (e) { return json({ ok: false, error: 'KV okunamadı' }, 500); }
 		}
 		return new Response('KediRay', { status: 404 });
 	}
