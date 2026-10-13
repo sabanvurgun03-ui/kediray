@@ -404,7 +404,12 @@ cmd_count() { # status|on|off|show|ping
 			url=$(stats_url); [ -n "$url" ] || { [ "$v" = -v ] && echo "Sayaç adresi tanımlı değil."; return 0; }
 			[ -s "$STATS_SID" ] || stats_mkid
 			[ -s "$STATS_SID" ] || { [ "$v" = -v ] && echo "Kimlik üretilemedi; gönderilmedi."; return 1; }
-			err=$(curl -fsS --noproxy '' -m 8 -X POST -H 'Content-Type: application/json' -d "$(stats_payload)" "${url%/}/ping" 2>&1 >/dev/null); rc=$?
+			# VPN çalışıyorsa önce tünelden dene (bazı hatlarda workers.dev doğrudan sıfırlanıyor: "Connection reset"), olmazsa doğrudan
+			err=""; rc=1
+			if running; then
+				err=$(curl -fsS --noproxy '' -m 8 -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" -X POST -H 'Content-Type: application/json' -d "$(stats_payload)" "${url%/}/ping" 2>&1 >/dev/null); rc=$?
+			fi
+			[ $rc = 0 ] || { err=$(curl -fsS --noproxy '' -m 8 -X POST -H 'Content-Type: application/json' -d "$(stats_payload)" "${url%/}/ping" 2>&1 >/dev/null); rc=$?; }
 			if [ "$v" = -v ]; then [ $rc = 0 ] && echo "Gönderildi." || echo "Gönderilemedi (curl $rc): $err"; fi
 			return $rc ;;
 		*) echo "kullanım: kediray count status|on|off|show|ping" >&2; return 1 ;;
