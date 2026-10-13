@@ -1,0 +1,10 @@
+name = "kediray-stats"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# KV: `npx wrangler kv namespace create STATS` çıktısındaki id'yi aşağıya yaz
+[[kv_namespaces]]
+binding = "STATS"
+id = "BURAYA_KV_ID"
+
+# Yönetici şifresi: `npx wrangler secret put ADMIN_TOKEN`

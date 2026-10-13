@@ -40,6 +40,7 @@ Kurulumdan sonra LuCI'de **VPN → KediRay VPN** menüsünü aç. Sayfa eski gö
     package/kediray/files/        modemde çalışan dosyalar (kediray komutu, init, hotplug, *.uc)
     package/aw1k-panel/files/     AW1K Panel uygulamasının modem tarafı (aw1k-usage, rpcd eklentisi, ACL)
     luci-app-kediray/             LuCI arayüzü (JS görünümleri, menü, ACL)
+    server/stats-worker/          anonim kullanım sayacı sunucusu (Cloudflare Worker)
     tools/                        build.py, kurulum betiği iskeleti ve paket şablonları
     VERSION                       tek sürüm kaynağı
     build.sh                      dist/ içine release dosyalarını üretir
@@ -54,6 +55,10 @@ LuCI → KediRay → **Hakkında → GitHub'dan güncelle**, ya da SSH:
     kediray update install
 
 Güncelleme, o sürümün GitHub Release'inden indirilir ve release'teki `sha256sums` ile doğrulanır. `sha256sums` yoksa ya da uyuşmazsa kurulmaz.
+
+## Gizlilik (anonim kullanım sayısı)
+
+KediRay hiçbir şeyi kendiliğinden göndermez. Panele ilk girişte "Geliştirmeye yardımcı olur musun?" diye bir kez sorar; **Evet** dersen günde bir kez rastgele bir kurulum kimliği, KediRay sürümü ve uygulama adı gönderilir. Sunucu bilgilerin, trafiğin, adın ve IP adresin kaydedilmez. Cevap vermezsen ya da **Hayır** dersen hiçbir şey gönderilmez. Ayarlar'dan ya da `kediray stats off` ile istediğin an kapatabilirsin (kimlik silinir); ne gönderileceğini `kediray stats show` gösterir. Toplayan sunucunun kodu [`server/stats-worker`](server/stats-worker) içinde açık durur.
 
 ## Yedekleme
 
@@ -115,6 +120,10 @@ LuCI → KediRay → **About → Update from GitHub**, or over SSH:
     kediray update install
 
 The update is downloaded from that version's GitHub Release and checked against the release's `sha256sums`. It is not installed if `sha256sums` is missing or doesn't match.
+
+### Privacy (anonymous usage count)
+
+KediRay sends nothing on its own. The first time you open the panel it asks once whether you want to help; if you say **Yes**, it sends a random install ID, the KediRay version and the app name once a day. Your servers, traffic, name and IP address are not recorded. If you don't answer or say **No**, nothing is sent. Turn it off any time in Settings or with `kediray stats off` (the ID is deleted); `kediray stats show` prints exactly what would be sent. The collecting server's code is open in [`server/stats-worker`](server/stats-worker).
 
 ### Backup
 
