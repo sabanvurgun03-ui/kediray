@@ -53,8 +53,7 @@ AW1K Panel Android uygulamasının APK'sı aynı sayfada ayrı bir sürüm olara
     package/kediray/files/        modemde çalışan dosyalar (kediray komutu, init, hotplug, *.uc)
     package/aw1k-panel/files/     AW1K Panel uygulamasının modem tarafı (aw1k-usage, rpcd eklentisi, ACL)
     luci-app-kediray/             LuCI arayüzü (JS görünümleri, menü, ACL)
-    installer/                    kurulum betiği iskeleti + dosya haritası
-    tools/                        build.py ve paket şablonları
+    tools/                        build.py, kurulum betiği iskeleti ve paket şablonları
     VERSION                       tek sürüm kaynağı
     build.sh                      dist/ içine release dosyalarını üretir
 

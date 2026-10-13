@@ -6,7 +6,7 @@
 """Kaynak ağacından release dosyalarını üretir. Tek kaynak: depodaki klasörler ve VERSION.
 
 Çıktı (varsayılan: dist/):
-  kediray-install.sh      tek dosya kurulum (installer/install.sh.in + ağaçtaki dosyalar, sürüm VERSION'dan)
+  kediray-install.sh      tek dosya kurulum (tools/installer/install.sh.in + ağaçtaki dosyalar, sürüm VERSION'dan)
   kediray-all.tar.gz      mimariden bağımsız paket: modeme kopyalanacak dosya ağacı (files/), ilk açılış betiği, paket listesi
   kediray-src.tar.gz      kaynak ağacı (git'in izlediği dosyalar)
   sha256sums              yukarıdakilerin SHA256 toplamları (sha256sum -c sha256sums)
@@ -85,15 +85,15 @@ def tree_files(root):
 
 def read_map(root):
     rows = []
-    for n, line in enumerate(rd(root / 'installer' / 'files.map').split('\n'), 1):
+    for n, line in enumerate(rd(root / 'tools' / 'installer' / 'files.map').split('\n'), 1):
         if not line.strip() or line.startswith('#'):
             continue
         parts = line.split('\t')
         if len(parts) != 3 or not re.fullmatch(r'KEDIRAY_EOF_\d+', parts[2]):
-            die('installer/files.map:%d biçimi bozuk' % n)
+            die('tools/installer/files.map:%d biçimi bozuk' % n)
         rows.append(tuple(parts))
     if len({r[0] for r in rows}) != len(rows) or len({r[2] for r in rows}) != len(rows):
-        die('installer/files.map: aynı kaynak ya da işaret iki kez geçiyor')
+        die('tools/installer/files.map: aynı kaynak ya da işaret iki kez geçiyor')
     return rows
 
 
@@ -104,9 +104,9 @@ def check_tree(root, tf, rows):
     miss = sorted(tree - mapped - EXTRA)
     gone = sorted(mapped - tree)
     if miss:
-        die('ağaçta olup installer/files.map\'te olmayan dosya (kurulum betiğine girmez): ' + ', '.join(miss))
+        die('ağaçta olup tools/installer/files.map\'te olmayan dosya (kurulum betiğine girmez): ' + ', '.join(miss))
     if gone:
-        die('installer/files.map\'te olup ağaçta olmayan dosya: ' + ', '.join(gone))
+        die('tools/installer/files.map\'te olup ağaçta olmayan dosya: ' + ', '.join(gone))
     for s, p, _ in rows:
         norm = '/etc/config/kediray' if p == '/tmp/kediray.default' else p
         if tf[s] != norm:
@@ -114,7 +114,7 @@ def check_tree(root, tf, rows):
 
 
 def generate_installer(root, ver, rows):
-    skel = rd(root / 'installer' / 'install.sh.in').replace('@VERSION@', ver)
+    skel = rd(root / 'tools' / 'installer' / 'install.sh.in').replace('@VERSION@', ver)
     by_src = {s: (p, d) for s, p, d in rows}
     used, out = set(), []
     for line in skel.split('\n'):
@@ -124,13 +124,13 @@ def generate_installer(root, ver, rows):
             continue
         s = m.group(1)
         if s not in by_src:
-            die('iskelette olup installer/files.map\'te olmayan işaret: ' + s)
+            die('iskelette olup tools/installer/files.map\'te olmayan işaret: ' + s)
         p, d = by_src[s]
         used.add(s)
         out.append("cat > '%s' <<'%s'\n%s%s" % (p, d, rd(root / s), d))
     left = sorted(set(by_src) - used)
     if left:
-        die('installer/files.map\'te olup iskelette işareti olmayan dosya: ' + ', '.join(left))
+        die('tools/installer/files.map\'te olup iskelette işareti olmayan dosya: ' + ', '.join(left))
     text = '\n'.join(out)
     if '@@KR_FILE' in text:
         die('üretilen kurulum betiğinde çözülmemiş işaret kaldı')
@@ -341,7 +341,7 @@ def verify(root, out, ver, installer, rows, tf):
     with tarfile.open(out / 'kediray-src.tar.gz', 'r:gz') as t:
         names = {n[len(stop) + 1:] for n in t.getnames() if n.startswith(stop + '/') and n != stop}
     want = set(tracked_files(root))
-    check(want <= names and 'installer/install.sh.in' in names, 'kediray-src: izlenen %d dosyanın hepsi var' % len(want))
+    check(want <= names and 'tools/installer/install.sh.in' in names, 'kediray-src: izlenen %d dosyanın hepsi var' % len(want))
 
     # 5) eski güncelleme düğmesi için kökteki kopya (geçiş dönemi): varsa güncel olmalı
     legacy = root / 'kediray-install.sh'
@@ -369,7 +369,7 @@ def main():
     check_tree(root, tf, rows)
     installer = generate_installer(root, ver, rows)
     if len(rows) < 10:
-        die('installer/files.map çok kısa')
+        die('tools/installer/files.map çok kısa')
 
     out.mkdir(parents=True, exist_ok=True)
     for n in ASSETS + ('sha256sums',):
