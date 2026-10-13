@@ -1,0 +1,24 @@
+{
+	"luci-app-kediray": {
+		"description": "KediRay VPN yönetimi",
+		"read": {
+			"file": {
+				"/usr/bin/kediray": [ "exec" ],
+				"/usr/bin/kediray *": [ "exec" ]
+			},
+			"ubus": {
+				"luci-rpc": [ "getHostHints" ],
+				"file": [ "exec" ]
+			},
+			"uci": [ "kediray" ]
+		},
+		"write": {
+			"cgi-io": [ "upload" ],
+			"file": {
+				"/tmp/kediray-update.sh": [ "write" ],
+				"/tmp/kediray-restore.conf": [ "write" ]
+			},
+			"uci": [ "kediray" ]
+		}
+	}
+}

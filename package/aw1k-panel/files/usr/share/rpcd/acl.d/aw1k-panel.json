@@ -1,0 +1,15 @@
+{
+    "aw1k-panel": {
+        "description": "AW1K Panel veri kullanımı ve KediRay",
+        "read": {
+            "ubus": {
+                "aw1k": [ "usage", "kediray", "kediray_ctl", "kediray_devices", "kediray_device", "wifi_clients", "guest_get", "guest_set", "wan_info", "bandpw_write" ]
+            }
+        },
+        "write": {
+            "ubus": {
+                "aw1k": [ "kediray_ctl", "kediray_device", "guest_set", "bandpw_write" ]
+            }
+        }
+    }
+}

@@ -1,0 +1,26 @@
+# Kurulum betiğinin (kediray-install.sh) yazdığı dosyalar, betikteki sırayla.
+# kaynak (depoda)<TAB>modemdeki yol<TAB>here-doc işareti
+package/kediray/files/etc/config/kediray	/tmp/kediray.default	KEDIRAY_EOF_1
+package/kediray/files/etc/init.d/kediray	/etc/init.d/kediray	KEDIRAY_EOF_2
+package/kediray/files/etc/hotplug.d/iface/80-kediray	/etc/hotplug.d/iface/80-kediray	KEDIRAY_EOF_3
+package/kediray/files/etc/hotplug.d/firewall/99-kediray	/etc/hotplug.d/firewall/99-kediray	KEDIRAY_EOF_4
+package/kediray/files/usr/bin/kediray	/usr/bin/kediray	KEDIRAY_EOF_5
+package/kediray/files/usr/share/kediray/gen.uc	/usr/share/kediray/gen.uc	KEDIRAY_EOF_6
+package/kediray/files/usr/share/kediray/link.uc	/usr/share/kediray/link.uc	KEDIRAY_EOF_7
+package/kediray/files/usr/share/kediray/cli.uc	/usr/share/kediray/cli.uc	KEDIRAY_EOF_8
+package/kediray/files/usr/share/kediray/node.uc	/usr/share/kediray/node.uc	KEDIRAY_EOF_9
+package/kediray/files/usr/share/kediray/logs.uc	/usr/share/kediray/logs.uc	KEDIRAY_EOF_10
+package/kediray/files/usr/share/kediray/watch.uc	/usr/share/kediray/watch.uc	KEDIRAY_EOF_11
+package/kediray/files/usr/share/kediray/traffic.uc	/usr/share/kediray/traffic.uc	KEDIRAY_EOF_12
+luci-app-kediray/htdocs/luci-static/resources/view/kediray/status.js	/www/luci-static/resources/view/kediray/status.js	KEDIRAY_EOF_13
+luci-app-kediray/htdocs/luci-static/resources/view/kediray/trafik.js	/www/luci-static/resources/view/kediray/trafik.js	KEDIRAY_EOF_24
+luci-app-kediray/htdocs/luci-static/resources/view/kediray/settings.js	/www/luci-static/resources/view/kediray/settings.js	KEDIRAY_EOF_14
+luci-app-kediray/htdocs/luci-static/resources/view/kediray/log.js	/www/luci-static/resources/view/kediray/log.js	KEDIRAY_EOF_15
+luci-app-kediray/htdocs/luci-static/resources/view/kediray/about.js	/www/luci-static/resources/view/kediray/about.js	KEDIRAY_EOF_16
+luci-app-kediray/htdocs/luci-static/resources/view/kediray/ayir.js	/www/luci-static/resources/view/kediray/ayir.js	KEDIRAY_EOF_23
+luci-app-kediray/root/usr/share/luci/menu.d/luci-app-kediray.json	/usr/share/luci/menu.d/luci-app-kediray.json	KEDIRAY_EOF_17
+luci-app-kediray/root/usr/share/rpcd/acl.d/luci-app-kediray.json	/usr/share/rpcd/acl.d/luci-app-kediray.json	KEDIRAY_EOF_18
+luci-app-kediray/htdocs/luci-static/kedi-logo.svg	/www/luci-static/kedi-logo.svg	KEDIRAY_EOF_19
+package/aw1k-panel/files/usr/bin/aw1k-usage	/usr/bin/aw1k-usage	KEDIRAY_EOF_20
+package/aw1k-panel/files/usr/libexec/rpcd/aw1k	/usr/libexec/rpcd/aw1k	KEDIRAY_EOF_21
+package/aw1k-panel/files/usr/share/rpcd/acl.d/aw1k-panel.json	/usr/share/rpcd/acl.d/aw1k-panel.json	KEDIRAY_EOF_22

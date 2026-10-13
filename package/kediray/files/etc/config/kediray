@@ -1,0 +1,91 @@
+
+config main 'main'
+	option enabled '0'
+	# Sunucu: 'auto' = en hızlı sunucu (otomatik yedekleme), ya da bir sunucu bölümünün adı
+	option node 'auto'
+	# (rule = eski Türkiye-direkt modu kaldırıldı, global gibi çalışır)
+	# global = her şey VPN (yerel ağ hariç)
+	# list   = sadece listelenen siteler/uygulamalar VPN, geri kalan direkt
+	option mode 'global'
+	# Listede olmayan cihazlar: vpn | direct
+	option default_device 'vpn'
+	# Trafik yakalama (xDivine-Ray ile aynı):
+	#   mixed    TCP çekirdekte NAT redirect, UDP hev-socks5-tunnel TUN  [önerilen]
+	#   tun      TCP+UDP tamamen hev-socks5-tunnel TUN üzerinden (xDivine-Ray'in "tun" modu)
+	#   tproxy   TCP+UDP TPROXY
+	#   redirect sadece TCP (UDP tünellenmez)
+	option capture 'mixed'
+	# Sunucuya IP ile bağlan (alan adı bir kez IP'ye çevrilir, SNI/Host olarak kalır)
+	option connect_ip '1'
+	option lan 'lan'
+	# DNS
+	# Varsayılan: Google TCP + DNS'e dokunma (Metin2 atılması DNS'ten kaynaklanmıyor, sebep sunucu tarafı WS bağlantı hatası)
+	option dns_remote 'tcp://8.8.8.8'
+	# auto = modeme operatörden gelen DNS (xDivine-Ray gibi): her zaman ayakta, tünele girmez.
+	# Yerine DoH yazılabilir: https+local://1.1.1.1/dns-query
+	option dns_direct 'auto'
+	option dns_direct2 'auto'
+	option dns_bootstrap '1.1.1.1'
+	# off     = DNS'e hiç dokunma (önerilen): modemin kendi DNS'i aynen kalır, sorgu tünele girmez
+	# fast    = sorgular KediRay DNS'inden, tünelden bağımsız
+	# private = sorgular tünelden: en gizli, ama tünel koparsa alan adı çözülemez (sayfa 50 sn dönebilir)
+	option dns_mode 'off'
+	# Tünel takılırsa bilinen adresi önbellekten ver (Xray serveStale)
+	option dns_stale '1'
+	option ipv6 '0'
+	option v6_block '1'
+	# Bildirim ve kararlılık (xDivine-Ray'in ölçülmüş varsayılanları)
+	# push_fix=0: Google/Apple bildirim bağlantıları da TÜNELDEN gider (xDivine-Ray gibi). Tünelin kendisi heartbeat/keepalive ile canlı tutulur;
+	# direkt gönderirsen operatör NAT'ı boştaki bağlantıyı sessizce keser ve bildirimler gecikir ya da hiç gelmez.
+	option push_fix '0'
+	option conn_idle '14400'
+	# Boştaki WebSocket tüneli sunucu/CDN/operatör tarafından kesilmesin: 30 sn (0 = kapalı)
+	option ws_heartbeat '30'
+	option tcp_keepalive '30'
+	# QUIC'i (UDP 443) reddet: tarayıcı anında TCP'ye (tünele) geçer (v2rayNG/Xray varsayılanı)
+	option block_quic '1'
+	# 1 = alan adını sunucu çözsün (her bağlantıya bir tur ekler); 0 = hedef IP korunur
+	option sniff_override '0'
+	# auto: Discord/WARP gibi DNS'i bozuk uygulamalar varsa hedef alan adıyla değiştirilir | off: hiç değiştirilmez (en hızlı)
+	option sniff_mode 'auto'
+	# TCP mux (0 önerilir; UDP için XUDP her zaman açık)
+	option mux '0'
+	# WebSocket erken veri
+	option ws_early '0'
+	option cfgver '14'
+	option ad_block '0'
+	# VPN süreci çökerse: killswitch = VPN trafiği kesilir (WhatsApp asla direkt çıkmaz) | open = internet direkt açılır
+	# Mobil/CGNAT hatlar: düşen SYN yüzünden bağlantı 50 sn asılı kalmasın (3 deneme ≈ 15 sn)
+	option mobile_tune '1'
+	# Hız ayarı: TCP tamponları büyütülür (hız testi/indirme daha çabuk yükselir) ve Xray bağlantı tamponu 1 MB olur
+	option speed_tune '1'
+	option buffer_size '1024'
+	option failsafe 'killswitch'
+	# Abonelik otomatik güncelleme (saat, 0 = kapalı)
+	option sub_interval '12'
+	# Gelişmiş
+	option log_level 'warning'
+	option tproxy_port '12345'
+	# Cihazların yazdığı DNS'i (8.8.8.8 vb.) çekirdekte KediRay DNS'ine çevir: tünele girmez, hızlıdır
+	option dns_hijack '1'
+	option block_doh '1'
+	option dns_port '15353'
+	option socks_port '10808'
+	option api_port '10085'
+	# Ölçüm (ping/sağlık) adresi ve yedeği: biri engellenirse diğeri kullanılır
+	option probe_url 'https://www.gstatic.com/generate_204'
+	option probe_url2 'https://cp.cloudflare.com/generate_204'
+	option probe_interval '2m'
+
+# Uygulamalar: başlangıçta boş. VPN Ayırma sayfasındaki "Hazır uygulamalar"dan (WhatsApp, Metin2, Teams, YouTube...)
+# ya da "Yeni uygulama ekle"den eklenir. Her biri için route 'vpn' veya 'direct' seçilir.
+
+config rule
+	option name 'Discord (liste modu için örnek)'
+	option enabled '1'
+	option target 'proxy'
+	list domain 'domain:discord.com'
+	list domain 'domain:discord.gg'
+	list domain 'domain:discordapp.com'
+	list domain 'domain:discordapp.net'
+	list domain 'domain:discord.media'

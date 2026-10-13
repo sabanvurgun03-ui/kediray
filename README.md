@@ -17,7 +17,7 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 - Bant sekmesi: modem bant taraması ve akıllı bant seçimi (QModem gerekir)
 - Görünüm: açık/koyu ve renk temaları
 - **Yedekle / geri yükle:** sunucular, uygulama kuralları ve ayarlar tek dosyada (modemi sıfırlayınca geri getir)
-- GitHub'dan güncelleme (SHA256 doğrulamalı)
+- GitHub Release'ten güncelleme (sha256sums doğrulamalı)
 - [AW1K Panel](https://github.com/sabanvurgun03-ui/aw1kpanel) Android uygulamasıyla uyumlu
 
 ## Ekran görüntüleri
@@ -30,10 +30,35 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 
 Modemde SSH ile:
 
-    wget -O /tmp/kediray.sh https://raw.githubusercontent.com/sabanvurgun03-ui/kediray/main/kediray-install.sh
+    wget -O /tmp/kediray.sh https://github.com/sabanvurgun03-ui/kediray/releases/latest/download/kediray-install.sh
     sh /tmp/kediray.sh
 
 Kurulumdan sonra LuCI'de **VPN → KediRay VPN** menüsünü aç. Sayfa eski görünürse Ctrl+Shift+R yap.
+
+## İndirmeler
+
+Her sürümün dosyaları [Releases](https://github.com/sabanvurgun03-ui/kediray/releases) sayfasında:
+
+| Dosya | Ne |
+|---|---|
+| `kediray-install.sh` | Tek dosya kurulum (yukarıdaki komutla aynı betik) |
+| `kediray-all.tar.gz` | Firmware'e gömme paketi: dosya ağacı, ilk açılış betiği, paket listesi. Mimariden bağımsız (aarch64, armv7, mips, mipsel, riscv64, x86_64 ...), çünkü KediRay derlenmiş dosya içermez |
+| `kediray-src.tar.gz` | Kaynak ağacı (derleme araçlarıyla birlikte) |
+| `sha256sums` | Dosyaların SHA256 toplamları: `sha256sum -c sha256sums` |
+
+AW1K Panel Android uygulamasının APK'sı aynı sayfada ayrı bir sürüm olarak durur.
+
+## Depo düzeni
+
+    package/kediray/files/        modemde çalışan dosyalar (kediray komutu, init, hotplug, *.uc)
+    package/aw1k-panel/files/     AW1K Panel uygulamasının modem tarafı (aw1k-usage, rpcd eklentisi, ACL)
+    luci-app-kediray/             LuCI arayüzü (JS görünümleri, menü, ACL)
+    installer/                    kurulum betiği iskeleti + dosya haritası
+    tools/                        build.py ve paket şablonları
+    VERSION                       tek sürüm kaynağı
+    build.sh                      dist/ içine release dosyalarını üretir
+
+`./build.sh` kurulum betiğini ve paketleri kaynak ağacından üretir ve doğrular. Aynı girdiden her seferinde birebir aynı çıktı verir.
 
 ## Güncelleme
 
@@ -42,7 +67,7 @@ LuCI → KediRay → **Hakkında → GitHub'dan güncelle**, ya da SSH:
     kediray update check
     kediray update install
 
-Dosya GitHub'dan indirilir ve `kediray-install.sh.sha256` ile doğrulanır. Uyuşmazsa kurulmaz.
+Güncelleme, o sürümün GitHub Release'inden indirilir ve release'teki `sha256sums` ile doğrulanır. `sha256sums` yoksa ya da uyuşmazsa kurulmaz.
 
 ## Yedekleme
 
@@ -55,7 +80,7 @@ Yedek dosyası sunucu kimliklerini (UUID) içerir. **Kimseyle paylaşma, GitHub'
 
 ## Notlar
 
-- Modemin GitHub'a erişebilmesi gerekir (`raw.githubusercontent.com`).
+- Modemin GitHub'a erişebilmesi gerekir (`github.com`, `raw.githubusercontent.com`).
 - Kurulum, aynı anda çalışan başka bir transparan proxy ile (örneğin xDivine-Ray) çakışabilir. Geçiş için: `kediray takeover`.
 
 ## Lisans
@@ -78,7 +103,7 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 - Band tab: modem band scan and smart band selection (needs QModem)
 - Appearance: light/dark and color themes
 - **Backup / restore:** servers, app rules and settings in one file (bring them back after a router reset)
-- Update from GitHub (SHA256 verified)
+- Update from GitHub Releases (sha256sums verified)
 - Works with the [AW1K Panel](https://github.com/sabanvurgun03-ui/aw1kpanel) Android app
 
 ### Screenshots
@@ -91,10 +116,24 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 
 Over SSH on the router:
 
-    wget -O /tmp/kediray.sh https://raw.githubusercontent.com/sabanvurgun03-ui/kediray/main/kediray-install.sh
+    wget -O /tmp/kediray.sh https://github.com/sabanvurgun03-ui/kediray/releases/latest/download/kediray-install.sh
     sh /tmp/kediray.sh
 
 Then open **VPN → KediRay VPN** in LuCI. If the page looks stale, press Ctrl+Shift+R.
+
+### Downloads
+
+Each release's files are on the [Releases](https://github.com/sabanvurgun03-ui/kediray/releases) page:
+
+| File | What |
+|---|---|
+| `kediray-install.sh` | Single-file installer (the same script as the command above) |
+| `kediray-all.tar.gz` | Firmware package: file tree, first-boot script, package list. Architecture-independent (aarch64, armv7, mips, mipsel, riscv64, x86_64 ...) because KediRay ships no compiled binaries |
+| `kediray-src.tar.gz` | Source tree (with the build tools) |
+| `sha256sums` | SHA256 sums of the files: `sha256sum -c sha256sums` |
+
+The AW1K Panel Android APK sits on the same page as its own, separate release.
+To build the files yourself: `./build.sh` (output goes to `dist/`; the same input always gives byte-identical files).
 
 ### Update
 
@@ -103,7 +142,7 @@ LuCI → KediRay → **About → Update from GitHub**, or over SSH:
     kediray update check
     kediray update install
 
-The file is downloaded from GitHub and checked against `kediray-install.sh.sha256`. It is not installed if they don't match.
+The update is downloaded from that version's GitHub Release and checked against the release's `sha256sums`. It is not installed if `sha256sums` is missing or doesn't match.
 
 ### Backup
 
@@ -116,7 +155,7 @@ The backup file contains server IDs (UUIDs). **Do not share it or upload it to G
 
 ### Notes
 
-- The router must be able to reach GitHub (`raw.githubusercontent.com`).
+- The router must be able to reach GitHub (`github.com`, `raw.githubusercontent.com`).
 - It can conflict with another transparent proxy running at the same time (e.g. xDivine-Ray). To switch: `kediray takeover`.
 
 ### License

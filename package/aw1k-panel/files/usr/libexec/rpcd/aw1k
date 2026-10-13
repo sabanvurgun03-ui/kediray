@@ -1,0 +1,218 @@
+#!/bin/sh
+# rpcd eklentisi: ubus call aw1k usage | kediray | kediray_ctl | kediray_devices | wifi_clients
+# Mobil/WAN cihaz adı: wwan0_1 varsa o, yoksa wan arayüzünün cihazı, o da yoksa "wan"
+aw1k_wandev() {
+    local d=wwan0_1
+    if ubus call network.device status "{\"name\":\"$d\"}" >/dev/null 2>&1; then echo "$d"; return; fi
+    d=$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.l3_device')
+    [ -n "$d" ] && { echo "$d"; return; }
+    echo wan
+}
+case "$1" in
+list)
+    echo '{ "usage": {}, "kediray": {}, "kediray_ctl": { "action": "str" }, "kediray_devices": {}, "wifi_clients": {}, "guest_get": {}, "guest_set": { "enabled": true, "ssid": "str", "key": "str" }, "wan_info": {}, "bandpw_write": { "pw": "str" }, "kediray_device": { "mac": "str", "mode": "str", "name": "str" } }'
+    ;;
+call)
+    case "$2" in
+    kediray)
+        running=false; /etc/init.d/kediray status 2>/dev/null | grep -q running && running=true
+        enabled=false; /etc/init.d/kediray enabled 2>/dev/null && enabled=true
+        st=$(ubus call network.device status '{"name":"kediray0"}' 2>/dev/null)
+        rx=$(echo "$st" | jsonfilter -e '@.statistics.rx_bytes'); [ -n "$rx" ] || rx=0
+        tx=$(echo "$st" | jsonfilter -e '@.statistics.tx_bytes'); [ -n "$tx" ] || tx=0
+        since=0
+        [ -f /var/etc/kediray/config.json ] && since=$(stat -c %Y /var/etc/kediray/config.json 2>/dev/null || echo 0)
+        printf '{"running":%s,"enabled":%s,"since":%s,"now":%s,"rx":%s,"tx":%s}' \
+            "$running" "$enabled" "$since" "$(date +%s)" "$rx" "$tx"
+        ;;
+    kediray_devices)
+        def=$(uci -q get kediray.main.default_device); [ -n "$def" ] || def=vpn
+        printf '{"default":"%s","devices":[' "$def"
+        n=0; i=0
+        while mac=$(uci -q get kediray.@device[$i].mac); do
+            mode=$(uci -q get kediray.@device[$i].mode)
+            [ $n -gt 0 ] && printf ','
+            printf '{"mac":"%s","mode":"%s"}' "$mac" "$mode"
+            n=$((n+1)); i=$((i+1))
+        done
+        printf '],"assoc":['
+        n=0
+        for obj in $(ubus list 'hostapd.*' 2>/dev/null); do
+            dev=${obj#hostapd.}
+            out=$(ubus call iwinfo assoc "{\"device\":\"$dev\"}" 2>/dev/null) || continue
+            macs=$(echo "$out" | jsonfilter -e '@.results[*].mac')
+            times=$(echo "$out" | jsonfilter -e '@.results[*].connected_time')
+            j=0
+            for m in $macs; do
+                t=$(echo "$times" | sed -n "$((j+1))p"); [ -n "$t" ] || t=-1
+                [ $n -gt 0 ] && printf ','
+                printf '{"mac":"%s","secs":%s}' "$m" "$t"
+                n=$((n+1)); j=$((j+1))
+            done
+        done
+        printf ']}'
+        ;;
+    wifi_clients)
+        now=$(date +%s)
+        tmp=/tmp/aw1k-wc.$$
+        : > $tmp
+        printf '{"now":%s,"status":' "$now"
+        ubus call network.wireless status 2>/dev/null || printf 'null'
+        printf ',"ifaces":['
+        n=0
+        for obj in $(ubus list 'hostapd.*' 2>/dev/null); do
+            dev=${obj#hostapd.}
+            data=$(ubus call "$obj" get_clients 2>/dev/null) || continue
+            echo "$data" >> $tmp
+            as=$(ubus call iwinfo assoc "{\"device\":\"$dev\"}" 2>/dev/null); [ -n "$as" ] || as=null
+            [ $n -gt 0 ] && printf ','
+            printf '{"name":"%s","data":%s,"assoc":%s}' "$dev" "$data" "$as"
+            n=$((n+1))
+        done
+        printf '],"seen":{'
+        f=/tmp/aw1k-seen; : > $f.new
+        for m in $(grep -oE '([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}' $tmp | tr 'A-F' 'a-f' | sort -u); do
+            ts=$(grep "^$m " $f 2>/dev/null | head -n1 | cut -d' ' -f2); [ -n "$ts" ] || ts=$now
+            echo "$m $ts" >> $f.new
+        done
+        mv $f.new $f
+        awk '{ if (NR>1) printf ","; printf "\"%s\":%s", $1, $2 }' $f
+        printf '}}'
+        rm -f $tmp
+        ;;
+    guest_get)
+        esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+        if ! uci -q get wireless.guest_wifi >/dev/null; then
+            printf '{"exists":false}'
+        else
+            dis=$(uci -q get wireless.guest_wifi.disabled); en=true; [ "$dis" = 1 ] && en=false
+            printf '{"exists":true,"enabled":%s,"ssid":"%s","key":"%s","radio":"%s"}' "$en" \
+                "$(esc "$(uci -q get wireless.guest_wifi.ssid)")" "$(esc "$(uci -q get wireless.guest_wifi.key)")" \
+                "$(uci -q get wireless.guest_wifi.device)"
+        fi
+        ;;
+    guest_set)
+        read -r input
+        enabled=$(echo "$input" | jsonfilter -e '@.enabled')
+        ssid=$(echo "$input" | jsonfilter -e '@.ssid')
+        key=$(echo "$input" | jsonfilter -e '@.key')
+        if [ -z "$ssid" ] || [ ${#ssid} -gt 32 ]; then printf '{"ok":false,"error":"Ağ adı 1-32 karakter olmalı"}'; exit 0; fi
+        if [ ${#key} -lt 8 ] || [ ${#key} -gt 63 ]; then printf '{"ok":false,"error":"Şifre 8-63 karakter olmalı"}'; exit 0; fi
+        # ağ arayüzü
+        if ! uci -q get network.guest >/dev/null; then
+            lanip=$(uci -q get network.lan.ipaddr | cut -d/ -f1)
+            gip=192.168.50.1; case "$lanip" in 192.168.50.*) gip=192.168.51.1 ;; esac
+            uci set network.guest=interface
+            uci set network.guest.proto=static
+            uci set network.guest.ipaddr="$gip"
+            uci set network.guest.netmask=255.255.255.0
+        fi
+        # DHCP
+        if ! uci -q get dhcp.guest >/dev/null; then
+            uci set dhcp.guest=dhcp
+            uci set dhcp.guest.interface=guest
+            uci set dhcp.guest.start=100
+            uci set dhcp.guest.limit=100
+            uci set dhcp.guest.leasetime=1h
+        fi
+        # güvenlik duvarı: misafir ağı yalnızca internete çıkar, LAN'a erişemez
+        if ! uci -q get firewall.guest_zone >/dev/null; then
+            wz=wan
+            uci -q show firewall | grep -q "^firewall\.@zone\[[0-9]*\]\.name='wan'$" || {
+                wz=$(uci -q show firewall | sed -n "s/^firewall\.@zone\[\([0-9]*\)\]\.masq='1'$/\1/p" | head -n1)
+                [ -n "$wz" ] && wz=$(uci -q get firewall.@zone[$wz].name) || wz=wan
+            }
+            uci set firewall.guest_zone=zone
+            uci set firewall.guest_zone.name=guest
+            uci set firewall.guest_zone.network=guest
+            uci set firewall.guest_zone.input=REJECT
+            uci set firewall.guest_zone.output=ACCEPT
+            uci set firewall.guest_zone.forward=REJECT
+            uci set firewall.guest_fwd=forwarding
+            uci set firewall.guest_fwd.src=guest
+            uci set firewall.guest_fwd.dest="$wz"
+            uci set firewall.guest_dns=rule
+            uci set firewall.guest_dns.name='Guest-DNS'
+            uci set firewall.guest_dns.src=guest
+            uci set firewall.guest_dns.dest_port=53
+            uci set firewall.guest_dns.proto='tcp udp'
+            uci set firewall.guest_dns.target=ACCEPT
+            uci set firewall.guest_dhcp=rule
+            uci set firewall.guest_dhcp.name='Guest-DHCP'
+            uci set firewall.guest_dhcp.src=guest
+            uci set firewall.guest_dhcp.dest_port=67
+            uci set firewall.guest_dhcp.proto=udp
+            uci set firewall.guest_dhcp.family=ipv4
+            uci set firewall.guest_dhcp.target=ACCEPT
+        fi
+        # Wi-Fi: tercihen 2.4 GHz radyo
+        if ! uci -q get wireless.guest_wifi >/dev/null; then
+            radio=""
+            for r in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-device$/\1/p'); do
+                [ -n "$radio" ] || radio=$r
+                [ "$(uci -q get wireless.$r.band)" = 2g ] && { radio=$r; break; }
+            done
+            [ -n "$radio" ] || { printf '{"ok":false,"error":"Wi-Fi radyosu bulunamadı"}'; exit 0; }
+            uci set wireless.guest_wifi=wifi-iface
+            uci set wireless.guest_wifi.device="$radio"
+            uci set wireless.guest_wifi.mode=ap
+            uci set wireless.guest_wifi.network=guest
+            uci set wireless.guest_wifi.isolate=1
+        fi
+        uci set wireless.guest_wifi.ssid="$ssid"
+        uci set wireless.guest_wifi.encryption=psk2
+        uci set wireless.guest_wifi.key="$key"
+        if [ "$enabled" = true ]; then uci -q delete wireless.guest_wifi.disabled; else uci set wireless.guest_wifi.disabled=1; fi
+        uci commit network; uci commit dhcp; uci commit firewall; uci commit wireless
+        ( sleep 1; /etc/init.d/network reload; /etc/init.d/firewall reload; /etc/init.d/dnsmasq restart ) </dev/null >/dev/null 2>&1 &
+        printf '{"ok":true}'
+        ;;
+    wan_info)
+        dev=$(aw1k_wandev)
+        up=$(ubus call network.interface dump 2>/dev/null | jsonfilter -e "@.interface[@.l3_device='$dev'].uptime" | head -n1)
+        [ -n "$up" ] || up=$(ubus call network.interface dump 2>/dev/null | jsonfilter -e "@.interface[@.device='$dev'].uptime" | head -n1)
+        [ -n "$up" ] || up=-1
+        st=$(ubus call network.device status "{\"name\":\"$dev\"}" 2>/dev/null)
+        rx=$(echo "$st" | jsonfilter -e '@.statistics.rx_bytes'); [ -n "$rx" ] || rx=-1
+        tx=$(echo "$st" | jsonfilter -e '@.statistics.tx_bytes'); [ -n "$tx" ] || tx=-1
+        printf '{"uptime":%s,"rx":%s,"tx":%s}' "$up" "$rx" "$tx"
+        ;;
+    bandpw_write)
+        read -r input
+        pw=$(echo "$input" | jsonfilter -e '@.pw')
+        [ -n "$pw" ] || { printf '{"ok":false}'; exit 0; }
+        ( umask 077; printf '%s\n' "$pw" > /root/band-kilidi-sifre.txt )
+        chmod 600 /root/band-kilidi-sifre.txt
+        printf '{"ok":true}'
+        ;;
+    kediray_device)
+        read -r input
+        mac=$(echo "$input" | jsonfilter -e '@.mac')
+        mode=$(echo "$input" | jsonfilter -e '@.mode')
+        name=$(echo "$input" | jsonfilter -e '@.name' | tr -cd 'A-Za-z0-9 ._-')
+        echo "$mac" | grep -qiE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || { printf '{"ok":false}'; exit 0; }
+        case "$mode" in vpn|direct|block|default) ;; *) printf '{"ok":false}'; exit 0 ;; esac
+        /usr/bin/kediray device "$mac" "$mode" "$name" >/dev/null 2>&1
+        printf '{"ok":true}'
+        ;;
+    kediray_ctl)
+        read -r input
+        action=$(echo "$input" | jsonfilter -e '@.action')
+        case "$action" in
+        start|stop|restart)
+            ( /etc/init.d/kediray "$action" >/dev/null 2>&1 & )
+            printf '{"ok":true}'
+            ;;
+        *) printf '{"ok":false}' ;;
+        esac
+        ;;
+    usage)
+        f=/tmp/aw1k-usage.db
+        [ -f "$f" ] || f=/etc/aw1k-usage.db
+        printf '{"today":"%s","days":[' "$(date +%F)"
+        [ -f "$f" ] && awk 'NF == 3 { if (n++) printf ","; printf "{\"d\":\"%s\",\"rx\":%.0f,\"tx\":%.0f}", $1, $2, $3 }' "$f"
+        printf ']}'
+        ;;
+    esac
+    ;;
+esac

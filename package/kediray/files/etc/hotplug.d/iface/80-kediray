@@ -1,0 +1,8 @@
+#!/bin/sh
+# Arayüz yeniden kalktığında (WAN/LAN, güvenlik duvarı yeniden yüklemesi) KediRay kurallarını geri yükle
+[ "$ACTION" = ifup ] || exit 0
+[ "$(uci -q get kediray.main.enabled)" = 1 ] || exit 0
+[ -f /var/etc/kediray/fw ] || exit 0
+nft list table inet kediray >/dev/null 2>&1 && ip -4 rule | grep -q 'lookup 107' && exit 0
+logger -t kediray "arayüz $INTERFACE kalktı, kurallar yeniden uygulanıyor"
+/usr/bin/kediray fw-up >/dev/null 2>&1 &

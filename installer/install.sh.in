@@ -1,0 +1,661 @@
+#!/bin/sh
+# ============================================================================
+#  KediRay @VERSION@ — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#
+#  Copyright (C) 2026 Şaban Vurgun
+#  SPDX-License-Identifier: GPL-3.0-or-later
+#  Bu program özgür yazılımdır: GNU GPL 3. sürüm ya da (isteğe bağlı) sonrası koşullarında
+#  dağıtabilir ve değiştirebilirsiniz. Garanti verilmez. Ayrıntı: LICENSE dosyası.
+#
+#  Kurulum:   sh kediray-install.sh
+#  Sessiz:    sh kediray-install.sh -y --metin2 direct --teams direct --sub 'https://...'
+#  Kaldırma:  kediray uninstall        (ayarlar dahil: kediray uninstall --purge)
+#
+#  Seçenekler:
+#    -y                 Soru sorma, varsayılanları kullan
+#    --metin2 vpn|direct
+#    --teams  vpn|direct
+#    --sub URL          Abonelik adresi ekle
+#    --link 'vless://…' Sunucu linki veya JSON ekle
+#    --core-version vX  Belirli Xray sürümü (varsayılan: en son)
+#    --force-core       Xray kurulu olsa da yeniden indir
+#    --gh-proxy URL     GitHub indirmeleri için ayna/önek
+#    --license KEY      Lisans anahtarı (modem IMEI'sine göre; IMEI: kediray license id)
+#
+#  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
+# ============================================================================
+
+KR_VERSION="@VERSION@"
+AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; ARG_LICENSE=""; CORE_VER="latest"; FORCE_CORE=0
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-y|--yes) AUTO=1 ;;
+		--metin2) ARG_METIN2="$2"; shift ;;
+		--teams) ARG_TEAMS="$2"; shift ;;
+		--sub) ARG_SUB="$2"; shift ;;
+		--link) ARG_LINK="$2"; shift ;;
+		--license) ARG_LICENSE="$2"; shift ;;
+		--core-version) CORE_VER="$2"; shift ;;
+		--force-core) FORCE_CORE=1 ;;
+		--gh-proxy) export GH_PROXY="$2"; shift ;;
+		-h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+	esac
+	shift
+done
+
+if [ -t 1 ]; then
+	C_G='\033[1;32m'; C_Y='\033[1;33m'; C_R='\033[1;31m'; C_B='\033[1;36m'; C_0='\033[0m'
+else
+	C_G=''; C_Y=''; C_R=''; C_B=''; C_0=''
+fi
+step() { printf "\n${C_B}==> %s${C_0}\n" "$*"; }
+ok()   { printf "${C_G}  ✔ %s${C_0}\n" "$*"; }
+warn() { printf "${C_Y}  ! %s${C_0}\n" "$*"; }
+die()  { printf "${C_R}  ✘ %s${C_0}\n" "$*"; exit 1; }
+
+TTY=""
+if [ "$AUTO" != 1 ]; then
+	if [ -t 0 ]; then TTY=/dev/stdin
+	elif [ -r /dev/tty ] && ( : < /dev/tty ) 2>/dev/null; then TTY=/dev/tty
+	else AUTO=1; fi
+fi
+
+# ask "soru" "varsayılan" -> $REPLY
+ask() {
+	REPLY="$2"
+	[ "$AUTO" = 1 ] && return 0
+	printf "  %s [%s]: " "$1" "$2"
+	read -r REPLY < "$TTY" || REPLY=""
+	[ -n "$REPLY" ] || REPLY="$2"
+}
+yesno() { # "soru" E|H
+	ask "$1 (E/H)" "$2"
+	case "$REPLY" in [EeYy]*) return 0 ;; *) return 1 ;; esac
+}
+
+cat <<'BANNER'
+
+   /\_/\    KediRay — OpenWrt Xray VPN
+  ( o.o )   WS dostu · bildirim düzeltmeli · cihaz/uygulama bazlı ayırma
+   > ^ <    Metin2 & Teams: VPN ya da Direkt — seçim senin
+
+BANNER
+
+# ---------------------------------------------------------------- 1. kontroller
+step "Sistem kontrol ediliyor"
+[ "$(id -u)" = 0 ] || die "root olarak çalıştır"
+[ -f /etc/openwrt_release ] || die "Bu bir OpenWrt sistemi değil"
+. /etc/openwrt_release
+ok "$DISTRIB_DESCRIPTION ($DISTRIB_ARCH)"
+command -v nft >/dev/null 2>&1 || die "nftables (fw4) yok. OpenWrt 22.03 ve üstü gerekir."
+command -v fw4 >/dev/null 2>&1 && ok "firewall4 / nftables"
+
+if command -v apk >/dev/null 2>&1; then PM=apk
+elif command -v opkg >/dev/null 2>&1; then PM=opkg
+else die "Paket yöneticisi bulunamadı (apk/opkg)"; fi
+ok "Paket yöneticisi: $PM"
+
+pkg_installed() {
+	if [ "$PM" = apk ]; then
+		apk info -e "$1" >/dev/null 2>&1 || apk list -I "$1" 2>/dev/null | grep -q "^$1-[0-9]"
+	else opkg list-installed 2>/dev/null | grep -q "^$1 "; fi
+}
+pkg_add() {
+	if [ "$PM" = apk ]; then apk add "$@" >/tmp/kr-pkg.log 2>&1
+	else opkg install "$@" >/tmp/kr-pkg.log 2>&1; fi
+}
+
+FREE_KB=$(df -k /overlay 2>/dev/null | awk 'NR==2{print $4}')
+[ -n "$FREE_KB" ] || FREE_KB=$(df -k / | awk 'NR==2{print $4}')
+ok "Boş alan: $((FREE_KB / 1024)) MB"
+if [ -z "$(ls /usr/share/kediray/bin/xray 2>/dev/null)" ] && [ "$FREE_KB" -lt 75000 ]; then
+	warn "Xray çekirdeği + coğrafi veriler ~70 MB ister, yer az görünüyor."
+	yesno "Yine de devam edilsin mi?" H || die "İptal edildi"
+fi
+
+# ---------------------------------------------------------------- 2. çakışmalar
+step "Çakışan VPN servisleri aranıyor"
+CONFLICTS=""
+# Güncelleme mi? Önceden kurulu ve AÇIK bir KediRay'in durumu güncellemeyle değişmemeli (eskiden -y ile
+# gelen güncelleme diğer VPN servisi kayıtlıysa KediRay'i kapatıyordu).
+PREV_CONF=0; [ -f /etc/config/kediray ] && PREV_CONF=1
+PREV_ENABLED=$(uci -q get kediray.main.enabled)
+WAS_ON=0; [ "$PREV_CONF" = 1 ] && [ "$PREV_ENABLED" = 1 ] && WAS_ON=1
+for s in xwrt passwall passwall2 openclash nikki mihomo homeproxy v2raya xray v2ray sing-box neko xlite shadowsocksr ssrplus bypass vssr; do
+	[ -x "/etc/init.d/$s" ] || continue
+	if /etc/init.d/"$s" enabled 2>/dev/null || /etc/init.d/"$s" running 2>/dev/null; then
+		CONFLICTS="$CONFLICTS $s"
+	fi
+done
+IMPORT_XWRT=0
+KEEP_OTHER=0
+if [ -n "$CONFLICTS" ] && [ "$WAS_ON" = 1 ]; then
+	ok "Güncelleme: KediRay zaten açıktı; diğer servislere ($CONFLICTS ) dokunulmuyor, KediRay açık kalacak"
+elif [ -n "$CONFLICTS" ]; then
+	warn "Çalışan/etkin VPN servisleri:$CONFLICTS"
+	case " $CONFLICTS " in *" xwrt "*)
+		yesno "xDivine-Ray (xwrt) sunucuları/abonelikleri KediRay'e aktarılsın mı?" E && IMPORT_XWRT=1 ;;
+	esac
+	echo
+	echo "  Kurulum bunları DURDURMADAN da yapılabilir: KediRay kurulur, kendi portlarını"
+	echo "  seçer ve kapalı bekler. Hazır olunca panelde 'Güvenli geçiş' ya da 'kediray takeover'"
+	echo "  ile geçersin; internet gelmezse eski VPN'e otomatik geri döner."
+	if yesno "Şimdi durdurulsunlar mı? (önerilen: Hayır)" H; then
+		for s in $CONFLICTS; do
+			/etc/init.d/"$s" stop >/dev/null 2>&1
+			/etc/init.d/"$s" disable >/dev/null 2>&1
+			ok "$s durduruldu (geri açmak için: /etc/init.d/$s enable && /etc/init.d/$s start)"
+		done
+	else
+		KEEP_OTHER=1
+		ok "Diğer VPN açık kalıyor; KediRay kapalı kurulacak"
+	fi
+else
+	ok "Çakışma yok"
+fi
+
+# ---------------------------------------------------------------- 3. paketler
+step "Gerekli paketler kuruluyor"
+REQ="ucode ucode-mod-uci ucode-mod-fs ip-full curl ca-bundle unzip openssl-util"
+OPT="conntrack"
+EXTRA="hev-socks5-tunnel kmod-tun kmod-nft-tproxy kmod-nft-socket"
+# Paket listesi ancak eksik paket varsa güncellenir (yeniden kurulumda beklemeyi kaldırır)
+MISSING=""
+for p in $REQ $OPT $EXTRA; do pkg_installed "$p" || MISSING="$MISSING $p"; done
+if [ -n "$MISSING" ]; then
+	if [ "$PM" = apk ]; then apk update >/tmp/kr-pkg.log 2>&1 || warn "apk update başarısız (internet?)"
+	else opkg update >/tmp/kr-pkg.log 2>&1 || warn "opkg update başarısız (internet?)"; fi
+else
+	ok "tüm paketler zaten kurulu (paket listesi güncellenmedi)"
+fi
+for p in $REQ; do
+	if pkg_installed "$p"; then ok "$p (kurulu)"; continue; fi
+	if pkg_add "$p"; then ok "$p"; else
+		case "$p" in
+			unzip) command -v unzip >/dev/null 2>&1 && ok "unzip (busybox)" || warn "unzip kurulamadı: Xray arşivi yerleşik çıkarıcıyla açılacak (sorun değil)" ;;
+			openssl-util)
+				if command -v openssl >/dev/null 2>&1; then ok "openssl (mevcut)"
+				else warn "openssl-util kurulamadı: sertifikası doğrulanmayan (allowInsecure) sunucular sabitlenemez"; fi ;;
+			*) tail -n 3 /tmp/kr-pkg.log; die "$p kurulamadı" ;;
+		esac
+	fi
+done
+for p in $OPT; do
+	pkg_installed "$p" && continue
+	pkg_add "$p" && ok "$p (isteğe bağlı)" || warn "$p kurulamadı (isteğe bağlı, sorun değil)"
+done
+# Trafik yakalama: mixed (önerilen, xDivine-Ray ile aynı) = TCP NAT redirect + UDP hev-socks5-tunnel TUN.
+# Yedek: tproxy. İkisi de yoksa redirect (sadece TCP).
+for p in hev-socks5-tunnel kmod-tun; do
+	pkg_installed "$p" && { ok "$p (kurulu)"; continue; }
+	pkg_add "$p" && ok "$p" || warn "$p kurulamadı"
+done
+modprobe tun 2>/dev/null
+MIXED_OK=0
+if command -v hev-socks5-tunnel >/dev/null 2>&1 && [ -c /dev/net/tun ]; then
+	MIXED_OK=1; ok "mixed mod hazır (TCP: çekirdek NAT, UDP: hev-socks5-tunnel)"
+fi
+for p in kmod-nft-tproxy kmod-nft-socket; do
+	pkg_installed "$p" && continue
+	pkg_add "$p" >/dev/null 2>&1 || true
+done
+modprobe nft_tproxy 2>/dev/null; modprobe nft_socket 2>/dev/null
+TPROXY_OK=0
+# Gerçek test: çekirdek TPROXY + socket eşleşmesini destekliyor mu?
+nft delete table inet kr_probe 2>/dev/null
+if nft -f - 2>/tmp/kr-nft.log <<'NFT'
+table inet kr_probe {
+	chain c {
+		type filter hook prerouting priority mangle; policy accept;
+		meta l4proto tcp socket transparent 1 meta mark set 0x6b accept
+		meta l4proto { tcp, udp } meta mark set 0x6b tproxy ip to 127.0.0.1:1 accept
+	}
+}
+NFT
+then
+	nft delete table inet kr_probe 2>/dev/null
+	TPROXY_OK=1; ok "Çekirdek TPROXY desteği de var (yedek mod)"
+else
+	nft delete table inet kr_probe 2>/dev/null
+fi
+if [ "$MIXED_OK" = 1 ]; then CAPTURE=mixed
+elif [ "$TPROXY_OK" = 1 ]; then CAPTURE=tproxy; warn "hev-socks5-tunnel yok: tproxy modu kullanılacak"
+else CAPTURE=redirect; warn "Ne hev-socks5-tunnel ne TPROXY var: sadece TCP tünellenecek (UDP/oyun/arama direkt çıkar)"; fi
+command -v ucode >/dev/null 2>&1 || die "ucode yok"
+ucode -e 'require("uci"); require("fs");' 2>/dev/null || die "ucode-mod-uci / ucode-mod-fs eksik"
+
+# ---------------------------------------------------------------- 4. dosyalar
+step "KediRay dosyaları yazılıyor"
+[ -x /etc/init.d/kediray ] && /etc/init.d/kediray stop >/dev/null 2>&1
+mkdir -p /usr/share/kediray/bin /var/etc/kediray /www/luci-static/resources/view/kediray \
+	/usr/share/luci/menu.d /usr/share/rpcd/acl.d /etc/hotplug.d/iface /etc/hotplug.d/firewall /etc/init.d /usr/bin
+
+write_files() {
+@@KR_FILE package/kediray/files/etc/config/kediray@@
+@@KR_FILE package/kediray/files/etc/init.d/kediray@@
+@@KR_FILE package/kediray/files/etc/hotplug.d/iface/80-kediray@@
+@@KR_FILE package/kediray/files/etc/hotplug.d/firewall/99-kediray@@
+@@KR_FILE package/kediray/files/usr/bin/kediray@@
+@@KR_FILE package/kediray/files/usr/share/kediray/gen.uc@@
+@@KR_FILE package/kediray/files/usr/share/kediray/link.uc@@
+@@KR_FILE package/kediray/files/usr/share/kediray/cli.uc@@
+@@KR_FILE package/kediray/files/usr/share/kediray/node.uc@@
+@@KR_FILE package/kediray/files/usr/share/kediray/logs.uc@@
+@@KR_FILE package/kediray/files/usr/share/kediray/watch.uc@@
+@@KR_FILE package/kediray/files/usr/share/kediray/traffic.uc@@
+@@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/status.js@@
+@@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/trafik.js@@
+@@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/settings.js@@
+@@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/log.js@@
+@@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/about.js@@
+@@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/ayir.js@@
+@@KR_FILE luci-app-kediray/root/usr/share/luci/menu.d/luci-app-kediray.json@@
+@@KR_FILE luci-app-kediray/root/usr/share/rpcd/acl.d/luci-app-kediray.json@@
+@@KR_FILE luci-app-kediray/htdocs/luci-static/kedi-logo.svg@@
+mkdir -p /usr/libexec/rpcd
+@@KR_FILE package/aw1k-panel/files/usr/bin/aw1k-usage@@
+@@KR_FILE package/aw1k-panel/files/usr/libexec/rpcd/aw1k@@
+@@KR_FILE package/aw1k-panel/files/usr/share/rpcd/acl.d/aw1k-panel.json@@
+}
+AW_OLD=$(md5sum /usr/libexec/rpcd/aw1k 2>/dev/null)
+write_files
+chmod 755 /usr/bin/aw1k-usage /usr/libexec/rpcd/aw1k 2>/dev/null
+[ "$AW_OLD" != "$(md5sum /usr/libexec/rpcd/aw1k 2>/dev/null)" ] && AW_RESTART=1
+chmod 755 /usr/bin/kediray /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray /etc/hotplug.d/firewall/99-kediray
+# Güncelleme rpcd/arka plan üzerinden çalışırsa umask 077 olabilir: web'in sunduğu dosyalar 403 verir. Okunur yap.
+chmod 755 /www/luci-static/resources/view/kediray 2>/dev/null
+chmod 644 /www/luci-static/resources/view/kediray/*.js /www/luci-static/kedi-logo.svg /usr/share/luci/menu.d/luci-app-kediray.json /usr/share/rpcd/acl.d/luci-app-kediray.json /usr/share/rpcd/acl.d/aw1k-panel.json 2>/dev/null
+# Tarayıcı önbelleği: LuCI görünüm dosyalarını sürüm etiketli adla da yayınla ve menüyü ona yönlendir.
+# (Aynı adlı .js dosyasını tarayıcı bir saat saklar; güncellemeden sonra eski sayfa görünüyordu. Yeni ad = yeni adres.)
+KR_TAG=$(echo "$KR_VERSION" | tr . _)
+KR_VD=/www/luci-static/resources/view/kediray
+rm -f "$KR_VD"/*-r[0-9]*.js 2>/dev/null
+for v in status trafik ayir settings log about; do
+	[ -f "$KR_VD/$v.js" ] || continue
+	cp "$KR_VD/$v.js" "$KR_VD/$v-r$KR_TAG.js" && \
+		sed -i "s#\"path\": \"kediray/$v[^\"]*\"#\"path\": \"kediray/$v-r$KR_TAG\"#" /usr/share/luci/menu.d/luci-app-kediray.json
+done
+chmod 644 "$KR_VD"/*.js 2>/dev/null
+chmod 755 /usr/share/kediray 2>/dev/null; chmod 644 /usr/share/kediray/*.uc 2>/dev/null
+printf '%s\n' "$KR_VERSION" > /usr/share/kediray/version
+if [ -f /etc/config/kediray ]; then
+	ok "Mevcut ayarlar korundu (/etc/config/kediray)"
+	rm -f /tmp/kediray.default
+	# 1.4: bağlantı ayarları xDivine-Ray'in ölçülmüş varsayılanlarına döner (bir kez)
+	cv=$(uci -q get kediray.main.cfgver); cv=${cv:-0}
+	if [ "$cv" -lt 4 ] 2>/dev/null; then
+		# 1.4: xDivine-Ray ile aynı bağlantı yolu (mixed) ve bildirim ayarları
+		uci set kediray.main.capture="$CAPTURE"
+		uci set kediray.main.ws_heartbeat=0
+		uci set kediray.main.tcp_keepalive=0
+		uci set kediray.main.block_quic=1
+		[ "$(uci -q get kediray.main.dns_remote)" = "https://1.1.1.1/dns-query" ] && uci set kediray.main.dns_remote=tcp://1.1.1.1
+		[ "$(uci -q get kediray.main.dns_port)" = 5353 ] && uci set kediray.main.dns_port=15353
+		[ "$(uci -q get kediray.main.socks_port)" = 1080 ] && uci set kediray.main.socks_port=10808
+	fi
+	if [ "$cv" -lt 3 ] 2>/dev/null; then
+		uci set kediray.main.mux=0
+		uci set kediray.main.ws_early=0
+		uci set kediray.main.dns_mode=private
+		uci set kediray.main.sniff_override=0
+		ci=$(uci -q get kediray.main.conn_idle)
+		[ -z "$ci" ] || [ "$ci" -lt 14400 ] 2>/dev/null && uci set kediray.main.conn_idle=14400
+		uci commit kediray
+		ok "Bağlantı ayarları güncellendi (TCP mux kapalı, UDP/QUIC XUDP ile, DNS tünelden, hedef IP korunur)"
+	fi
+	if [ "$cv" -lt 4 ] 2>/dev/null; then
+		uci set kediray.main.cfgver=4; uci commit kediray
+		ok "Bağlantı yolu ayarlandı: $CAPTURE"
+	fi
+	# 1.5: Metin2 ışınlanma kopması - kanal portları tek aralık, Gameforge ağı ve komşu /24'ler direkt
+	if [ "$cv" -lt 5 ] 2>/dev/null; then
+		if [ "$(uci -q get kediray.metin2)" = app ]; then
+			case "$(uci -q get kediray.metin2.ports)" in
+				'11000-11999 13000-13999'|'') uci set kediray.metin2.ports='11000-13999' ;;
+			esac
+			[ -n "$(uci -q get kediray.metin2.expand)" ] || uci set kediray.metin2.expand=24
+			for d in domain:gameforge.io domain:gameforge.net; do
+				uci -q get kediray.metin2.domain | tr ' ' '\n' | grep -qx "$d" || uci add_list kediray.metin2.domain="$d"
+			done
+		fi
+		uci set kediray.main.cfgver=5; uci commit kediray
+		ok "Metin2: kanal portları 11000-13999, Gameforge ağı ve komşu sunucular direkt (ışınlanma kopması düzeltmesi)"
+	fi
+	# 1.6.2: direkt DNS için yedek (ilk DoH takılınca sorgu beklemesin)
+	if [ "$cv" -lt 6 ] 2>/dev/null; then
+		[ -n "$(uci -q get kediray.main.dns_direct2)" ] || uci set kediray.main.dns_direct2='https+local://8.8.8.8/dns-query'
+		uci set kediray.main.cfgver=6; uci commit kediray
+		ok "Direkt DNS için yedek sunucu eklendi (DoH takılınca sorgu 10 sn beklemiyor)"
+	fi
+	# 1.7: ping/sağlık ölçümü için yedek adres (biri engellenirse sunucu boşuna "düştü" sayılmasın)
+	if [ "$cv" -lt 7 ] 2>/dev/null; then
+		[ -n "$(uci -q get kediray.main.probe_url2)" ] || uci set kediray.main.probe_url2='https://cp.cloudflare.com/generate_204'
+		uci set kediray.main.cfgver=7; uci commit kediray
+		ok "Ölçüm adresine yedek eklendi (Cloudflare)"
+	fi
+	# 1.8: sayfa açılma gecikmesi düzeltmesi (ölçüldü: UDP girişinde sniffing oturum başına ~200 ms ekliyordu)
+	if [ "$cv" -lt 8 ] 2>/dev/null; then
+		[ -n "$(uci -q get kediray.main.dns_hijack)" ] || uci set kediray.main.dns_hijack=1
+		uci set kediray.main.cfgver=8; uci commit kediray
+		ok "DNS artık çekirdekte yönlendiriliyor; UDP girişinde içerik tanıma kapatıldı (sayfalar hızlanır)"
+	fi
+	# 1.9.1: DNS artık tünele bağımlı değil (tünel koparsa sayfa 50 sn dönüyordu)
+	if [ "$cv" -lt 9 ] 2>/dev/null; then
+		case "$(uci -q get kediray.main.dns_mode)" in private|"") uci set kediray.main.dns_mode=fast ;; esac
+		uci set kediray.main.cfgver=9; uci commit kediray
+		ok "DNS modu 'Direkt DoH' yapıldı: tünel bir an koparsa alan adları yine çözülür"
+	fi
+	# 1.10: direkt DNS artık operatörün kendi sunucusu (xDivine-Ray ile aynı).
+	# Ölçüldü: bazı hatlarda DoH adreslerine hiç ulaşılamıyor ve her sorgu saniyelerce bekliyor.
+	if [ "$cv" -lt 10 ] 2>/dev/null; then
+		case "$(uci -q get kediray.main.dns_direct)" in
+			https*|"") uci set kediray.main.dns_direct=auto ;;
+		esac
+		case "$(uci -q get kediray.main.dns_direct2)" in
+			https*|"") uci set kediray.main.dns_direct2=auto ;;
+		esac
+		uci set kediray.main.cfgver=10; uci commit kediray
+		ok "Direkt DNS: operatörün kendi sunucusu (DoH erişilemeyen hatlarda sayfa takılmaz)"
+	fi
+	# 1.12: DNS xDivine-Ray ile birebir aynı: dnsmasq -> çekirdek (15353) -> tünel, üst sunucu tcp://1.1.1.1.
+	# 1.9.1'de 'fast'a (direkt DoH) geçmiştik; xDivine-Ray'de seçili olan mod bu değil, 'tünelden' olan.
+	if [ "$cv" -lt 12 ] 2>/dev/null; then
+		case "$(uci -q get kediray.main.dns_mode)" in fast|"") uci set kediray.main.dns_mode=private ;; esac
+		case "$(uci -q get kediray.main.dns_remote)" in ""|https*) uci set kediray.main.dns_remote='tcp://1.1.1.1' ;; esac
+		[ -n "$(uci -q get kediray.main.dns_hijack)" ] || uci set kediray.main.dns_hijack=1
+		uci set kediray.main.cfgver=12; uci commit kediray
+		ok "DNS modu: 'Tünelden' (dnsmasq -> çekirdek -> tünel)"
+	fi
+	# 1.13: tarayıcının kendi "Güvenli DNS"i (DoH) sistem DNS'ini atlıyor; bu hatta o adreslere
+	# ulaşılamadığı için sayfa başına 1-3 istek ~50 sn askıda kalıyordu. Reddedilince tarayıcı anında geri döner.
+	if [ "$cv" -lt 13 ] 2>/dev/null; then
+		[ -n "$(uci -q get kediray.main.block_doh)" ] || uci set kediray.main.block_doh=1
+		uci set kediray.main.cfgver=13; uci commit kediray
+		ok "Tarayıcıların kendi DoH'u engellendi (askıda kalan istekler biter)"
+	fi
+	# 1.14: uzak DNS artık DoH. Gerçek hatta doğrulandı: DNS-over-TCP kullanılırken tünelde tek bir
+	# bağlantı düşünce sorgu ölüyor ve sayfalar askıda kalıyordu; DoH'a geçince sorun bitti.
+	if [ "$cv" -lt 14 ] 2>/dev/null; then
+		case "$(uci -q get kediray.main.dns_remote)" in
+			tcp://*|""|1.1.1.1|8.8.8.8) uci set kediray.main.dns_remote='https://1.1.1.1/dns-query' ;;
+		esac
+		uci set kediray.main.cfgver=14; uci commit kediray
+		ok "Uzak DNS: Cloudflare DoH (tünelde bağlantı düşse de sorgu ölmez)"
+	fi
+	# 1.11: mobil hatta düşen SYN yüzünden istekler 50 sn askıda kalıyordu
+	if [ "$cv" -lt 11 ] 2>/dev/null; then
+		[ -n "$(uci -q get kediray.main.mobile_tune)" ] || uci set kediray.main.mobile_tune=1
+		uci set kediray.main.cfgver=11; uci commit kediray
+		ok "Mobil hat ayarı açıldı: takılan bağlantı 50 sn yerine ~15 sn'de bırakılır"
+	fi
+	# 1.19.3: "Direkt" seçilen cihaz/uygulama her durumda direkt çıksın (otomatik VPN'e çevirme bir kez kapatılır; panelden açılabilir)
+	if [ ! -f /etc/kediray.autodirect-off ]; then
+		uci set kediray.main.auto_direct=0; uci commit kediray
+		touch /etc/kediray.autodirect-off
+		ok "Direkt seçilenler artık hiçbir zaman VPN'e çevrilmez (panel: Cihazlar > kutucuk)"
+	fi
+	# 1.19.19: bildirimler (FCM/APNs) tünelden gitsin: direkt giden bağlantıyı operatör NAT'ı sessizce kesiyordu (bir kez; panelden açılabilir)
+	if [ ! -f /etc/kediray.pushfix0 ]; then
+		uci set kediray.main.push_fix=0; uci commit kediray
+		touch /etc/kediray.pushfix0
+		ok "Bildirimler artık tünelden gidiyor (xDivine-Ray gibi): operatör NAT'ı direkt bağlantıyı sessizce kesip bildirimleri geciktiriyordu"
+	fi
+	# 1.19.4: boşta kalan WebSocket tünelinin kesilip bildirimlerin gelmemesi: heartbeat + keepalive 30 sn (bir kez)
+	if [ ! -f /etc/kediray.keepalive30 ]; then
+		[ "$(uci -q get kediray.main.ws_heartbeat)" = 0 ] && uci set kediray.main.ws_heartbeat=30
+		[ "$(uci -q get kediray.main.tcp_keepalive)" = 0 ] && uci set kediray.main.tcp_keepalive=30
+		uci commit kediray
+		touch /etc/kediray.keepalive30
+		ok "WebSocket heartbeat ve TCP keepalive 30 sn (boştaki tünel kesilmesin, bildirimler gelsin)"
+	fi
+	# Seçili mod bu cihazda yoksa desteklenene geç
+	case "$(uci -q get kediray.main.capture)" in
+		mixed|tun) [ "$MIXED_OK" = 1 ] || { uci set kediray.main.capture="$CAPTURE"; uci commit kediray; } ;;
+		tproxy) [ "$TPROXY_OK" = 1 ] || { uci set kediray.main.capture="$CAPTURE"; uci commit kediray; } ;;
+	esac
+	# Yeni sürümde eklenen Metin2 sunucu IP'lerini mevcut ayara da ekle
+	if [ "$(uci -q get kediray.metin2)" = app ]; then
+		added=0
+		for ip in 79.110.80.0/20 79.110.87.192/32 79.110.92.148/32 79.110.90.244/32 79.110.90.99/32 79.110.91.96/32 79.110.91.98/32 79.110.92.117/32 79.110.92.96/32 79.110.92.97/32 79.110.92.98/32; do
+			uci -q get kediray.metin2.ip | tr ' ' '\n' | grep -qx "$ip" && continue
+			uci add_list kediray.metin2.ip="$ip"; added=$((added + 1))
+		done
+		[ $added -gt 0 ] && { uci commit kediray; ok "Metin2 listesine $added IP eklendi"; }
+	fi
+else
+	mv /tmp/kediray.default /etc/config/kediray
+	FRESH_CONF=1
+	uci set kediray.main.capture="$CAPTURE"; uci commit kediray
+	ok "Varsayılan ayarlar yazıldı (yakalama: $CAPTURE)"
+fi
+rm -rf /var/etc/kediray/core.ver
+ok "Dosyalar hazır"
+
+# Çalışan başka servislerle port çakışması olmasın: dolu portları atla
+port_used() {
+	local hex f
+	hex=$(printf ':%04X' "$1")
+	for f in /proc/net/tcp /proc/net/tcp6 /proc/net/udp /proc/net/udp6; do
+		[ -r "$f" ] || continue
+		awk -v p="$hex" 'FNR > 1 && substr($2, length($2) - 4) == p { f = 1 } END { exit !f }' "$f" && return 0
+	done
+	return 1
+}
+range_used() { # başlangıç adet
+	local i=0
+	while [ $i -lt "$2" ]; do port_used $(($1 + i)) && return 0; i=$((i + 1)); done
+	return 1
+}
+TAKEN=""
+for pair in tproxy_port:12345 dns_port:5353 socks_port:1080 api_port:10085; do
+	opt=${pair%%:*}; def=${pair#*:}
+	cur=$(uci -q get "kediray.main.$opt"); cur=${cur:-$def}
+	p=$cur
+	while port_used "$p" || echo " $TAKEN " | grep -q " $p "; do p=$((p + 1)); done
+	TAKEN="$TAKEN $p"
+	if [ "$p" != "$cur" ]; then uci set "kediray.main.$opt=$p"; ok "$opt: $cur dolu, $p seçildi"; fi
+done
+tb=$(uci -q get kediray.main.test_base); tb=${tb:-21000}
+while range_used $((tb + 1)) 64; do tb=$((tb + 100)); done
+[ "$tb" != 21000 ] && uci set kediray.main.test_base="$tb"
+[ "$KEEP_OTHER" = 1 ] && uci set kediray.main.enabled=0
+uci commit kediray
+ok "Portlar: TPROXY $(uci -q get kediray.main.tproxy_port) · DNS $(uci -q get kediray.main.dns_port) · SOCKS $(uci -q get kediray.main.socks_port) · API $(uci -q get kediray.main.api_port)"
+
+# ---------------------------------------------------------------- 5. Xray çekirdeği
+step "Xray çekirdeği"
+CORE_BIN=$(/usr/bin/kediray corebin 2>/dev/null)
+CORE_CUR=""
+[ -n "$CORE_BIN" ] && [ -x "$CORE_BIN" ] && CORE_CUR=$("$CORE_BIN" version 2>/dev/null | head -n1)
+CORE_ASSET=$(/usr/bin/kediray assetdir 2>/dev/null)
+core_ok=0
+if [ "$FORCE_CORE" != 1 ] && [ -n "$CORE_CUR" ] && [ -n "$CORE_ASSET" ]; then
+	# istenen sürüm zaten kuruluysa (ya da "latest" istendiyse) indirme yapma
+	if [ "$CORE_VER" = latest ]; then core_ok=1
+	else case "$CORE_CUR" in *"${CORE_VER#v}"*) core_ok=1 ;; esac; fi
+fi
+if [ "$core_ok" = 1 ]; then
+	ok "zaten kurulu, indirme atlandı: $CORE_CUR"
+	ok "coğrafi veriler: $CORE_ASSET  (güncellemek için: kediray update-geo)"
+elif /usr/bin/kediray update-core "$CORE_VER"; then
+	ok "Xray kuruldu"
+else
+	warn "GitHub'dan indirilemedi, paket deposu deneniyor"
+	if [ -n "$CORE_CUR" ]; then
+		ok "mevcut çekirdek korundu: $CORE_CUR"
+	else
+		pkg_add xray-core && ok "xray-core (paket)" || die "Xray kurulamadı. İnternet/GitHub erişimini kontrol et ya da --gh-proxy kullan."
+	fi
+	[ -n "$CORE_ASSET" ] || pkg_add v2ray-geoip v2ray-geosite >/dev/null 2>&1 || warn "geoip/geosite paketi kurulamadı: kediray update-geo"
+fi
+
+# Coğrafi veri (geoip/geosite): kurallar geosite:whatsapp gibi kayıtları kullanır, dosya yoksa Xray hiç başlamaz.
+# Sırayla: GitHub'dan indir -> paket deposu -> sistemde zaten olan (xDivine-Ray vb.) dosyaları bağla.
+geo_have() { local d; d=$(/usr/bin/kediray assetdir 2>/dev/null); [ -s "$d/geoip.dat" ] && [ -s "$d/geosite.dat" ]; }
+if ! geo_have; then
+	warn "geoip/geosite eksik, tamamlanıyor"
+	mkdir -p /usr/share/kediray
+	/usr/bin/kediray update-geo >/dev/null 2>&1 || true
+	geo_have || { pkg_add v2ray-geoip v2ray-geosite >/dev/null 2>&1 || true; }
+	if ! geo_have; then
+		GSRC=$(find /usr /opt /etc -type f -name geosite.dat -size +1k 2>/dev/null | head -n1)
+		if [ -n "$GSRC" ] && [ -s "$(dirname "$GSRC")/geoip.dat" ]; then
+			ln -sf "$GSRC" /usr/share/kediray/geosite.dat
+			ln -sf "$(dirname "$GSRC")/geoip.dat" /usr/share/kediray/geoip.dat
+			ok "mevcut coğrafi veri bağlandı: $(dirname "$GSRC")"
+		fi
+	fi
+	geo_have && ok "geoip/geosite hazır" || warn "geoip/geosite bulunamadı: Xray başlamayabilir. Elle: kediray update-geo"
+fi
+
+# ---------------------------------------------------------------- 6. tercihler
+step "Tercihler"
+# 1.19.11: Güncellemede (mevcut ayar dosyası varsa) uygulamaların VPN/Direkt seçimine DOKUNULMAZ.
+# Eskiden -y ile (panelden güncelleme) Metin2 ve Teams her seferinde varsayılan "Direkt"e dönüyordu.
+choose_route() { # uygulama soru varsayılan argüman
+	local v="$4" cur
+	[ "$(uci -q get "kediray.$1")" = app ] || return 0
+	cur=$(uci -q get "kediray.$1.route")
+	if [ -z "$v" ] && [ "${FRESH_CONF:-0}" != 1 ] && [ -n "$cur" ]; then
+		ok "$(uci -q get "kediray.$1.name"): mevcut seçim korundu ($([ "$cur" = vpn ] && echo VPN || echo Direkt))"
+		return 0
+	fi
+	if [ -z "$v" ]; then
+		echo
+		echo "  $2"
+		echo "    1) Direkt (bypass) — en düşük ping, VPN yeniden başlasa bile kopmaz"
+		echo "    2) VPN üzerinden"
+		ask "Seçimin (1/2)" "$3"
+		case "$REPLY" in 2|v|V|vpn|VPN) v=vpn ;; *) v=direct ;; esac
+	fi
+	uci set "kediray.$1.route=$v"
+	ok "$(uci -q get "kediray.$1.name"): $([ "$v" = vpn ] && echo VPN || echo Direkt)"
+}
+choose_route metin2 "Metin2 nasıl bağlansın?" 1 "$ARG_METIN2"
+choose_route teams "Microsoft Teams (sesli/görüntülü görüşme) nasıl bağlansın?" 1 "$ARG_TEAMS"
+if [ "$(uci -q get kediray.whatsapp)" = app ] && { [ "${FRESH_CONF:-0}" = 1 ] || [ -z "$(uci -q get kediray.whatsapp.route)" ]; }; then
+	uci set kediray.whatsapp.route=vpn
+	ok "WhatsApp: VPN"
+fi
+uci commit kediray
+
+# ---------------------------------------------------------------- lisans
+LICENSED=0
+if /usr/bin/kediray license status >/dev/null 2>&1; then
+	LICENSED=1; ok "Lisans denetimi tamam"
+else
+	LIC_ID=$(/usr/bin/kediray license id 2>/dev/null)
+	[ -n "$ARG_LICENSE" ] && /usr/bin/kediray license activate "$ARG_LICENSE"
+	if /usr/bin/kediray license status >/dev/null 2>&1; then LICENSED=1
+	else
+		warn "Lisans yok (modem IMEI: ${LIC_ID:-okunamadı}). VPN çalışmaya devam eder; ayar değişikliği için lisans gerekir."
+		if [ "$AUTO" != 1 ]; then
+			ask "Lisans anahtarı (boş bırakırsan sonra: kediray license activate <anahtar>)" ""
+			[ -n "$REPLY" ] && /usr/bin/kediray license activate "$REPLY" && LICENSED=1
+		fi
+	fi
+fi
+
+if [ "$LICENSED" != 1 ]; then
+	warn "Lisans olmadan sunucu/abonelik eklenmez (varsa mevcut sunucular çalışmaya devam eder). Lisansı girince: kediray add <link>"
+else
+[ "$IMPORT_XWRT" = 1 ] && /usr/bin/kediray import-xwrt
+
+if [ -n "$ARG_SUB" ]; then
+	uci add_list kediray.main.sub_url="$ARG_SUB"; uci commit kediray
+elif [ "$AUTO" != 1 ] && [ -z "$(uci -q get kediray.main.sub_url)" ]; then
+	echo
+	ask "Abonelik adresi (x-ui/3x-ui; yoksa boş bırak)" ""
+	[ -n "$REPLY" ] && { uci add_list kediray.main.sub_url="$REPLY"; uci commit kediray; }
+fi
+[ -n "$(uci -q get kediray.main.sub_url)" ] && /usr/bin/kediray sub
+
+if [ -n "$ARG_LINK" ]; then
+	/usr/bin/kediray add "$ARG_LINK"
+elif [ "$AUTO" != 1 ] && [ -z "$(uci show kediray 2>/dev/null | grep '=node$')" ]; then
+	echo
+	echo "  Sunucu linki yapıştır (vless://, vmess://, trojan://, ss://). Boş bırakırsan panelden eklersin."
+	echo "  (JSON eklemek için panelde 'Link / JSON ekle' butonunu kullan.)"
+	ask "Link" ""
+	[ -n "$REPLY" ] && /usr/bin/kediray add "$REPLY"
+fi
+fi
+
+# ---------------------------------------------------------------- 7. servis
+step "Servis ve arayüz etkinleştiriliyor"
+touch /etc/crontabs/root
+sed -i '/kediray watchdog/d' /etc/crontabs/root
+echo '* * * * * /usr/bin/kediray watchdog >/dev/null 2>&1' >> /etc/crontabs/root
+sed -i '/kediray update auto/d' /etc/crontabs/root
+echo '0 1 * * * /usr/bin/kediray update auto >/dev/null 2>&1' >> /etc/crontabs/root
+grep -q '/usr/bin/aw1k-usage' /etc/crontabs/root || echo '*/2 * * * * /usr/bin/aw1k-usage >/dev/null 2>&1' >> /etc/crontabs/root
+/etc/init.d/cron enable >/dev/null 2>&1
+# crond crontab değişikliğini kendisi okur; çalışıyorsa YENİDEN BAŞLATMA: gece otomatik güncelleme cron'dan başladığında
+# restart, kurulumu yarıda öldürüyordu (menü yolu/servis adımları atlanıyor, VPN bir dakika kapalı kalıyordu)
+/etc/init.d/cron running >/dev/null 2>&1 || /etc/init.d/cron start >/dev/null 2>&1
+/usr/bin/aw1k-usage >/dev/null 2>&1
+ok "Watchdog (dakikalık kontrol + abonelik güncelleme)"
+case "$(uci -q get kediray.main.capture)" in
+	mixed|tun) /usr/bin/kediray fw-zone && ok "Güvenlik duvarı bölgesi (kediray0 TUN) hazır" ;;
+esac
+
+# Eski menü kayıtlarını temizle (KediRay artık VPN menüsünde) ve LuCI önbelleğini sıfırla
+for f in /usr/share/luci/menu.d/*.json; do
+	[ "$f" = /usr/share/luci/menu.d/luci-app-kediray.json ] && continue
+	grep -q '"admin/services/kediray' "$f" 2>/dev/null && rm -f "$f"
+done
+sed -i 's#admin/services/kediray#admin/vpn/kediray#g' /usr/share/luci/menu.d/luci-app-kediray.json
+rm -f /tmp/luci-indexcache* 2>/dev/null; rm -rf /tmp/luci-modulecache 2>/dev/null
+/etc/init.d/rpcd reload >/dev/null 2>&1
+# rpcd eklentisi ilk kez/değişerek geldiyse rpcd'nin yeniden başlaması gerekir. Kurulum panelden (rpcd üzerinden) çalışıyorsa
+# rpcd'nin kendi cgroup'u altındadır: burada restart edince kurulumun kendisi de (ve rc betiğinin "başlat" adımı) ölür, rpcd
+# kapalı kalır ve girişte "İzin Gerekli" döner. O durumda istek bırakılır; cron'daki watchdog (rpcd dışında) en geç 1 dk içinde yapar.
+if [ "$AW_RESTART" = 1 ]; then
+	if grep -q rpcd /proc/$$/cgroup 2>/dev/null; then : > /tmp/kediray.rpcd-restart
+	else /etc/init.d/rpcd restart >/dev/null 2>&1; fi
+fi
+ok "LuCI menüsü: VPN → KediRay VPN (görmezsen LuCI’den çıkış yapıp tekrar gir)"
+
+rm -f /etc/rc.d/S??kediray /etc/rc.d/K??kediray 2>/dev/null   # eski sıra numarası (S99) kalmasın
+/etc/init.d/kediray enable >/dev/null 2>&1
+/usr/bin/kediray fixboot -v 2>/dev/null
+STILL=$(/usr/bin/kediray conflicts)
+if [ -n "$STILL" ] && [ "$WAS_ON" != 1 ]; then
+	uci set kediray.main.enabled=0; uci commit kediray
+	ok "KediRay kuruldu ve kapalı bekliyor ($STILL çalışmaya devam ediyor, internetin kesilmedi)"
+	if uci show kediray 2>/dev/null | grep -q '=node$'; then
+		echo "  Geçmeye hazır olunca:  kediray takeover   (ya da panelde 'Güvenli geçiş')"
+		echo "  İnternet gelmezse otomatik olarak $STILL'e geri döner."
+	else
+		echo "  Önce panelden sunucu ekle, sonra 'Güvenli geçiş' butonuna bas."
+	fi
+elif [ "$PREV_CONF" = 1 ] && [ "$PREV_ENABLED" != 1 ]; then
+	ok "KediRay güncellendi; VPN daha önce kapalıydı, kapalı bırakıldı (açmak için Ayarlar → VPN açık)"
+elif uci show kediray 2>/dev/null | grep -q '=node$'; then
+	uci set kediray.main.enabled=1; uci commit kediray
+	# procd servis kayıtlı değilken zararsız bir "Command failed: Not found" yazar; süz
+	/etc/init.d/kediray restart 2>&1 | grep -v '^Command failed: Not found$'
+	sleep 4
+	if /usr/bin/kediray status --json | grep -q '"running": *true'; then
+		ok "VPN çalışıyor"
+		/usr/bin/kediray ping all >/dev/null 2>&1
+		/usr/bin/kediray check
+	else
+		warn "VPN başlamadı. Ayrıntı: kediray log"
+	fi
+else
+	warn "Henüz sunucu yok; panelden ekleyince 'Başlat'a bas."
+fi
+
+LANIP=$(uci -q get network.lan.ipaddr | cut -d/ -f1)
+printf "\n${C_G}KediRay %s kuruldu.${C_0}\n" "$KR_VERSION"
+echo "  Panel : http://${LANIP:-192.168.1.1}/cgi-bin/luci/admin/vpn/kediray"
+echo "  Komut : kediray help"
+echo
+if [ "${LICENSED:-0}" != 1 ]; then
+	printf "${C_Y}Lisans gerekli.${C_0} VPN çalışmaya devam eder; ayar değişikliği için lisans gir.\n"
+	echo "  Modem IMEI    : $(/usr/bin/kediray license id 2>/dev/null || echo okunamadı)"
+	echo "  Etkinleştir   : kediray license activate <anahtar>   (panel: Hakkında → Lisans)"
+	echo
+fi

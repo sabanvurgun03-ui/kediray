@@ -1,0 +1,3193 @@
+#!/bin/sh
+# KediRay - OpenWrt için Xray tabanlı akıllı VPN yöneticisi
+# Kullanım: kediray help
+
+CONF=kediray
+SHARE=/usr/share/kediray
+RUN=/var/etc/kediray
+# Soket işaretleri ve yönlendirme tabloları (xDivine'dan farklı değerler: ikisi aynı cihazda çakışmasın)
+MARK_CORE=0x2e0   # Xray'in kendi bağlantıları
+MARK_TP=0x2e1     # tproxy modu
+MARK_TUN=0x2e2    # mixed modda TUN'a gidecek UDP
+TABLE_TP=107; PREF_TP=107
+TABLE_TUN=108; PREF_CORE=1071; PREF_TUN=1072
+TUN_DEV=kediray0
+TUN_ADDR=198.19.0.1
+T="$(printf '\t')"
+export KR_RUN="$RUN" KR_SHARE="$SHARE"
+
+uget() { uci -q get "$CONF.$1"; }
+# Günlük önem seviyeleri (panelde Hata / Uyarı / Bilgi olarak ayrılır)
+log() { logger -t kediray -p daemon.info "$*"; }
+say() { echo "$*" >&2; logger -t kediray -p daemon.warn "$*"; }      # uyarı
+sayerr() { echo "$*" >&2; logger -t kediray -p daemon.err "$*"; }    # hata
+
+api_addr() { echo "127.0.0.1:$(uget main.api_port || echo 10085)"; }
+tp_port() { uget main.tproxy_port || echo 12345; }
+
+corebin() {
+	local c
+	for c in "$(uget main.xray_bin)" "$SHARE/bin/xray" /usr/bin/xray; do
+		[ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return 0; }
+	done
+	return 1
+}
+
+assetdir() {
+	local d
+	for d in "$SHARE" /usr/share/xray /usr/share/v2ray; do
+		[ -s "$d/geoip.dat" ] && [ -s "$d/geosite.dat" ] && { echo "$d"; return 0; }
+	done
+	echo "$SHARE"
+}
+
+xr() { XRAY_LOCATION_ASSET="$(assetdir)" "$(corebin)" "$@"; }
+
+running() {
+	ubus call service list '{"name":"kediray"}' 2>/dev/null | jsonfilter -e '@.kediray.instances.xray.running' 2>/dev/null | grep -q true
+}
+
+lan_ifs() {
+	local out="" dev n
+	. /lib/functions/network.sh
+	for n in $(uget main.lan); do
+		dev=""
+		network_get_device dev "$n" 2>/dev/null
+		[ -n "$dev" ] || network_get_physdev dev "$n" 2>/dev/null
+		[ -n "$dev" ] && out="$out $dev"
+	done
+	[ -n "$out" ] || out="br-lan"
+	echo $out
+}
+
+resolve4() {
+	case "$1" in
+		*[!0-9.]*) ;;
+		*) echo "$1"; return 0 ;;
+	esac
+	nslookup "$1" "$(uget main.dns_bootstrap || echo 1.1.1.1)" 2>/dev/null | awk '
+		/^Name:/ { f = 1 }
+		f && /^Address/ { for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { print $i; exit } }'
+}
+
+# procd, servis kayıtlı değilken (ilk kurulum, kapalıyken restart) stderr'e
+# "Command failed: Not found" yazar; hata değildir, kullanıcıyı korkutmasın diye süzülür.
+svc() { # <start|stop|restart|enable|disable|reload>
+	/etc/init.d/kediray "$1" 2>&1 | grep -v '^Command failed: Not found$' >&2
+	return 0
+}
+
+with_lock() {
+	if command -v lock >/dev/null 2>&1; then
+		lock /var/lock/kediray.lock
+		"$@"; local rc=$?
+		lock -u /var/lock/kediray.lock
+		return $rc
+	fi
+	"$@"
+}
+
+# ---------- sertifika sabitleme (Xray 26'da allowInsecure yerine) ----------
+# Sunucunun sunduğu sertifikayı al (doğrulama yapmadan) — xDivine-Ray'in fetch-cert yaklaşımı
+run_to() { # <saniye> komut...  (busybox'ta timeout olmasa da çalışır)
+	local s="$1" p w rc
+	shift
+	if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"; return; fi
+	"$@" &
+	p=$!
+	( sleep "$s"; kill "$p" 2>/dev/null ) &
+	w=$!
+	wait "$p"; rc=$?
+	kill "$w" 2>/dev/null
+	return $rc
+}
+cert_pem() { # ip port sni
+	command -v openssl >/dev/null 2>&1 || return 1
+	echo | run_to 8 openssl s_client -connect "$1:$2" -servername "$3" 2>/dev/null | openssl x509 2>/dev/null
+}
+
+# Çekirdek allowInsecure'ü hâlâ tanıyor mu? (Xray 26'da kaldırıldı.) xDivine gibi gerçek bir testle öğrenilir.
+cap_insecure() {
+	local ver f
+	ver=$(xr version 2>/dev/null | awk 'NR==1{print $2}')
+	f="/etc/kediray.cap.$ver"   # kalıcı (flash): açılışta her seferinde Xray testi yapılmasın
+	if [ ! -f "$f" ]; then
+		mkdir -p "$RUN"
+		rm -f /etc/kediray.cap.* 2>/dev/null
+		printf '%s' '{"inbounds":[],"outbounds":[{"protocol":"vless","settings":{"vnext":[{"address":"probe.invalid","port":443,"users":[{"id":"b831381d-6324-4d53-ad4f-8cda48b30811","encryption":"none"}]}]},"streamSettings":{"network":"tcp","security":"tls","tlsSettings":{"serverName":"a.com","allowInsecure":true}}}]}' > "$RUN/cap.json"
+		if xr run -test -c "$RUN/cap.json" 2>&1 | grep -q 'Configuration OK'; then echo 1 > "$f"; else echo 0 > "$f"; fi
+		rm -f "$RUN/cap.json"
+	fi
+	[ "$(cat "$f")" = 1 ]
+}
+
+hevbin() {
+	local h
+	for h in "$(uget main.hev_bin)" "$(command -v hev-socks5-tunnel 2>/dev/null)" /usr/bin/hev-socks5-tunnel; do
+		[ -n "$h" ] && [ -x "$h" ] && { echo "$h"; return 0; }
+	done
+	return 1
+}
+
+# Seçilen yakalama modu bu cihazda çalışabilir mi? Çalışamıyorsa en yakınına düş.
+capture_eff() {
+	local c
+	c=$(uget main.capture); c=${c:-mixed}
+	case "$c" in mixed|tun)
+		if ! hevbin >/dev/null || [ ! -c /dev/net/tun ]; then
+			[ -f "$RUN/capture.warned" ] || { say "$c modu için hev-socks5-tunnel/kmod-tun yok; tproxy moduna geçildi (kur: apk add hev-socks5-tunnel kmod-tun)"; touch "$RUN/capture.warned"; }
+			c=tproxy
+		fi ;;
+	esac
+	echo "$c"
+}
+cert_hash() { # ip port sni -> yaprak sertifikanın SHA-256'sı (Xray'in pinnedPeerCertSha256 biçimi)
+	cert_pem "$@" | openssl x509 -outform DER 2>/dev/null | sha256sum | awk '{print $1}' | grep -E '^[0-9a-f]{64}$'
+}
+
+# allowInsecure (doğrulanmayan sertifika) kullanan sunucular: her başlangıçta sunucunun sertifikasını
+# yeniden oku; değiştiyse yenisini sabitle (sunucu zaten doğrulanmıyor, amaç tüneli ayakta tutmak).
+pin_nodes() { # [force|<bölüm>]
+	local tag sec tp addr port proto net insecure sni pin name ip h changed=0
+	[ -s "$RUN/nodes.tsv" ] || return 0
+	[ "$(uget main.pin_refresh)" = 0 ] && [ -z "$1" ] && return 0
+	# xDivine gibi: çekirdek allowInsecure'ü hâlâ destekliyorsa sabitlemeye gerek yok
+	[ -z "$1" ] && cap_insecure && return 0
+	while IFS="$T" read -r tag sec tp addr port proto net insecure sni pin name; do
+		[ "$insecure" = 1 ] || continue
+		case "$1" in ""|force) ;; *) [ "$1" = "$sec" ] || continue ;; esac
+		: > "$RUN/pin.seen"
+		ip=$(resolve4 "$addr")
+		[ -n "$ip" ] || { say "$name: adres çözülemedi, sertifika okunamadı"; echo "$name: adres çözülemedi, sertifika okunamadı" >> "$RUN/pin.out"; : > "$RUN/pin.fail"; continue; }
+		h=$(cert_hash "$ip" "$port" "$sni")
+		if [ -z "$h" ]; then
+			if [ "$pin" = "-" ]; then
+				sayerr "$name: sertifika alınamadı ve daha önce sabitlenmemiş; bu sunucu bağlanamaz (openssl-util kurulu mu? sunucu açık mı?)"
+			else
+				log "$name: sertifika şu an okunamadı, kayıtlı sabitleme kullanılıyor"
+			fi
+			echo "$name: sertifika okunamadı (sunucu kapalı ya da openssl-util yok)" >> "$RUN/pin.out"
+			: > "$RUN/pin.fail"
+			continue
+		fi
+		if [ "$h" = "$pin" ]; then echo "$name: sertifika zaten sabit" >> "$RUN/pin.out"; continue; fi
+		uci -q set "$CONF.$sec.pin=$h"
+		changed=1
+		: > "$RUN/pin.chg"
+		if [ "$pin" = "-" ]; then log "$name: sertifika sabitlendi ($(echo "$h" | cut -c1-12)…)"; echo "$name: sertifika sabitlendi" >> "$RUN/pin.out"
+		else log "$name: sunucunun sertifikası değişmiş, yenisi sabitlendi ($(echo "$pin" | cut -c1-12)… -> $(echo "$h" | cut -c1-12)…)"; echo "$name: sunucunun sertifikası değişmişti, yenisi sabitlendi" >> "$RUN/pin.out"; fi
+	done < "$RUN/nodes.tsv"
+	[ "$changed" = 1 ] && uci -q commit "$CONF"
+	return 0
+}
+
+# Elle sabitleme (panelde "Sertifikayı sabitle"): sunucunun şu anki sertifikasını okuyup sabitler.
+# Sertifika değiştiyse tüneli yeniden başlatır (internet kesildiyse düzelir); değişmediyse dokunmaz.
+cmd_pin() { # [force|<bölüm>]
+	mkdir -p "$RUN"
+	rm -f "$RUN/pin.out" "$RUN/pin.chg" "$RUN/pin.seen" "$RUN/pin.fail"
+	pin_nodes "${1:-force}"
+	if [ ! -e "$RUN/pin.seen" ]; then
+		echo "Sertifikası doğrulanmayan (allowInsecure) sunucu yok; sabitlenecek bir şey yok."
+		return 0
+	fi
+	cat "$RUN/pin.out" 2>/dev/null
+	if [ -e "$RUN/pin.chg" ]; then
+		if [ "$(uget main.enabled)" = 1 ]; then echo "Tünel yeniden başlatılıyor…"; /etc/init.d/kediray restart; fi
+	elif [ ! -e "$RUN/pin.fail" ]; then
+		echo "Sertifika değişmemiş; internet gitmişse sorun sertifikadan değil."
+	fi
+	[ ! -e "$RUN/pin.fail" ] || [ -e "$RUN/pin.chg" ]
+}
+
+cmd_cert() { # <bölüm> [--json]  sunucunun sertifikasını göster
+	local sec="$1" tag s tp addr port proto net insecure sni pin name ip pem subj iss nb na h trusted=0
+	[ -s "$RUN/nodes.tsv" ] || ucode "$SHARE/gen.uc" nodes > "$RUN/nodes.tsv" 2>/dev/null
+	while IFS="$T" read -r tag s tp addr port proto net insecure sni pin name; do
+		[ "$s" = "$sec" ] && break
+	done < "$RUN/nodes.tsv"
+	[ "$s" = "$sec" ] || { echo '{"ok":false,"msg":"sunucu bulunamadı"}'; return 1; }
+	command -v openssl >/dev/null 2>&1 || { echo '{"ok":false,"msg":"openssl-util kurulu değil (apk add openssl-util)"}'; return 1; }
+	ip=$(resolve4 "$addr")
+	pem=$(cert_pem "${ip:-$addr}" "$port" "$sni")
+	[ -n "$pem" ] || { printf '{"ok":false,"msg":"%s:%s adresinden sertifika alınamadı (TLS yok ya da sunucu kapalı)"}\n' "${ip:-$addr}" "$port"; return 1; }
+	subj=$(echo "$pem" | openssl x509 -noout -subject 2>/dev/null | sed 's/^subject= *//')
+	iss=$(echo "$pem" | openssl x509 -noout -issuer 2>/dev/null | sed 's/^issuer= *//')
+	nb=$(echo "$pem" | openssl x509 -noout -startdate 2>/dev/null | cut -d= -f2)
+	na=$(echo "$pem" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+	h=$(echo "$pem" | openssl x509 -outform DER 2>/dev/null | sha256sum | awk '{print $1}')
+	echo | openssl s_client -connect "${ip:-$addr}:$port" -servername "$sni" 2>/dev/null | grep -q "Verify return code: 0 " && trusted=1
+	KR_J_SUBJ="$subj" KR_J_ISS="$iss" KR_J_NB="$nb" KR_J_NA="$na" KR_J_H="$h" KR_J_PIN="$pin" KR_J_SNI="$sni" \
+	KR_J_EP="${ip:-$addr}:$port" KR_J_INS="$insecure" KR_J_TR="$trusted" KR_J_NAME="$name" ucode -e '
+		let g = getenv;
+		print(sprintf("%J\n", { ok: true, name: g("KR_J_NAME"), endpoint: g("KR_J_EP"), sni: g("KR_J_SNI"), subject: g("KR_J_SUBJ"),
+			issuer: g("KR_J_ISS"), not_before: g("KR_J_NB"), not_after: g("KR_J_NA"), sha256: g("KR_J_H"),
+			pinned: g("KR_J_PIN") != "-" ? g("KR_J_PIN") : null, pin_match: g("KR_J_PIN") == g("KR_J_H"),
+			insecure: g("KR_J_INS") == "1", trusted: g("KR_J_TR") == "1" }));'
+}
+
+# ---------- modemin kendi trafiği (apk, curl...) -> VPN (1.17.3: tünel doğrulanınca açılır) ----------
+# Neden ayrı tablo: modem açılırken tünel henüz hazır değilken modemin kendi bağlantıları (hücresel modem
+# denetimleri, saat, güncelleme...) tünele yönlenirse takılıyor ve internet geç geliyordu. Artık yalnızca
+# tünelden gerçek bir istek geçtikten sonra eklenir; tünel iki kontrol üst üste başarısız olursa kalkar.
+mvpn_wanted() { # modem_vpn açık ve yakalama modu uygun mu
+	[ "$(uget main.modem_vpn)" != 0 ] || return 1
+	case "$(cat "$RUN/capture" 2>/dev/null)" in mixed|redirect) return 0 ;; esac
+	return 1
+}
+mvpn_on() { nft list table inet kediray_out >/dev/null 2>&1; }
+mvpn_down() { nft delete table inet kediray_out 2>/dev/null; rm -f "$RUN/mvpn.bad"; return 0; }
+mvpn_up() {
+	local srv tp
+	srv=$(tr ' ' ',' < "$RUN/server_ips" 2>/dev/null | sed 's/^,*//; s/,*$//; s/,,*/,/g')
+	tp=$(uget main.tproxy_port); tp=${tp:-12345}
+	nft -f - <<EOF 2>/dev/null
+table inet kediray_out {
+	chain nat_out {
+		type nat hook output priority -105; policy accept;
+		meta nfproto != ipv4 return
+		meta l4proto != tcp return
+		meta mark $MARK_CORE return
+		fib daddr type { local, broadcast, multicast } return
+		ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4${srv:+, $srv} } return
+		ip daddr { 1.1.1.1, 1.0.0.1, 8.8.8.8, 8.8.4.4, 9.9.9.9 } tcp dport { 443, 5053 } return
+		meta l4proto tcp redirect to :$tp
+	}
+}
+EOF
+}
+mvpn_watch() { # watchdog her dakika çağırır
+	local sp
+	if ! mvpn_wanted; then mvpn_on && mvpn_down; return 0; fi
+	sp=$(uget main.socks_port); sp=${sp:-10808}
+	if curl -s -m 6 -o /dev/null --noproxy '' -x "socks5h://127.0.0.1:$sp" "https://www.gstatic.com/generate_204" 2>/dev/null; then
+		rm -f "$RUN/mvpn.bad"
+		mvpn_on || { mvpn_up && log "modemin kendi trafiği de VPN'e alındı (tünel doğrulandı)"; }
+	else
+		if mvpn_on; then
+			if [ -f "$RUN/mvpn.bad" ]; then mvpn_down; log "tünel yanıt vermiyor: modemin kendi trafiği geçici olarak direkt bırakıldı"
+			else : > "$RUN/mvpn.bad"; fi
+		fi
+	fi
+	return 0
+}
+
+# ---------- direkt (VPN'siz) çıkış denetimi (1.17) ----------
+# Modemin kendi çıkışı çalışmıyorsa (ör. paketsiz hat) "direkt" giden her şey (Metin2, Teams,
+# kullanıcı kuralları, direkt cihazlar) kendiliğinden VPN'e alınır. Hat düzelince eski yollar geri gelir.
+# Kapatmak için: uci set kediray.main.auto_direct=0
+direct_probe() { # 0: direkt çıkış var, 1: yok (üç yoldan hiçbiri açılmıyor)
+	local d="$RUN/dp.$$" i
+	mkdir -p "$d"
+	( p_tcp 1.1.1.1 443 && : > "$d/a" ) >/dev/null 2>&1 &
+	( p_tcp 8.8.8.8 443 && : > "$d/b" ) >/dev/null 2>&1 &
+	( p_tcp 9.9.9.9 443 && : > "$d/c" ) >/dev/null 2>&1 &
+	wait
+	i=1
+	if [ -e "$d/a" ] || [ -e "$d/b" ] || [ -e "$d/c" ]; then i=0; fi
+	rm -rf "$d"
+	return $i
+}
+direct_auto() { [ "$(uget main.auto_direct)" != 0 ]; }
+direct_state() { # ok|dead  (önbellek; yoksa bir kez yoklar)
+	# Önbellek yoksa (modem yeni açıldı) yoklama yapıp açılışı geciktirme: "yok" varsay (her şey VPN'den çıkar),
+	# watchdog birkaç dakika içinde gerçek durumu ölçer
+	[ -s "$RUN/direct" ] || { mkdir -p "$RUN"; echo dead > "$RUN/direct"; }
+	cat "$RUN/direct"
+}
+direct_watch() { # dakikada bir: iki ardışık aynı sonuç gelirse durumu değiştir ve uygula (titremeyi önler)
+	local new cur
+	# Ölçüm otomatik VPN'e çevirme kapalıyken de sürer: bildirim düzeltmesi (FCM direkt) hat gerçekten direkt çıkabiliyorsa açılır
+	if direct_probe; then new=ok; else new=dead; fi
+	cur=$(cat "$RUN/direct" 2>/dev/null)
+	if [ -z "$cur" ]; then echo "$new" > "$RUN/direct"; rm -f "$RUN/direct.cand"; return 0; fi
+	if [ "$new" = "$cur" ]; then rm -f "$RUN/direct.cand"; return 0; fi
+	if [ "$(cat "$RUN/direct.cand" 2>/dev/null)" = "$new" ]; then
+		echo "$new" > "$RUN/direct"; rm -f "$RUN/direct.cand"
+		if [ "$new" = dead ]; then log "direkt çıkış yok: direkt giden her şey VPN'e alınıyor"
+		else log "direkt çıkış geri geldi: uygulama yolları eski haline dönüyor"; fi
+		apply_changes
+	else
+		echo "$new" > "$RUN/direct.cand"
+	fi
+}
+cmd_fixboot() { # QModem açılışta USB kök hub'larını (usbN) modem diye deniyor ve açılışı ~40 sn geciktiriyor; hub'ları atla
+	local f=/usr/share/qmodem/modem_scan.sh t
+	[ -f "$f" ] || return 0
+	if grep -q 'kediray-hubfix' "$f"; then [ "$1" = -v ] && echo "QModem hub yaması zaten var"; return 0; fi
+	grep -q '^    add)$' "$f" || { [ "$1" = -v ] && echo "modem_scan.sh beklenen yapıda değil, dokunulmadı"; return 0; }
+	[ -f /root/modem_scan.sh.kediray.bak ] || cp "$f" /root/modem_scan.sh.kediray.bak 2>/dev/null
+	t=/tmp/modem_scan.fix.$$
+	awk '{ print } /^    add\)$/ && !d { print "        case \"$config\" in usb[0-9]*) exit 0 ;; esac # kediray-hubfix"; d = 1 }' "$f" > "$t" \
+		&& sh -n "$t" && cat "$t" > "$f" \
+		&& { logger -t kediray "QModem hub yaması uygulandı (sonraki açılış hızlanır)"; [ "$1" = -v ] && echo "QModem hub yaması uygulandı"; }
+	rm -f "$t"
+	return 0
+}
+# Kurulum gerçekten çalışıyor mu? Kurulum yarıda ölürse (ör. rpcd yeniden başlarken) bitiş dosyası (.rc) hiç yazılmaz;
+# yalnızca log dosyasına bakmak 15 dk boyunca yanlış "güncelleme sürüyor" dedirtiyordu. Çalışan işlem aranır;
+# işlem listesi okunamazsa ya da kurulum henüz başlıyorsa log'un son 1 dk içinde yazılmış olması da "çalışıyor" sayılır.
+upd_alive() { # /proc taranır (ps seçenekleri BusyBox/procps arasında değişiyor)
+	local d
+	for d in /proc/[0-9]*; do
+		[ "$d" = "/proc/$$" ] && continue
+		tr '\0' ' ' < "$d/cmdline" 2>/dev/null | grep -q 'kediray-update\.run\.sh' && return 0
+	done
+	return 1
+}
+upd_busy() {
+	[ -f /tmp/kediray-update.log ] && [ ! -f /tmp/kediray-update.rc ] || return 1
+	upd_alive && return 0
+	[ -n "$(find /tmp/kediray-update.log -mmin -1 2>/dev/null)" ]
+}
+cmd_selfupdate() { # <dosya> | log  — panelden yüklenen kurulum dosyasıyla kendini günceller
+	local f="${1:-}" ver
+	if [ "$f" = log ]; then
+		if [ -f /tmp/kediray-update.rc ]; then echo "DONE $(cat /tmp/kediray-update.rc)"
+		elif upd_busy; then echo RUNNING
+		else echo "DONE 1"; fi
+		echo "STEPS $(grep -c '^==> ' /tmp/kediray-update.log 2>/dev/null)|$(grep '^==> ' /tmp/kediray-update.log 2>/dev/null | tail -n 1 | sed 's/^==> //')"
+		tail -n 80 /tmp/kediray-update.log 2>/dev/null
+		return 0
+	fi
+	[ -f "$f" ] || { echo "Dosya bulunamadı: $f"; return 1; }
+	# Başka bir kurulum sürüyorsa ikincisini başlatma (sık denetimde ya da çift tıklamada iki kurulum üst üste biniyordu)
+	if upd_busy; then
+		echo "Bir güncelleme zaten sürüyor; bitmesini bekle."; rm -f "$f"; return 1
+	fi
+	head -c 600 "$f" | grep -q 'KediRay' && grep -q '^KR_VERSION="' "$f" || { echo "Bu dosya bir KediRay kurulum dosyası gibi görünmüyor."; return 1; }
+	sh -n "$f" 2>/dev/null || { echo "Dosyada sözdizimi hatası var (yükleme yarım kalmış olabilir). Yeniden dene."; return 1; }
+	ver=$(sed -n 's/^KR_VERSION="\(.*\)"/\1/p' "$f" | head -1)
+	rm -f /tmp/kediray-update.rc /tmp/kediray-update.log
+	cp "$f" /tmp/kediray-update.run.sh 2>/dev/null && rm -f "$f"
+	echo "Kurulum başlatıldı: $(kr_version) -> $ver"
+	( $(command -v setsid) sh -c 'sh /tmp/kediray-update.run.sh -y; echo $? > /tmp/kediray-update.rc; rm -f /tmp/kediray-update.run.sh' >/tmp/kediray-update.log 2>&1 </dev/null & )   # setsid varsa panel servisi yeniden başlasa da kurulum yaşar; nohup BusyBox'ta yok
+	return 0
+}
+
+# ---- GitHub'dan güncelleme: kediray update check [--json] | install -----------------------------------
+# Depo: uci kediray.main.update_repo (varsayılan sabanvurgun03-ui/kediray), dal: update_branch (main).
+# Sürüm numarası depodaki VERSION dosyasından okunur; kurulum dosyası o sürümün GitHub Release'inden (v<sürüm>)
+# indirilir ve release'teki sha256sums ile doğrulanır. sha256sums yoksa ya da uyuşmazsa kurulmaz.
+UPD_REPO_DEF="sabanvurgun03-ui/kediray"
+upd_base() {
+	local r b
+	r=$(uget main.update_repo); r=${r:-$UPD_REPO_DEF}
+	b=$(uget main.update_branch); b=${b:-main}
+	echo "https://raw.githubusercontent.com/$r/$b"
+}
+upd_rel() { # sürüm -> release indirme adresi
+	local r; r=$(uget main.update_repo); r=${r:-$UPD_REPO_DEF}
+	echo "https://github.com/$r/releases/download/v$1"
+}
+upd_sum() { # sürüm dosya_adı -> release'in sha256sums dosyasından o dosyanın SHA256'sı (yoksa hata)
+	local f="/tmp/kediray-upd.$$.sums" out
+	ufetch "$(upd_rel "$1")/sha256sums" "$f" 10 || { rm -f "$f"; return 1; }
+	out=$(awk -v n="$2" '{ g=$2; sub(/^\*/, "", g); if (g == n) { print $1; exit } }' "$f")
+	rm -f "$f"
+	echo "$out" | grep -Eq '^[0-9a-f]{64}$' || return 1
+	echo "$out"
+}
+ver_gt() { # a b -> a, b'den yeni mi (1.19.36 > 1.19.9)
+	awk -v a="$1" -v b="$2" 'BEGIN { na = split(a, x, "."); nb = split(b, y, "."); n = (na > nb ? na : nb)
+		for (i = 1; i <= n; i++) { p = x[i] + 0; q = y[i] + 0; if (p > q) exit 0; if (p < q) exit 1 } exit 1 }'
+}
+upd_json() { # ok latest cur newer [hata] [denetim_zamanı(epoch)] [kaynak: manual|auto]
+	local extra=""
+	[ -n "$6" ] && extra=",\"checked\":$6,\"src\":\"${7:-manual}\""
+	printf '{"ok":%s,"current":"%s","latest":"%s","newer":%s,"error":"%s"%s}\n' "$1" "$3" "$2" "$4" "$5" "$extra"
+}
+UPD_CACHE=/etc/kediray.upd.json   # günde bir kez yazılır; yeniden başlatmada kaybolmasın
+UPD_LAST=/tmp/kediray.upd.last    # son başarılı denetim: "epoch|kaynak|en_son_sürüm" (RAM'de; flash'ı yıpratmaz)
+cmd_update() { # check [--json] | install | auto | cached
+	case "$1" in
+		auto) # cron: günde bir kez sessizce denetle (update_check=0 ise yapmaz); sonuç önbelleğe yazılır
+			[ "$(uget main.update_check)" = 0 ] && { rm -f "$UPD_CACHE"; return 0; }
+			KR_UPD_SRC=auto cmd_update check --json > "$UPD_CACHE.$$" 2>/dev/null && mv "$UPD_CACHE.$$" "$UPD_CACHE" || { rm -f "$UPD_CACHE.$$"; return 0; }
+			# "Otomatik kur" işaretliyse ve yeni sürüm varsa kur (indirme SHA256 ile doğrulanır; hata olursa mevcut sürüm kalır)
+			if [ "$(uget main.update_auto_install)" = 1 ] && grep -q '"newer":true' "$UPD_CACHE"; then
+				logger -t kediray "otomatik güncelleme başlıyor: $(sed -n 's/.*"latest":"\([0-9.]*\)".*/\1/p' "$UPD_CACHE")"
+				cmd_update install 2>&1 | logger -t kediray
+			fi
+			return 0 ;;
+		cached) # panel: son denetimin sonucu — elle ya da otomatik, hangisi daha yeniyse (yoksa boş)
+			local latest cur ts src
+			[ "$(uget main.update_check)" = 0 ] && return 0
+			if [ -s "$UPD_LAST" ]; then
+				# RAM'deki kayıt (elle denetim de buraya yazar)
+				ts=$(cut -d'|' -f1 "$UPD_LAST"); src=$(cut -d'|' -f2 "$UPD_LAST"); latest=$(cut -d'|' -f3 "$UPD_LAST")
+			elif [ -s "$UPD_CACHE" ]; then
+				# yeniden başlatma sonrası: günlük otomatik denetimin önbelleği
+				latest=$(sed -n 's/.*"latest":"\([0-9.]*\)".*/\1/p' "$UPD_CACHE" | head -n1)
+				ts=$(sed -n 's/.*"checked":\([0-9]*\).*/\1/p' "$UPD_CACHE" | head -n1)
+				src=$(sed -n 's/.*"src":"\([a-z]*\)".*/\1/p' "$UPD_CACHE" | head -n1)
+			else
+				return 0
+			fi
+			[ -n "$latest" ] || return 0
+			cur=$(kr_version)
+			# kayıttaki "en son" sürümü şimdiki sürümle yeniden karşılaştır (güncelledikten sonra bayat uyarı kalmasın)
+			if ver_gt "$latest" "$cur"; then upd_json true "$latest" "$cur" true "" "$ts" "$src"; else upd_json true "$latest" "$cur" false "" "$ts" "$src"; fi
+			return 0 ;;
+	esac
+	local act="${1:-check}" js=0 base cur latest t="/tmp/kediray-upd.$$" sum got ver
+	[ "$2" = --json ] || [ "$1" = --json ] && js=1
+	[ "$act" = --json ] && act=check
+	cur=$(kr_version); base=$(upd_base)
+	mkdir -p /tmp
+	if ! ufetch "$base/VERSION?t=$(date +%s)" "$t.v" 7; then
+		rm -f "$t.v"
+		[ $js = 1 ] && upd_json false "" "$cur" false "GitHub'a ulaşılamadı" || echo "GitHub'a ulaşılamadı: $base"
+		return 1
+	fi
+	latest=$(tr -cd '0-9.' < "$t.v" | head -c 20); rm -f "$t.v"
+	[ -n "$latest" ] || { [ $js = 1 ] && upd_json false "" "$cur" false "VERSION okunamadı" || echo "VERSION dosyası okunamadı"; return 1; }
+	case "$act" in
+		check)
+			local now src="${KR_UPD_SRC:-manual}"
+			now=$(date +%s)
+			printf '%s|%s|%s\n' "$now" "$src" "$latest" > "$UPD_LAST" 2>/dev/null
+			if ver_gt "$latest" "$cur"; then
+				# VERSION duyurdu ama release (sha256sums) henüz yayınlanmadıysa "yeni sürüm var" deme
+				if upd_sum "$latest" kediray-install.sh >/dev/null; then
+					[ $js = 1 ] && upd_json true "$latest" "$cur" true "" "$now" "$src" || echo "Yeni sürüm var: $cur -> $latest"
+				else
+					[ $js = 1 ] && upd_json true "$latest" "$cur" false "" "$now" "$src" || echo "Yeni sürüm duyuruldu ($latest) ama GitHub Release dosyaları henüz hazır değil; sonra tekrar dene."
+				fi
+			else
+				[ $js = 1 ] && upd_json true "$latest" "$cur" false "" "$now" "$src" || echo "Güncelsin ($cur)"
+			fi
+			return 0 ;;
+		install)
+			ver_gt "$latest" "$cur" || [ "$3" = force ] || [ "$2" = force ] || { echo "Zaten güncel ($cur). Zorla kurmak için: kediray update install force"; return 0; }
+			sum=$(upd_sum "$latest" kediray-install.sh) || { echo "Release'te sha256sums bulunamadı ya da kediray-install.sh satırı yok (v$latest); güvenlik için kurulmadı."; return 1; }
+			ufetch "$(upd_rel "$latest")/kediray-install.sh" /tmp/kediray-update.sh 20 || { echo "Kurulum dosyası indirilemedi."; rm -f /tmp/kediray-update.sh; return 1; }
+			got=$(sha256sum /tmp/kediray-update.sh | awk '{print $1}')
+			[ "$got" = "$sum" ] || { echo "SHA256 uyuşmuyor (indirme bozuk ya da dosya değişmiş); kurulmadı."; rm -f /tmp/kediray-update.sh; return 1; }
+			ver=$(sed -n 's/^KR_VERSION="\(.*\)"/\1/p' /tmp/kediray-update.sh | head -1)
+			# Release dosyasının sürümü duyurulanla aynı olmalı (etiket/dosya karışmasına karşı)
+			[ "$ver" = "$latest" ] || { echo "Release dosyasının sürümü ($ver) duyurulan sürümle ($latest) uyuşmuyor; kurulmadı."; rm -f /tmp/kediray-update.sh; return 1; }
+			cmd_selfupdate /tmp/kediray-update.sh
+			return $? ;;
+		*) echo "kullanım: kediray update check [--json] | install [force] | auto | cached" >&2; return 1 ;;
+	esac
+}
+
+# ---- Yedek: kediray backup [dosya] | restore <dosya> ---------------------------------------------------
+# Yedek = /etc/config/kediray (sunucular, uygulama kuralları, cihaz yönleri, ayarlar) düz uci metni.
+# DİKKAT: sunucu kimlikleri (UUID/şifre) içerir; yedek dosyasını kimseyle paylaşma, GitHub'a yükleme.
+cmd_backup() { # [dosya]  (dosya verilmezse stdout'a yazar)
+	local out="$1" tmp="/tmp/kediray-backup.$$"
+	[ -s /etc/config/kediray ] || { echo "Yedeklenecek ayar yok (/etc/config/kediray boş)" >&2; return 1; }
+	uci export kediray > "$tmp" 2>/dev/null && head -n1 "$tmp" | grep -q '^package kediray' || { rm -f "$tmp"; echo "Yedek alınamadı" >&2; return 1; }
+	if [ -n "$out" ]; then
+		mv "$tmp" "$out" || { rm -f "$tmp"; echo "Yazılamadı: $out" >&2; return 1; }
+		echo "Yedek yazıldı: $out ($(uci show kediray 2>/dev/null | grep -c '=node$') sunucu)"
+	else
+		cat "$tmp"; rm -f "$tmp"
+	fi
+	return 0
+}
+cmd_restore() { # <dosya>
+	local f="$1" d="/tmp/kediray-restore.chk" nn na
+	[ -f "$f" ] || { echo "Dosya bulunamadı: $f" >&2; return 1; }
+	[ "$(wc -c < "$f")" -lt 1048576 ] || { echo "Dosya çok büyük; KediRay yedeği değil." >&2; return 1; }
+	head -n1 "$f" | grep -q '^package kediray' || { echo "Bu dosya bir KediRay yedeği değil (ilk satır 'package kediray' olmalı)." >&2; return 1; }
+	grep -q '^config ' "$f" || { echo "Yedekte hiç ayar yok." >&2; return 1; }
+	# önce geçici bir yerde dene: bozuksa gerçek ayarlara dokunma
+	rm -rf "$d"; mkdir -p "$d"; : > "$d/kediray"
+	uci -q -c "$d" import kediray < "$f" || { rm -rf "$d"; echo "Yedek okunamadı (bozuk dosya); mevcut ayarlar değişmedi." >&2; return 1; }
+	nn=$(uci -q -c "$d" show kediray | grep -c '=node$'); na=$(uci -q -c "$d" show kediray | grep -c '=app$')
+	rm -rf "$d"
+	# geri dönüş için mevcut ayarı sakla
+	cp /etc/config/kediray /etc/kediray.pre-restore 2>/dev/null
+	uci -q import kediray < "$f" || { cp /etc/kediray.pre-restore /etc/config/kediray 2>/dev/null; echo "Geri yükleme başarısız; eski ayarlar korundu." >&2; return 1; }
+	uci commit kediray
+	apply_changes >/dev/null 2>&1
+	echo "Yedek geri yüklendi: $nn sunucu, $na uygulama kuralı. (Önceki ayarlar: /etc/kediray.pre-restore)"
+	return 0
+}
+cmd_engines() { # JSON: KediRay + kurulu diğer VPN motorları ve çalışma durumu
+	local s name first=1 r
+	printf '['
+	if running; then r=true; else r=false; fi
+	printf '{"id":"kediray","name":"KediRay","running":%s}' "$r"
+	for s in $KNOWN_VPN; do
+		[ -x "/etc/init.d/$s" ] || continue
+		case "$s" in
+			xwrt) name="xDivine-Ray" ;; neko) name="Neko" ;; passwall) name="PassWall" ;; passwall2) name="PassWall 2" ;;
+			openclash) name="OpenClash" ;; nikki) name="Nikki" ;; mihomo) name="Mihomo" ;; homeproxy) name="HomeProxy" ;;
+			v2raya) name="v2rayA" ;; sing-box) name="sing-box" ;; xlite) name="xlite" ;; *) name="$s" ;;
+		esac
+		if svc_running "$s"; then r=true; else r=false; fi
+		printf ',{"id":"%s","name":"%s","running":%s}' "$s" "$name" "$r"
+	done
+	printf ']\n'
+}
+cmd_engine() { # <ad> start|stop  — aynı anda yalnızca bir motor çalışır
+	local e="$1" act="$2" s
+	case "$act" in start|stop) ;; *) echo "kullanım: kediray engine <ad> start|stop" >&2; return 1 ;; esac
+	if [ "$e" = kediray ]; then
+		if [ "$act" = stop ]; then
+			uci set "$CONF.main.enabled=0"; uci commit "$CONF"
+			svc stop
+			echo "KediRay durduruldu"
+			return 0
+		fi
+		cmd_takeover
+		return $?
+	fi
+	case " $KNOWN_VPN " in *" $e "*) ;; *) echo "bilinmeyen motor: $e" >&2; return 1 ;; esac
+	[ -x "/etc/init.d/$e" ] || { echo "böyle bir servis yok: $e" >&2; return 1; }
+	if [ "$act" = stop ]; then
+		/etc/init.d/"$e" stop >/dev/null 2>&1
+		cleanup_other "$e"
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1
+		echo "$e durduruldu"
+		return 0
+	fi
+	if running; then
+		uci set "$CONF.main.enabled=0"; uci commit "$CONF"
+		svc stop
+		/etc/init.d/kediray disable >/dev/null 2>&1
+		echo "KediRay durduruldu"
+	fi
+	for s in $(conflicts); do
+		[ "$s" = "$e" ] && continue
+		/etc/init.d/"$s" stop >/dev/null 2>&1
+		cleanup_other "$s"
+		/etc/init.d/"$s" disable >/dev/null 2>&1
+		echo "$s durduruldu"
+	done
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	/etc/init.d/"$e" enable >/dev/null 2>&1
+	/etc/init.d/"$e" start >/dev/null 2>&1
+	sleep 3
+	if svc_running "$e"; then echo "$e başlatıldı"; log "motor değişti: $e"; return 0; fi
+	echo "$e başlatılamadı" >&2
+	return 1
+}
+cmd_engine_bg() { # <ad> start|stop — arka planda çalıştırır (panel isteği zaman aşımına uğramasın)
+	case "$1" in ''|*[!a-z0-9-]*) echo "geçersiz ad" >&2; return 1 ;; esac
+	case "$2" in start|stop) ;; *) echo "start|stop olmalı" >&2; return 1 ;; esac
+	rm -f /tmp/kediray-engine.rc
+	: > /tmp/kediray-engine.log
+	( $(command -v setsid) sh -c "/usr/bin/kediray engine $1 $2; echo \$? > /tmp/kediray-engine.rc" >/tmp/kediray-engine.log 2>&1 </dev/null & )
+	echo "başlatıldı"
+	return 0
+}
+cmd_engine_log() {
+	if [ -f /tmp/kediray-engine.rc ]; then echo "DONE $(cat /tmp/kediray-engine.rc)"
+	elif [ -f /tmp/kediray-engine.log ]; then echo RUNNING
+	else echo "DONE 1"; fi
+	tail -n 60 /tmp/kediray-engine.log 2>/dev/null
+	return 0
+}
+cmd_app_add() { # <ad> <vpn|direct> <portlar> <alan adları (virgüllü)> <IP'ler (virgüllü)> [dns] [komşu /24 genişletme: 24]
+	local name route ports doms ips id base n x tdns expand
+	name=$(printf '%s' "$1" | tr -d '\r\n' | cut -c1-40); route="$2"; ports="$3"; doms="$4"; ips="$5"; tdns="$6"; expand="$7"
+	case "$expand" in ''|16|24) ;; *) echo "genişletme 16 ya da 24 olmalı" >&2; return 1 ;; esac
+	[ -n "$name" ] || { echo "ad gerekli" >&2; return 1; }
+	case "$route" in vpn|direct|warp|frag) ;; *) echo "yol vpn, direct, warp ya da frag olmalı" >&2; return 1 ;; esac
+	[ -n "$ports$doms$ips" ] || { echo "en az bir port, alan adı ya da IP gir" >&2; return 1; }
+	for x in $ports; do
+		echo "$x" | grep -qE '^[0-9]{1,5}(-[0-9]{1,5})?$' || { echo "geçersiz port: $x" >&2; return 1; }
+	done
+	set -f
+	for x in $(echo "$doms" | tr ',' ' '); do
+		echo "$x" | grep -qE '^[A-Za-z0-9._:-]+$' || { set +f; echo "geçersiz alan adı: $x" >&2; return 1; }
+	done
+	for x in $(echo "$ips" | tr ',' ' '); do
+		echo "$x" | grep -qE '^([0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?|geoip:[a-z0-9_-]+)$' || { set +f; echo "geçersiz IP: $x" >&2; return 1; }
+	done
+	base=$(printf '%s' "$name" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '_' | sed 's/^_*//;s/_*$//' | cut -c1-24)
+	[ -n "$base" ] || base=app
+	id="$base"; n=1
+	while [ -n "$(uci -q get "$CONF.$id")" ]; do n=$((n + 1)); id="${base}_$n"; done
+	uci set "$CONF.$id=app"
+	uci set "$CONF.$id.name=$name"
+	uci set "$CONF.$id.enabled=1"
+	uci set "$CONF.$id.route=$route"
+	[ -n "$ports" ] && uci set "$CONF.$id.ports=$ports"
+	[ "$tdns" = dns ] && [ -n "$doms" ] && uci set "$CONF.$id.tunnel_dns=1"
+	[ -n "$expand" ] && uci set "$CONF.$id.expand=$expand"
+	for x in $(echo "$doms" | tr ',' ' '); do
+		case "$x" in *:*) ;; *) x="domain:$x" ;; esac
+		uci add_list "$CONF.$id.domain=$x"
+	done
+	for x in $(echo "$ips" | tr ',' ' '); do uci add_list "$CONF.$id.ip=$x"; done
+	set +f
+	uci commit "$CONF"
+	echo "$name eklendi ($route)"
+	apply_changes
+	return 0
+}
+cmd_app_del() { # <app>
+	[ "$(uci -q get "$CONF.$1")" = app ] || { echo "böyle bir uygulama yok: $1" >&2; return 1; }
+	uci delete "$CONF.$1"
+	uci commit "$CONF"
+	echo "silindi: $1"
+	apply_changes
+	return 0
+}
+cmd_wan_ready() { # WAN'ın (tünel dışı) varsayılan rotası var mı? 0 = hazır
+	ip -4 route show default 2>/dev/null | awk -v t="dev $TUN_DEV" 'index($0, t) == 0 { f = 1 } END { exit !f }'
+}
+cmd_autodirect() { # on|off  — on: direkt çıkış yoksa direkt seçilenler otomatik VPN'e çevrilir; off: seçim her zaman uygulanır
+	local v
+	case "$1" in on) v=1 ;; off) v=0 ;; *) echo "kullanım: kediray autodirect on|off" >&2; return 1 ;; esac
+	uci set "$CONF.main.auto_direct=$v"
+	uci commit "$CONF"
+	if [ "$v" = 0 ]; then echo "Direkt seçilenler her zaman direkt çıkar (otomatik VPN'e çevirme KAPALI)"; else echo "Direkt çıkış yoksa direkt seçilenler otomatik VPN'e çevrilir"; fi
+	apply_changes
+	return 0
+}
+cmd_direct() { # [check]  durumu gösterir; check: yeniden yoklar ve uygular
+	local old new
+	if [ "${1:-}" = check ]; then
+		old=$(cat "$RUN/direct" 2>/dev/null)
+		mkdir -p "$RUN"
+		if direct_probe; then new=ok; else new=dead; fi
+		echo "$new" > "$RUN/direct"; rm -f "$RUN/direct.cand"
+		[ "$old" != "$new" ] && apply_changes
+	fi
+	if ! direct_auto; then echo "Otomatik direkt denetimi: KAPALI (seçimine hep uyulur). Ölçülen direkt çıkış: $(direct_state | sed 's/^dead$/YOK/;s/^ok$/VAR/') — YOK ise bildirimler (FCM) VPN'den gider"; return 0; fi
+	case "$(direct_state)" in
+		dead) echo "Direkt çıkış: YOK -> Metin2, Teams, kendi 'direkt' kuralların ve direkt cihazlar VPN'den çıkıyor" ;;
+		*)    echo "Direkt çıkış: VAR -> uygulama yolları ayarlarındaki gibi" ;;
+	esac
+}
+
+# ---------- yapılandırma üretimi ----------
+cmd_gen() {
+	local ips="" tag sec tp addr port proto net insecure sni pin name ip rc cap
+	mkdir -p "$RUN"
+	cap=$(capture_eff)
+	echo "$cap" > "$RUN/capture"
+	export KR_WAN_DNS="$(wan_dns)"
+	export KR_CAPTURE="$cap" KR_MARK_CORE="$MARK_CORE" KR_MARK_TP="$MARK_TP" KR_MARK_TUN="$MARK_TUN" \
+		KR_TUN="$TUN_DEV" KR_TUN_ADDR="$TUN_ADDR"
+	if cap_insecure; then export KR_CAP_INSECURE=1; else export KR_CAP_INSECURE=0; fi
+	if [ "$(direct_state)" = dead ]; then export KR_DIRECT_DEAD=1; else export KR_DIRECT_DEAD=0; fi
+	ucode "$SHARE/gen.uc" nodes > "$RUN/nodes.tsv" 2>/dev/null
+	pin_nodes
+	ucode "$SHARE/gen.uc" nodes > "$RUN/nodes.tsv" 2>/dev/null
+	resolve_all
+	ips=$(cat "$RUN/server_ips")
+
+	KR_RESOLVE="$(cat "$RUN/resolve" 2>/dev/null)" ucode "$SHARE/gen.uc" xray > "$RUN/config.new.json" 2> "$RUN/gen.err"
+	rc=$?
+	if [ $rc != 0 ]; then
+		rm -f "$RUN/config.new.json"
+		{ echo "Yapılandırma üretilemedi:"; cat "$RUN/gen.err"; } > "$RUN/last_error"
+		return $rc
+	fi
+	corebin >/dev/null || { sayerr "Xray çekirdeği bulunamadı: kediray update-core"; echo "Xray çekirdeği bulunamadı (kediray update-core)" > "$RUN/last_error"; return 1; }
+	# Aynı yapılandırma + aynı çekirdek + aynı geo dosyaları daha önce test edildiyse testi atla (açılışı birkaç sn kısaltır)
+	local tkey tfile
+	tkey="$(md5sum < "$RUN/config.new.json" | cut -d' ' -f1)-$(xr version 2>/dev/null | awk 'NR==1{print $2}')-$(wc -c < "$(assetdir)/geoip.dat" 2>/dev/null)-$(wc -c < "$(assetdir)/geosite.dat" 2>/dev/null)"
+	tfile=/etc/kediray.tested
+	if [ "$(cat "$tfile" 2>/dev/null)" = "$tkey" ]; then
+		: > "$RUN/test.log"
+	elif ! xr run -test -c "$RUN/config.new.json" > "$RUN/test.log" 2>&1; then
+		rm -f "$tfile"
+		sayerr "Xray yapılandırma testi başarısız:"
+		grep -iE 'fail|error|invalid' "$RUN/test.log" | tail -n 3 >&2
+		{ echo "Xray yapılandırma testi başarısız:"; grep -iE 'fail|error|invalid' "$RUN/test.log" | tail -n 3; } > "$RUN/last_error"
+		logger -t kediray -p daemon.err "Xray yapılandırma testi başarısız: $(grep -iE 'fail|error|invalid' "$RUN/test.log" | tail -n 1)"
+		return 1
+	else
+		echo "$tkey" > "$tfile"
+	fi
+	mv "$RUN/config.new.json" "$RUN/config.json"
+	KR_LAN_IFS="$(lan_ifs)" KR_SERVER_IPS="$ips" ucode "$SHARE/gen.uc" nft > "$RUN/rules.nft" || return 1
+	ucode "$SHARE/gen.uc" dnsmasq > "$RUN/dnsmasq.conf" || return 1
+	case "$cap" in mixed|tun)
+		# hev'in hangi anahtar adlarını tanıdığını ikili dosyadan oku (xDivine gibi)
+		if grep -q 'tcp-read-write-timeout' "$(hevbin)" 2>/dev/null; then export KR_HEV_KEYS=split
+		elif grep -q 'read-write-timeout' "$(hevbin)" 2>/dev/null; then export KR_HEV_KEYS=single
+		else export KR_HEV_KEYS=split; fi
+		ucode "$SHARE/gen.uc" hev > "$RUN/hev.yaml" || return 1 ;;
+	esac
+	rm -f "$RUN/last_error"
+	return 0
+}
+
+# Sunucu alan adlarını bir kez IP'ye çevir (IP ile bağlanma + güvenlik duvarı istisnası)
+resolve_all() { # [düğüm listesi]
+	local tag sec tp addr port proto net insecure sni pin name ip ips="" map="" f="${1:-$RUN/nodes.tsv}"
+	[ -s "$f" ] || { : > "$RUN/server_ips"; : > "$RUN/resolve"; return 0; }
+	while IFS="$T" read -r tag sec tp addr port proto net insecure sni pin name; do
+		ip=$(resolve4 "$addr")
+		[ -n "$ip" ] || continue
+		ips="$ips $ip"
+		[ "$ip" != "$addr" ] && map="$map $addr=$ip"
+	done < "$f"
+	echo "$ips" > "$RUN/server_ips"
+	echo "$map" > "$RUN/resolve"
+}
+
+# ---------- güvenlik duvarı + DNS ----------
+dnsmasq_confdir() {
+	local d
+	d=$(uci -q get dhcp.@dnsmasq[0].confdir)
+	[ -n "$d" ] || d=$(sed -n 's/^conf-dir=\([^,]*\).*/\1/p' /var/etc/dnsmasq.conf.* 2>/dev/null | head -n1)
+	[ -n "$d" ] || d=/tmp/dnsmasq.d
+	echo "$d"
+}
+
+# Mobil/CGNAT hatlarda (5G) sunucuya giden SYN paketi ara sıra düşüyor. Çekirdeğin varsayılanı
+# 6 yeniden deneme = ~50 sn: tarayıcı o istek için 50 saniye asılı kalıyor ("pending"/"failed" satırları).
+# 3 deneme ≈ 15 sn: bağlantı hızlı başarısız olur, tarayıcı kendi yeniden denemesiyle sayfayı tamamlar.
+# tcp_retries2: kurulmuş ama sessizce ölmüş bağlantıların ne kadar süreyle beklendiği (15 ≈ 15+ dk).
+# Hız ayarı: çekirdeğin TCP alma/gönderme tamponları küçük başlar ve yavaş büyür; 200 Mbps'lik bir hatta ilk saniyelerde
+# hız yavaş yükselir. Başlangıç ve üst sınır büyütülür (yalnızca yükseltilir, mevcut değer daha büyükse dokunulmaz).
+speed_tune() {
+	[ "$(uget main.speed_tune)" = 0 ] && return 0
+	local k v cur want conf=/etc/sysctl.d/99-kediray-speed.conf out=""
+	for k in net.ipv4.tcp_rmem net.ipv4.tcp_wmem; do
+		[ -w "/proc/sys/$(echo "$k" | tr . /)" ] || continue
+		want="4096 262144 16777216"
+		cur=$(cat "/proc/sys/$(echo "$k" | tr . /)")
+		set -- $cur
+		# orta değer (başlangıç) ve üst sınır mevcuttan küçükse yükselt
+		[ "${2:-0}" -ge 262144 ] && [ "${3:-0}" -ge 16777216 ] || echo "$want" > "/proc/sys/$(echo "$k" | tr . /)" 2>/dev/null
+		out="$out$k=$want\n"
+	done
+	for k in net.core.rmem_max net.core.wmem_max; do
+		[ -w "/proc/sys/$(echo "$k" | tr . /)" ] || continue
+		cur=$(cat "/proc/sys/$(echo "$k" | tr . /)")
+		[ "$cur" -ge 16777216 ] 2>/dev/null || echo 16777216 > "/proc/sys/$(echo "$k" | tr . /)" 2>/dev/null
+		out="$out$k=16777216\n"
+	done
+	# boşta kalan bağlantı yeniden yavaş başlamasın (ör. hız testi ile hemen sonraki test)
+	[ -w /proc/sys/net/ipv4/tcp_slow_start_after_idle ] && echo 0 > /proc/sys/net/ipv4/tcp_slow_start_after_idle 2>/dev/null
+	out="${out}net.ipv4.tcp_slow_start_after_idle=0\n"
+	[ -d /etc/sysctl.d ] && printf "$out" > "$conf"
+	return 0
+}
+
+net_tune() {
+	speed_tune
+	on_off() { [ "$(uget main.mobile_tune)" != 0 ]; }
+	on_off || return 0
+	local f
+	for f in syn_retries:3 retries2:8; do
+		[ -w "/proc/sys/net/ipv4/tcp_${f%%:*}" ] && echo "${f##*:}" > "/proc/sys/net/ipv4/tcp_${f%%:*}" 2>/dev/null
+	done
+	# kalıcı olsun (modem yeniden başlayınca da geçerli)
+	if [ -d /etc/sysctl.d ] && [ ! -f /etc/sysctl.d/99-kediray.conf ]; then
+		printf 'net.ipv4.tcp_syn_retries=3\nnet.ipv4.tcp_retries2=8\n' > /etc/sysctl.d/99-kediray.conf
+	fi
+	return 0
+}
+
+dns_up() {
+	local dir new old
+	# DNS modu 'off': üretilen dnsmasq parçası boştur -> modemin kendi DNS'ine hiç dokunma
+	[ -s "$RUN/dnsmasq.conf" ] || { dns_down; return 0; }
+	dir=$(dnsmasq_confdir)
+	mkdir -p "$dir"
+	new=$(md5sum "$RUN/dnsmasq.conf" 2>/dev/null | cut -d' ' -f1)
+	old=$(md5sum "$dir/kediray.conf" 2>/dev/null | cut -d' ' -f1)
+	if [ "$new" != "$old" ]; then
+		cp "$RUN/dnsmasq.conf" "$dir/kediray.conf"
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	fi
+	echo "$dir" > "$RUN/dnsdir"
+}
+
+# --- DNS acil yedeği ---------------------------------------------------------
+# DNS modu "Tünelden" iken tünel bağlantıyı düşürürse modem HİÇBİR adı çözemez:
+# tarayıcıda sayfalar yarım kalır, "bağlanılıyor" yazıp bekler. Ölçüldü (webtest): iki adres de
+# ad çözümleme aşamasında zaman aşımına düştü. Bu yüzden tünel DNS'i yanıt vermediğinde
+# geçici olarak operatörün DNS'ine düşülür; tünel düzelince kendiliğinden geri alınır.
+dns_probe() { # çekirdeğin DNS'i (dnsmasq üzerinden) yanıt veriyor mu
+	local t=""
+	command -v timeout >/dev/null 2>&1 && t="timeout 6"
+	$t nslookup www.gstatic.com 127.0.0.1 2>/dev/null | awk '
+		/^Name:/ { f = 1 }
+		f && /^Address/ { for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { print $i; exit } }' | grep -q .
+}
+
+dns_rescue_on() { # operatör DNS'ine geç
+	local dir w
+	w=$(wan_dns)
+	# Operatör DNS'i bilinmiyorsa (bazı WAN kurulumları) önyükleme adresine düş: ölü DNS'ten iyidir
+	[ -n "$w" ] || w=$(uget main.dns_bootstrap); [ -n "$w" ] || w=1.1.1.1
+	dir=$(dnsmasq_confdir); mkdir -p "$dir"
+	{
+		echo "# KediRay - DNS acil yedeği (tünel DNS'i yanıt vermiyor)"
+		echo "no-resolv"
+		for x in $w; do echo "server=$x"; done
+		[ "$(uget main.ipv6)" = 1 ] || echo "filter-AAAA"
+	} > "$dir/kediray.conf"
+	echo "$dir" > "$RUN/dnsdir"
+	: > "$RUN/dns_rescue"
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	log "DNS acil yedeği: tünel DNS'i yanıt vermedi, operatör DNS'ine geçildi ($w)"
+}
+
+dns_rescue_off() { # normal (tünel) DNS'ine dön
+	rm -f "$RUN/dns_rescue"
+	dns_up
+	log "DNS acil yedeği kapatıldı: tünel DNS'i yeniden çalışıyor"
+}
+
+dns_guard() { # watchdog'dan çağrılır
+	[ "$(uget main.dns_mode)" = private ] || { [ -f "$RUN/dns_rescue" ] && dns_rescue_off; return 0; }
+	[ -s "$RUN/dnsmasq.conf" ] || return 0
+	if dns_probe; then
+		[ -f "$RUN/dns_rescue" ] && dns_rescue_off
+		rm -f "$RUN/dns_fail"
+		return 0
+	fi
+	# Tek seferlik takılma yüzünden DNS'i değiştirme: iki tur üst üste yanıtsız kalmalı
+	if [ -f "$RUN/dns_fail" ]; then
+		[ -f "$RUN/dns_rescue" ] || dns_rescue_on
+	else
+		: > "$RUN/dns_fail"
+	fi
+	return 0
+}
+
+dns_down() {
+	local d removed=0
+	rm -f "$RUN/dns_rescue" "$RUN/dns_fail"
+	for d in "$(cat "$RUN/dnsdir" 2>/dev/null)" "$(dnsmasq_confdir)" /tmp/dnsmasq.d /tmp/dnsmasq.cfg01411c.d; do
+		[ -n "$d" ] && [ -f "$d/kediray.conf" ] && { rm -f "$d/kediray.conf"; removed=1; }
+	done
+	[ "$removed" = 1 ] && /etc/init.d/dnsmasq restart >/dev/null 2>&1
+	rm -f "$RUN/dnsdir"
+	return 0
+}
+
+port_open() { # tcp port dinleniyor mu (IPv4 veya IPv6 soket)
+	local hex f files=""
+	hex=$(printf '%04X' "$1")
+	for f in /proc/net/tcp /proc/net/tcp6; do [ -r "$f" ] && files="$files $f"; done
+	[ -n "$files" ] || return 1
+	# shellcheck disable=SC2086
+	awk -v p=":$hex" 'FNR > 1 && $4 == "0A" && substr($2, length($2) - 4) == p { f = 1 } END { exit !f }' $files
+}
+
+fw_up_real() {
+	[ -s "$RUN/config.json" ] && [ -s "$RUN/rules.nft" ] || return 1
+	local i=0
+	while ! port_open "$(tp_port)"; do
+		i=$((i + 1))
+		[ $i -gt 30 ] && { sayerr "Xray başlamadı (port $(tp_port) açılmadı); kurallar uygulanmadı"; return 1; }
+		sleep 0.5 2>/dev/null || sleep 1
+	done
+	local cap
+	cap=$(cat "$RUN/capture" 2>/dev/null); cap=${cap:-mixed}
+	case "$cap" in mixed|tun)
+		i=0
+		while ! ip link show "$TUN_DEV" >/dev/null 2>&1; do
+			i=$((i + 1))
+			[ $i -gt 30 ] && { sayerr "hev-socks5-tunnel TUN aygıtını ($TUN_DEV) açmadı; kurallar uygulanmadı"; return 1; }
+			sleep 0.5 2>/dev/null || sleep 1
+		done
+		ip addr show dev "$TUN_DEV" 2>/dev/null | grep -q 'inet ' || ip addr add "$TUN_ADDR/24" dev "$TUN_DEV" 2>/dev/null
+		ip link set dev "$TUN_DEV" up
+		fw_zone ;;
+	esac
+	rules_down
+	traffic_sample
+	nft -f "$RUN/rules.nft" || { sayerr "nftables kuralları yüklenemedi"; return 1; }
+	case "$cap" in
+		tproxy)
+			ip -4 rule add fwmark $MARK_TP lookup $TABLE_TP pref $PREF_TP
+			ip -4 route replace local 0.0.0.0/0 dev lo table $TABLE_TP ;;
+		mixed|tun)
+			# Çekirdeğin kendi bağlantıları her zaman ana tablodan; işaretli paketler TUN tablosuna
+			# (mixed: sadece UDP · tun: TCP+UDP hepsi)
+			ip -4 rule add fwmark $MARK_CORE lookup main pref $PREF_CORE
+			ip -4 route replace default dev "$TUN_DEV" table $TABLE_TUN
+			ip -4 rule add fwmark $MARK_TUN lookup $TABLE_TUN pref $PREF_TUN ;;
+	esac
+	net_tune
+	dns_up
+	apply_node
+	echo up > "$RUN/fw"
+	log "kurallar uygulandı ($(lan_ifs)) · modem açılışından $(cut -d. -f1 /proc/uptime) sn sonra"
+}
+
+rules_down() {
+	local p i
+	for p in $PREF_TP $PREF_CORE $PREF_TUN; do
+		i=0
+		while ip -4 rule del pref "$p" 2>/dev/null; do i=$((i + 1)); [ $i -gt 16 ] && break; done
+	done
+	ip -4 route flush table $TABLE_TP 2>/dev/null
+	ip -4 route flush table $TABLE_TUN 2>/dev/null
+}
+
+fw_down_real() {
+	traffic_sample save
+	nft delete table inet kediray 2>/dev/null
+	nft delete table inet kediray_out 2>/dev/null
+	rules_down
+	dns_down
+	rm -f "$RUN/fw"
+}
+
+# mixed mod: TUN aygıtı için güvenlik duvarı bölgesi. fw4 bölgesi olmayan aygıta iletilen paketi sessizce
+# düşürür; bölge yoksa bir kez oluşturulur ve çekirdekte gerçekten yüklendiği kontrol edilir (xDivine gibi).
+fw_zone() {
+	local lan_zone i name
+	nft list ruleset 2>/dev/null | grep -q "\"$TUN_DEV\"" && return 0
+	if ! uci -q get firewall.kediray >/dev/null; then
+		uci -q batch <<-EOF
+			set firewall.kediray=zone
+			set firewall.kediray.name='kediray'
+			set firewall.kediray.input='REJECT'
+			set firewall.kediray.output='ACCEPT'
+			set firewall.kediray.forward='REJECT'
+			set firewall.kediray.masq='1'
+			set firewall.kediray.mtu_fix='1'
+			add_list firewall.kediray.device='$TUN_DEV'
+		EOF
+	fi
+	if ! uci -q get firewall.kediray_fwd >/dev/null; then
+		lan_zone=lan; i=0
+		while name=$(uci -q get "firewall.@zone[$i].name"); do
+			case " $(uci -q get "firewall.@zone[$i].network") " in *" lan "*) lan_zone="$name"; break ;; esac
+			i=$((i + 1)); [ $i -gt 32 ] && break
+		done
+		uci -q batch <<-EOF
+			set firewall.kediray_fwd=forwarding
+			set firewall.kediray_fwd.src='$lan_zone'
+			set firewall.kediray_fwd.dest='kediray'
+		EOF
+	fi
+	uci -q commit firewall
+	/etc/init.d/firewall reload >/dev/null 2>&1
+	nft list ruleset 2>/dev/null | grep -q "\"$TUN_DEV\"" || say "uyarı: güvenlik duvarı $TUN_DEV için kural yüklemedi; UDP (oyun/arama) tünelden geçmeyebilir. Kontrol: fw4 check"
+	return 0
+}
+
+# Sabit sunucu seçimini canlı uygula (yeniden başlatmadan)
+# Sunucu seçimi her zaman sabitlenir (override). Otomatik modda bile seçilen sunucuda KALINIR ve sadece
+# o sunucu düşünce başkasına geçilir: çıkış IP'si oturum ortasında değişmez -> Metin2 gibi oyunlar atmaz.
+# (Xray'in kendi leastPing seçimi eşit hızdaki sunucular arasında sürekli gidip gelir.)
+set_override() { # <etiket>
+	local i=0
+	while ! xr api bo -s "$(api_addr)" -b proxy "$1" >/dev/null 2>&1; do
+		i=$((i + 1)); [ $i -gt 10 ] && { say "sunucu seçimi uygulanamadı (API yanıt vermedi)"; return 1; }
+		sleep 1
+	done
+	echo "$1" > "$RUN/sticky"
+	rm -f "$RUN/sticky.fail"
+}
+
+# Ölçüm adresleri: birincil + yedek. Biri engellenir/yavaşlarsa sunucu boş yere "düştü" sayılmasın.
+probe_url_list() {
+	local a b u
+	a=$(uget main.probe_url); a=${a:-http://www.gstatic.com/generate_204}
+	b=$(uget main.probe_url2); b=${b:-https://cp.cloudflare.com/generate_204}
+	for u in "$a" "$b"; do
+		[ -n "$u" ] || continue
+		echo "$u" | sed 's#^https://#http://#'
+	done | awk '!seen[$0]++'
+}
+probe_socks() { # <socks-port> [zaman aşımı] -> ms (ilk yanıt veren adres); hiçbiri olmazsa 1
+	local u t m=${2:-6}
+	for u in $(probe_url_list); do
+		t=$(curl -s -o /dev/null --noproxy '' -m "$m" -w '%{http_code} %{time_total}' -x "socks5h://127.0.0.1:$1" "$u" 2>/dev/null)
+		case "$t" in 2*|3*) echo "$t" | awk '{ printf "%d\n", $2 * 1000 }'; return 0 ;; esac
+	done
+	return 1
+}
+# Soğuk + sıcak ölçüm: aynı komutta iki istek. İlki TCP+TLS+WebSocket el sıkışmalarını içerir (yeni bağlantı),
+# ikincisi açık bağlantıdan gider = tünelin gerçek gidiş-dönüş gecikmesi (sayfalar/oyun bunu hisseder).
+probe_socks2() { # <socks-port> [zaman aşımı] -> "soğuk sıcak" (ms); başarısızsa 1
+	local u out m=${2:-8}
+	for u in $(probe_url_list); do
+		out=$(curl -s -o /dev/null -o /dev/null --noproxy '' -m "$m" -x "socks5h://127.0.0.1:$1" \
+			-w '%{http_code} %{time_starttransfer}\n' "$u" "$u" 2>/dev/null)
+		echo "$out" | awk 'NR == 1 { if ($1 < 200 || $1 >= 400) exit 1; c = $2 } NR == 2 { w = $2 }
+			END { if (c == "") exit 1; printf "%d %d\n", c * 1000, (w == "" ? c : w) * 1000 }' && return 0
+	done
+	return 1
+}
+
+probe_tag() { # <etiket> -> ms (başarısızsa dönüş kodu 1)
+	local tp
+	tp=$(awk -F"$T" -v g="$1" '$1 == g { print $3 }' "$RUN/nodes.tsv")
+	[ -n "$tp" ] || return 1
+	probe_socks "$tp"
+}
+
+auto_pick() { # [hariç etiket] -> en hızlı çalışan sunucunun etiketi (paralel ölçüm)
+	local tag sec tp rest d
+	d="$RUN/pick.$$"; mkdir -p "$d"
+	while IFS="$T" read -r tag sec tp rest; do
+		[ "$tag" = "$1" ] && continue
+		( ms=$(probe_tag "$tag") && echo "$ms $tag" > "$d/$tag" ) &
+	done < "$RUN/nodes.tsv"
+	wait
+	cat "$d"/* 2>/dev/null | sort -n | awk 'NR == 1 { print $2 }'
+	rm -rf "$d"
+}
+
+apply_node() {
+	local sel tag
+	sel=$(uget main.node)
+	[ "$sel" = none ] && return 0
+	[ -s "$RUN/nodes.tsv" ] || return 0
+	if [ -z "$sel" ] || [ "$sel" = auto ]; then
+		tag=$(cat "$RUN/sticky" 2>/dev/null)
+		# önceki seçim hâlâ listedeyse ve çalışıyorsa onda kal (yeniden başlatmada IP değişmesin)
+		if [ -z "$tag" ] || ! grep -q "^$tag$T" "$RUN/nodes.tsv" || ! probe_tag "$tag" >/dev/null; then
+			tag=$(auto_pick)
+			[ -n "$tag" ] || tag=$(awk -F"$T" 'NR == 1 { print $1 }' "$RUN/nodes.tsv")
+		fi
+	else
+		tag=$(awk -F"$T" -v s="$sel" '$2 == s { print $1 }' "$RUN/nodes.tsv")
+	fi
+	[ -n "$tag" ] && set_override "$tag"
+}
+
+# Otomatik modda: seçili sunucu 2 kez üst üste yanıt vermezse (≈2 dk) çalışan en hızlıya geç
+sticky_check() {
+	local cur n new
+	[ "$(uget main.node)" = auto ] || return 0
+	cur=$(cat "$RUN/sticky" 2>/dev/null)
+	[ -n "$cur" ] || { apply_node; return 0; }
+	if probe_tag "$cur" >/dev/null; then rm -f "$RUN/sticky.fail"; return 0; fi
+	n=$(( $(cat "$RUN/sticky.fail" 2>/dev/null || echo 0) + 1 ))
+	echo "$n" > "$RUN/sticky.fail"
+	[ "$n" -lt 2 ] && return 0
+	new=$(auto_pick "$cur")
+	[ -n "$new" ] || { log "otomatik geçiş: $cur yanıt vermiyor ama çalışan başka sunucu da yok"; return 0; }
+	set_override "$new"
+	logger -t kediray -p daemon.warn "otomatik geçiş: $(awk -F"$T" -v g="$cur" '$1 == g { print $11 }' "$RUN/nodes.tsv") düştü -> $(awk -F"$T" -v g="$new" '$1 == g { print $11 }' "$RUN/nodes.tsv")"
+}
+
+# Ayar değişikliğini uygula; Xray'i sadece Xray yapılandırması gerçekten değiştiyse yeniden başlat.
+# (Abonelik yenilemesi, cihaz/uygulama değişikliği oyundaki bağlantıyı gereksiz yere koparmasın.)
+apply_changes() {
+	local f
+	[ "$(uget main.enabled)" = 1 ] || return 0
+	if ! running || [ ! -s "$RUN/config.json" ]; then /etc/init.d/kediray restart >/dev/null 2>&1; return 0; fi
+	for f in config.json rules.nft hev.yaml dnsmasq.conf; do cp "$RUN/$f" "$RUN/$f.old" 2>/dev/null || : > "$RUN/$f.old"; done
+	if ! cmd_gen; then
+		for f in config.json rules.nft hev.yaml dnsmasq.conf; do [ -s "$RUN/$f.old" ] && mv "$RUN/$f.old" "$RUN/$f"; done
+		return 1
+	fi
+	if cmp -s "$RUN/config.json" "$RUN/config.json.old" && cmp -s "$RUN/hev.yaml" "$RUN/hev.yaml.old" 2>/dev/null; then
+		if ! cmp -s "$RUN/rules.nft" "$RUN/rules.nft.old" || ! cmp -s "$RUN/dnsmasq.conf" "$RUN/dnsmasq.conf.old"; then
+			with_lock fw_up_real
+		fi
+		log "değişiklik bağlantıları koparmadan uygulandı"
+	else
+		/etc/init.d/kediray restart >/dev/null 2>&1
+	fi
+	rm -f "$RUN"/*.old
+}
+
+active_tag() {
+	xr api bi -s "$(api_addr)" proxy 2>/dev/null | awk '
+		/Selecting Override/ { s = 1; next }
+		/Selects/ { s = 2; next }
+		s && NF >= 2 && $1 ~ /^[0-9]+$/ { if (s == 1 && o == "") o = $2; if (s == 2 && p == "") p = $2 }
+		END { print (o != "" ? o : p) }'
+}
+
+# ---------- komutlar ----------
+cmd_status() {
+	local r=0 fw=down core="" up=0 act="" pid cf
+	running && r=1
+	[ -f "$RUN/fw" ] && fw=up
+	cf=$(conflicts)
+	if [ -s "$RUN/core.ver" ]; then core=$(cat "$RUN/core.ver"); else
+		core=$(xr version 2>/dev/null | awk 'NR==1{print $2}'); mkdir -p "$RUN"; echo "$core" > "$RUN/core.ver"; fi
+	if [ $r = 1 ]; then
+		act=$(active_tag)
+		pid=$(ubus call service list '{"name":"kediray"}' 2>/dev/null | jsonfilter -e '@.kediray.instances.xray.pid')
+		[ -n "$pid" ] && [ -f "/proc/$pid/stat" ] && up=$(awk -v t="$(awk '{print int($1)}' /proc/uptime)" -v hz=100 '{print t - int($22 / hz)}' "/proc/$pid/stat")
+	fi
+	if [ "$1" = "--json" ]; then
+		KR_RUNNING=$r KR_FW=$fw KR_CORE="$core" KR_UPTIME="$up" KR_ACTIVE="$act" KR_CONFLICT="$cf" ucode "$SHARE/cli.uc" status
+	else
+		KR_RUNNING=$r KR_FW=$fw KR_CORE="$core" KR_UPTIME="$up" KR_ACTIVE="$act" KR_CONFLICT="$cf" ucode "$SHARE/cli.uc" status | \
+			ucode -e 'let s=json(require("fs").stdin.read("all")); print("Durum   : ", s.running ? "ÇALIŞIYOR" : (s.enabled ? "DURDU (hata?)" : "KAPALI"), "\nÇekirdek: Xray ", s.core, "\nMod     : ", s.mode, "\nSunucu  : ", s.active ? s.active.name + (s.active.ping ? " (" + s.active.ping + " ms)" : "") : "-", s.auto ? "  [otomatik]" : "  [sabit]", "\nSunucu sayısı: ", s.nodes, "\n", length(s.conflict) ? "UYARI   : çalışan başka VPN: " + join(" ", s.conflict) + "  ->  geçiş için: kediray takeover\n" : "");'
+		[ "$(direct_state)" = dead ] && direct_auto && echo "Direkt  : YOK -> direkt giden her şey VPN'den çıkıyor (otomatik)"
+	fi
+}
+
+# ---------- diğer VPN servisleriyle bir arada yaşama ----------
+KNOWN_VPN="xwrt passwall passwall2 openclash nikki mihomo homeproxy v2raya xray v2ray sing-box neko xlite shadowsocksr ssrplus bypass vssr"
+
+svc_running() {
+	[ -x "/etc/init.d/$1" ] || return 1
+	ubus call service list "{\"name\":\"$1\"}" 2>/dev/null | grep -q '"running": *true' && return 0
+	/etc/init.d/"$1" running >/dev/null 2>&1
+}
+
+conflicts() { # çalışan diğer şeffaf proxy servisleri
+	local s out=""
+	for s in $KNOWN_VPN; do svc_running "$s" && out="$out $s"; done
+	echo $out
+}
+
+cleanup_other() { # durdurulan servisin geride bıraktığı kural/DNS artıkları
+	local s="$1" d f
+	nft delete table ip "$s" 2>/dev/null
+	nft delete table inet "$s" 2>/dev/null
+	for d in /tmp/dnsmasq.d /tmp/dnsmasq.*.d "$(dnsmasq_confdir)"; do
+		[ -d "$d" ] || continue
+		for f in "$d"/*; do
+			[ -f "$f" ] || continue
+			case "$f" in */kediray.conf) continue ;; esac
+			# adında servis adı geçen ya da servise ait yerel DNS yönlendirmesi içeren parçalar
+			if echo "${f##*/}" | grep -qi "$s" || { grep -qi "$s" "$f" && grep -q 'server=127\.0\.0\.1#' "$f"; }; then
+				rm -f "$f"
+			fi
+		done
+	done
+}
+
+takeover_ok() { # KediRay gerçekten çalışıyor ve internet var mı
+	local i=0 url
+	while [ $i -lt 25 ]; do
+		running && [ -f "$RUN/fw" ] && break
+		i=$((i + 1)); sleep 1
+	done
+	running && [ -f "$RUN/fw" ] || return 1
+	nslookup www.google.com 127.0.0.1 >/dev/null 2>&1 || { sleep 3; nslookup www.google.com 127.0.0.1 >/dev/null 2>&1; } || return 1
+	probe_socks "$(uget main.socks_port || echo 10808)" 10 >/dev/null
+}
+
+cmd_takeover() { # [servisler]  diğer VPN'i durdur, KediRay'e geç; başarısızsa geri al
+	local svcs="${*:-$(conflicts)}" s
+	[ -s "$RUN/nodes.tsv" ] || ucode "$SHARE/gen.uc" nodes > "$RUN/nodes.tsv" 2>/dev/null
+	[ -s "$RUN/nodes.tsv" ] || { echo "Önce en az bir sunucu ekle (panel: Link / JSON ekle)" >&2; return 1; }
+	echo "Geçiş: ${svcs:-(başka VPN yok)} -> KediRay"
+	for s in $svcs; do
+		/etc/init.d/"$s" stop >/dev/null 2>&1
+		cleanup_other "$s"
+		echo "  $s durduruldu"
+	done
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	uci set "$CONF.main.enabled=1"; uci commit "$CONF"
+	/etc/init.d/kediray enable >/dev/null 2>&1
+	svc restart
+	if takeover_ok; then
+		for s in $svcs; do /etc/init.d/"$s" disable >/dev/null 2>&1; done
+		echo "Tamam: KediRay çalışıyor, internet VPN üzerinden geliyor."
+		[ -n "$svcs" ] && echo "  ($svcs açılışta devre dışı bırakıldı; geri dönmek için: kediray rollback $svcs)"
+		log "geçiş başarılı ($svcs -> kediray)"
+		return 0
+	fi
+	echo "KediRay'de internet gelmedi, geri alınıyor..." >&2
+	cmd_rollback $svcs
+	return 1
+}
+
+cmd_rollback() { # [servisler]  KediRay'i kapat, eski VPN'i geri aç
+	local s
+	uci set "$CONF.main.enabled=0"; uci commit "$CONF"
+	/etc/init.d/kediray stop >/dev/null 2>&1
+	fw_down_real
+	for s in "$@"; do
+		/etc/init.d/"$s" enable >/dev/null 2>&1
+		/etc/init.d/"$s" start >/dev/null 2>&1
+		echo "  $s yeniden açıldı"
+	done
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	log "geri alındı (kediray kapalı; açılan: $*)"
+	echo "Geri alındı. Ayrıntı: kediray log"
+}
+
+# ---------- Metin2 DNS testi: Gameforge adlarını her DNS yolundan çöz (yanıt var mı, kaç ms, hangi IP) ----------
+dnst_ms() { awk '{printf "%d", $1 * 1000}' /proc/uptime; }
+dnst_ns() { # <alan adı> <dns sunucusu> -> ilk IPv4
+	run_to 4 nslookup "$1" "$2" 2>/dev/null | awk '/^Name:/ { f = 1 } f && /^Address/ { for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { print $i; exit } }'
+}
+dnst_doh() { # <url> <alan adı> [curl argümanları] -> ilk IPv4
+	local u="$1" d="$2"
+	shift 2
+	curl -s -m 4 --noproxy '' "$@" -H 'accept: application/dns-json' "$u?name=$d&type=A" 2>/dev/null \
+		| grep -o '"data":"[0-9][0-9.]*"' | head -n 1 | sed 's/^"data":"//; s/"$//'
+}
+dnst_row() { # <yol> <alan adı> <başlangıç ms> <IP>
+	local ms tag=""
+	ms=$(( $(dnst_ms) - $3 ))
+	if [ -z "$4" ]; then printf '%-40s %-24s YOK\n' "$1" "$2"; return 0; fi
+	case "$4" in 79.110.8[0-9].*|79.110.9[0-5].*) tag="Gameforge ağı" ;; esac
+	printf '%-40s %-24s %-15s %5d ms  %s\n' "$1" "$2" "$4" "$ms" "$tag"
+}
+cmd_dnstest() { # [--bg|--read] [alan adı...]  Metin2 için hangi DNS yolu çalışıyor / hızlı?
+	local doms d w t0 ip sp up=0
+	# Arka planda çalışır: ölçüm 20 sn'yi aşabiliyor, web arayüzünün isteği o kadar bekleyemiyor
+	case "${1:-}" in
+		--read) bg_read dnstest; return 0 ;;
+		--bg) shift; bg_start dnstest cmd_dnstest "$@"; return 0 ;;
+	esac
+	doms="$*"
+	[ -n "$doms" ] || doms=$(uci -q get "$CONF.metin2.domain" 2>/dev/null | tr ' ' '\n' | sed -n 's/^domain://p' | head -n 3)
+	[ -n "$doms" ] || doms="metin2.gameforge.com gameforge.com"
+	sp=$(uget main.socks_port); sp=${sp:-1080}
+	running && up=1
+	echo "Metin2 DNS testi (tünel: $([ $up = 1 ] && echo AÇIK || echo KAPALI))"
+	printf '%-40s %-24s %s\n' "YOL" "ALAN ADI" "SONUÇ"
+	for d in $doms; do
+		for w in $(wan_dns); do
+			t0=$(dnst_ms); ip=$(dnst_ns "$d" "$w"); dnst_row "Operatör DNS $w (Direkt DNS: auto)" "$d" "$t0" "$ip"
+		done
+		t0=$(dnst_ms); ip=$(dnst_doh "https://1.1.1.1/dns-query" "$d"); dnst_row "Cloudflare DoH (direkt)" "$d" "$t0" "$ip"
+		t0=$(dnst_ms); ip=$(dnst_doh "https://8.8.8.8/resolve" "$d"); dnst_row "Google DoH (direkt)" "$d" "$t0" "$ip"
+		if [ $up = 1 ]; then
+			t0=$(dnst_ms); ip=$(dnst_doh "https://1.1.1.1/dns-query" "$d" -x "socks5h://127.0.0.1:$sp"); dnst_row "Cloudflare DoH (tünelden)" "$d" "$t0" "$ip"
+			t0=$(dnst_ms); ip=$(dnst_doh "https://8.8.8.8/resolve" "$d" -x "socks5h://127.0.0.1:$sp"); dnst_row "Google DoH (tünelden)" "$d" "$t0" "$ip"
+		fi
+	done
+	echo "YOK = o yoldan cevap gelmedi. Google TCP (tünelden) ayrıca ölçülmez; Xray içinden gider."
+	return 0
+}
+
+cmd_ping() { # [sec] [--json]  VPN kapalıyken geçici test çekirdeği kullanır
+	local only="" json=0 a tag sec tp addr port proto net insecure sni pin name tmp list tpid="" i=0 pids=""
+	for a in "$@"; do case "$a" in --json) json=1 ;; *) only="$a" ;; esac; done
+	mkdir -p "$RUN"
+	if running && [ -s "$RUN/nodes.tsv" ]; then
+		list="$RUN/nodes.tsv"
+	else
+		# VPN kapalı: sadece ölçüm için ayrı portlarda geçici bir Xray aç (trafiği/DNS'i etkilemez)
+		corebin >/dev/null || { echo "Xray çekirdeği yok (kediray update-core)" >&2; [ $json = 1 ] && ucode "$SHARE/cli.uc" nodes; return 1; }
+		list="$RUN/nodes.ping.tsv"
+		export KR_TEST_BASE=$(( $(uget main.test_base || echo 21000) + 500 ))
+		ucode "$SHARE/gen.uc" nodes > "$list" 2>/dev/null
+		[ -s "$list" ] || { echo "Ölçülecek geçerli sunucu yok" >&2; [ $json = 1 ] && ucode "$SHARE/cli.uc" nodes; return 1; }
+		resolve_all "$list"
+		KR_RESOLVE="$(cat "$RUN/resolve" 2>/dev/null)" ucode "$SHARE/gen.uc" test > "$RUN/ping.json" 2>/dev/null || { echo "Test yapılandırması üretilemedi" >&2; return 1; }
+		XRAY_LOCATION_ASSET="$(assetdir)" "$(corebin)" run -c "$RUN/ping.json" >/dev/null 2>&1 &
+		tpid=$!
+		tp=$(awk -F"$T" 'NR==1{print $3}' "$list")
+		while ! port_open "$tp"; do
+			i=$((i + 1)); [ $i -gt 20 ] && break
+			sleep 0.3 2>/dev/null || sleep 1
+		done
+	fi
+	tmp="$RUN/ping.$$"; mkdir -p "$tmp"
+	while IFS="$T" read -r tag sec tp addr port proto net insecure sni pin name; do
+		[ -n "$only" ] && [ "$only" != all ] && [ "$only" != "$sec" ] && continue
+		(
+			ms=-1; rt=-1; warm=-1
+			# Tünel testi: yeni bağlantı + tam web isteği (v2rayNG "gerçek gecikme" ile aynı) ve
+			# aynı bağlantıdaki ikinci istek (açık tünelin gerçek gecikmesi).
+			# Birincil adres yanıt vermezse yedek adres denenir (engellenen bir adres yüzünden "düştü" demesin).
+			cw=$(probe_socks2 "$tp" 8) && { ms=${cw%% *}; warm=${cw##* }; }
+			# Gerçek ağ gecikmesi: sunucuya TCP bağlantı süresi (oyunlardaki ping'e karşılık gelir)
+			ipx="$addr"
+			case "$addr" in *[!0-9.]*) ipx=$(tr ' ' '\n' < "$RUN/resolve" 2>/dev/null | awk -F= -v d="$addr" '$1 == d { print $2; exit }') ;; esac
+			if [ -n "$ipx" ]; then
+				rt=$(curl -s -o /dev/null --noproxy '' -m 4 -w '%{time_connect}' "http://$ipx:$port/" 2>/dev/null | awk '{ v = $1 * 1000; if (v > 0) printf "%d", (v < 1 ? 1 : v); else print -1 }')
+			fi
+			echo "$sec$T$ms$T$(date +%s)$T${rt:--1}$T${warm:--1}" > "$tmp/$sec"
+		) &
+		pids="$pids $!"
+	done < "$list"
+	# shellcheck disable=SC2086
+	[ -n "$pids" ] && wait $pids
+	[ -n "$tpid" ] && { kill "$tpid" 2>/dev/null; wait "$tpid" 2>/dev/null; rm -f "$RUN/ping.json"; }
+	touch "$RUN/ping.tsv"
+	cat "$tmp"/* 2>/dev/null > "$tmp.new"
+	awk -F"$T" 'NR == FNR { n[$1] = 1; print; next } !($1 in n)' "$tmp.new" "$RUN/ping.tsv" > "$tmp.all"
+	mv "$tmp.all" "$RUN/ping.tsv"
+	rm -rf "$tmp" "$tmp.new"
+	if [ $json = 1 ]; then ucode "$SHARE/cli.uc" nodes; else
+		awk -F"$T" 'NR == FNR { p[$1] = $2; r[$1] = $4; w[$1] = $5; next } { printf "%-24s ping %-8s tünel (yeni bağlantı) %-10s tünel (açık bağlantı) %s\n", $11, (r[$2] > 0 ? r[$2] " ms" : "?"), (p[$2] == "" ? "?" : (p[$2] < 0 ? "zaman aşımı" : p[$2] " ms")), (w[$2] > 0 ? w[$2] " ms" : "?") }' "$RUN/ping.tsv" "$list"
+	fi
+}
+
+cmd_auto() { # on|off  otomatik geçiş
+	local act sec
+	case "$1" in
+		on) cmd_use auto keep ;;
+		off)
+			# şu an kullanılan sunucuda sabit kal
+			if running; then act=$(active_tag); sec=$(awk -F"$T" -v t="$act" '$1 == t { print $2 }' "$RUN/nodes.tsv"); fi
+			[ -n "$sec" ] || sec=$(awk -F"$T" '$2 >= 0 { if (b == "" || $2 < m) { m = $2; b = $1 } } END { print b }' "$RUN/ping.tsv" 2>/dev/null)
+			[ -n "$sec" ] || sec=$(awk -F"$T" 'NR == 1 { print $2 }' "$RUN/nodes.tsv" 2>/dev/null)
+			[ -n "$sec" ] || { echo "Sunucu yok" >&2; return 1; }
+			cmd_use "$sec" ;;
+		*) [ "$(uget main.node)" = auto ] && echo on || echo off ;;
+	esac
+}
+
+cmd_speedtest() { # [--json]  hız ve gecikme ölçümü: direkt vs VPN
+	local url="https://speed.cloudflare.com/__down?bytes=20000000" small="http://www.gstatic.com/generate_204"
+	local sp d v dl vl dns r=0
+	sp="socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)"
+	running && r=1
+	d=$(curl -s -o /dev/null --noproxy '' -m 15 -w '%{speed_download}' "$url" 2>/dev/null)
+	dl=$(curl -s -o /dev/null --noproxy '' -m 8 -w '%{time_starttransfer}' "$small" 2>/dev/null)
+	dns=$(curl -s -o /dev/null --noproxy '' -m 8 -w '%{time_namelookup}' "https://www.wikipedia.org/" 2>/dev/null)
+	if [ $r = 1 ]; then
+		v=$(curl -s -o /dev/null --noproxy '' -m 15 -x "$sp" -w '%{speed_download}' "$url" 2>/dev/null)
+		vl=$(curl -s -o /dev/null --noproxy '' -m 8 -x "$sp" -w '%{time_starttransfer}' "$small" 2>/dev/null)
+	fi
+	awk -v d="${d:-0}" -v v="${v:-0}" -v dl="${dl:-0}" -v vl="${vl:-0}" -v dns="${dns:-0}" -v r=$r -v j="$1" 'BEGIN {
+		dm = d * 8 / 1000000; vm = v * 8 / 1000000
+		if (j == "--json") {
+			printf "{\"running\":%s,\"direct_mbps\":%.1f,\"vpn_mbps\":%.1f,\"direct_ms\":%d,\"vpn_ms\":%d,\"dns_ms\":%d}\n", (r ? "true" : "false"), dm, vm, dl * 1000, vl * 1000, dns * 1000
+		} else {
+			printf "Direkt : %.1f Mbps, gecikme %d ms\n", dm, dl * 1000
+			if (r) printf "VPN    : %.1f Mbps, gecikme %d ms\n", vm, vl * 1000; else print "VPN    : kapalı"
+			printf "DNS    : %d ms\n", dns * 1000
+		}
+	}'
+}
+
+# Hangi yol çalışıyor? Sayfaların "dönüp durması" (ERR_NAME_NOT_RESOLVED) hep buradan çıkıyor.
+# busybox'ta "date +%s%N" yok; /proc/uptime 10 ms çözünürlükle ölçer.
+now_cs() { cut -d' ' -f1 /proc/uptime 2>/dev/null | tr -d '.' || echo 0; }
+el_ms() { echo $(( ($(now_cs) - $1) * 10 )); }
+
+wan_dns() { # modeme WAN'dan verilen DNS sunucuları
+	local d="" net
+	if [ -f /lib/functions/network.sh ]; then
+		. /lib/functions/network.sh
+		network_flush_cache 2>/dev/null
+		network_find_wan net 2>/dev/null && network_get_dnsserver d "$net" 2>/dev/null
+	fi
+	[ -n "$d" ] || d=$(awk '/^nameserver/ && $2 !~ /^127\./ { print $2 }' /tmp/resolv.conf.d/resolv.conf.auto /etc/resolv.conf 2>/dev/null | head -2)
+	echo $d
+}
+# Gerçek (var olan) adlar kullanılır: uydurma ad NXDOMAIN döner ve yol çalışsa bile "hata" sanılır.
+# Tarayıcıda takılan gerçek adresler: sorun bunlarda görülüyor
+DOC_HOSTS="www.gstatic.com accounts.google.com i.ytimg.com yt3.ggpht.com fonts.gstatic.com"
+doc_host() { echo "$DOC_HOSTS" | cut -d' ' -f"$1"; }
+
+# --- tek tek yollar ---
+p_udp() { # <sunucu> <ad>
+	nslookup "$2" "$1" 2>/dev/null | sed -n '/^Name:/,$p' | grep -qE '^Address[^:]*: *[0-9]+\.[0-9]+'
+}
+p_doh() { # <url> <ad>
+	curl -s -m 6 --noproxy '*' -H 'accept: application/dns-json' "$1?name=$2&type=A" 2>/dev/null \
+		| grep -qE '"Answer" *:|"Status" *: *0'
+}
+p_doh_tun() { # <url> <ad>
+	curl -s -m 8 --noproxy '*' -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 10808)" \
+		-H 'accept: application/dns-json' "$1?name=$2&type=A" 2>/dev/null | grep -qE '"Answer" *:|"Status" *: *0'
+}
+p_tcp() { # <ip> <port>  düz erişilebilirlik
+	curl -s -m 5 --noproxy '*' -o /dev/null "http://$1:$2/" 2>/dev/null || [ $? = 22 ] || [ $? = 52 ] || [ $? = 56 ]
+}
+
+doc_row() { # <etiket> <komut...>
+	local label=$1 t0 ms; shift
+	t0=$(now_cs)
+	if "$@" >/dev/null 2>&1; then
+		ms=$(el_ms "$t0")
+		printf '  %-36s %6s ms   ÇALIŞIYOR\n' "$label" "$ms"
+		printf '%06d %s\n' "$ms" "$label" >> "$RUN/doctor.best"
+	else
+		printf '  %-36s %6s ms   ÇALIŞMIYOR\n' "$label" "$(el_ms "$t0")"
+	fi
+}
+
+# Takılma avı: tarayıcıda asılı kalan gerçek adresleri defalarca çek, hangi AŞAMADA takıldığını göster.
+# Böylece "DNS mi, bağlantı mı" sorusu tarayıcıdaki hata metnine bakmadan cevaplanır.
+HUNT_URLS="https://www.gstatic.com/cast/sdk/libs/sender/1.0/cast_sender.js https://accounts.google.com/generate_204 https://www.youtube.com/favicon.ico"
+
+# Uzun süren ölçümler: web arayüzünün isteği 1 dk'yı bekleyemiyor, arkada çalıştırıp okunuyor
+bg_start() { # <ad> <komut...>
+	local name="$1"; shift
+	mkdir -p "$RUN"
+	if [ -f "$RUN/$name.pid" ] && kill -0 "$(cat "$RUN/$name.pid")" 2>/dev/null; then echo "zaten çalışıyor"; return 0; fi
+	: > "$RUN/$name.out"
+	# Alt kabuğun kendi stdout/stderr'i de kapatılır: aksi halde rpcd (file exec) çıktının bitmesini bekler ve web arayüzü isteği zaman aşımına düşer
+	( "$@" > "$RUN/$name.out" 2>&1 < /dev/null; rm -f "$RUN/$name.pid" ) > /dev/null 2>&1 < /dev/null &
+	echo $! > "$RUN/$name.pid"
+	echo "başladı"
+}
+bg_read() { # <ad>
+	local name="$1"
+	mkdir -p "$RUN"
+	[ -f "$RUN/$name.out" ] || { echo "BASLAMADI"; return 0; }
+	if [ -f "$RUN/$name.pid" ] && kill -0 "$(cat "$RUN/$name.pid")" 2>/dev/null; then echo "CALISIYOR"; else echo "BITTI"; fi
+	cat "$RUN/$name.out"
+}
+
+# Sunucunun el sıkışmayı kaç kez düşürdüğünü ölçer (günlükteki "failed to dial ... EOF" satırlarının kaynağı).
+# Alan adı birden çok IP'ye çözülüyorsa her IP ayrı ayrı denenir: hangi IP'nin bozuk olduğu görünür.
+cmd_dialtest() { # [tekrar] [--bg|--read]
+	local n=10 a tag sec tp addr port proto net insecure sni pin name host ips ip i okc fail line tc ta code tot bad=0 tried=0
+	case "${1:-}" in
+		--read) bg_read dialtest; return 0 ;;
+		--bg) shift; bg_start dialtest cmd_dialtest "$@"; return 0 ;;
+	esac
+	for a in "$@"; do case "$a" in [0-9]*) n="$a" ;; esac; done
+	[ -s "$RUN/nodes.tsv" ] || ucode "$SHARE/gen.uc" nodes > "$RUN/nodes.tsv" 2>/dev/null
+	[ -s "$RUN/nodes.tsv" ] || { echo "Sunucu tanımlı değil."; return 1; }
+	echo "Sunucu el sıkışma testi: her adrese $n kez sıfırdan bağlantı (TCP + TLS)."
+	echo "Günlükteki 'Sunucu el sıkışma sırasında bağlantıyı kapattı (EOF)' satırlarının ne sıklıkta olduğunu ölçer."
+	echo
+	while IFS="$(printf '\t')" read -r tag sec tp addr port proto net insecure sni pin name; do
+		[ -n "$addr" ] || continue
+		host="${sni:-$addr}"
+		case "$addr" in
+			*[!0-9.]*) ips=$(nslookup "$addr" "$(uget main.dns_bootstrap || echo 1.1.1.1)" 2>/dev/null | awk '
+				/^Name:/ { f = 1 }
+				f && /^Address/ { for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print $i }' | sort -u) ;;
+			*) ips="$addr" ;;
+		esac
+		[ -n "$ips" ] || { echo "$name ($addr): adres çözülemedi"; echo; continue; }
+		echo "$name — $addr:$port  (SNI: $host)"
+		for ip in $ips; do
+			i=0; okc=0; fail=0; tot=0
+			while [ $i -lt "$n" ]; do
+				i=$((i + 1))
+				line=$(curl -sk -m 8 -o /dev/null --noproxy '*' --resolve "$host:$port:$ip" \
+					-w '%{time_connect} %{time_appconnect} %{http_code}' "https://$host:$port/" 2>/dev/null)
+				set -- ${line:-0 0 000}
+				tc="$1"; ta="$2"; code="$3"
+				# El sıkışma tamamlandıysa TLS süresi 0'dan büyüktür; sunucu 400/404 dönse de bağlantı kurulmuştur
+				if [ "$(awk -v x="$ta" 'BEGIN{print (x > 0) ? 1 : 0}')" = 1 ]; then
+					okc=$((okc + 1))
+					tot=$(awk -v t="$tot" -v x="$ta" 'BEGIN{printf "%.4f", t + x}')
+				else
+					fail=$((fail + 1))
+					awk -v i="$i" -v c="$tc" -v o="$code" 'BEGIN {
+						printf "    %2d. deneme  DÜŞTÜ: %s\n", i, (c > 0 ? "TCP kuruldu ama TLS/el sıkışma tamamlanmadı (EOF/RST)" : "sunucuya hiç bağlanılamadı") }'
+				fi
+			done
+			tried=$((tried + n)); bad=$((bad + fail))
+			awk -v ip="$ip" -v o="$okc" -v n="$n" -v f="$fail" -v t="$tot" 'BEGIN {
+				printf "  %-15s %d/%d başarılı", ip, o, n
+				if (o > 0) printf " · ortalama el sıkışma %d ms", t / o * 1000
+				if (f > 0) printf "  <-- %d DÜŞTÜ", f
+				printf "\n" }'
+		done
+		echo
+	done < "$RUN/nodes.tsv"
+	echo "Yorum:"
+	if [ "$bad" = 0 ]; then
+		echo "  Sunucu her seferinde el sıkıştı. Günlükteki EOF satırları seyrekse sorun sunucuda değil."
+	else
+		awk -v b="$bad" -v t="$tried" 'BEGIN { printf "  %d/%d deneme düştü (%%%.0f). Sayfalarda takılan istekler tam olarak bunlar.\n", b, t, b * 100 / t }'
+		echo "  Tek bir IP düşüyorsa: Ayarlar → Genel → \"Sunucuya IP ile bağlan\" kapat (her bağlantıda yeni IP denenir)."
+		echo "  Bütün IP'ler düşüyorsa: sunucu/port operatör tarafından kısıtlanıyor olabilir — başka port (2053/2083/2087/8443) ya da ikinci sunucu dene."
+	fi
+	return 0
+}
+
+cmd_hunt() { # [tekrar] [url...] [--bg|--read]  varsayılan: 10 tekrar, tarayıcıda takılan adresler
+	local n=10 urls="" a sp r=0 u i ok_=0 dns_slow=0 con_slow=0 fail=0 line
+	# Arka planda çalıştır: ölçüm 1 dk'yı aşabiliyor, web arayüzünün isteği o kadar bekleyemiyor
+	case "${1:-}" in
+		--read) bg_read hunt; return 0 ;;
+		--bg) shift; bg_start hunt cmd_hunt "$@"; return 0 ;;
+	esac
+	for a in "$@"; do case "$a" in http*) urls="$urls $a" ;; [0-9]*) n="$a" ;; esac; done
+	[ -n "$urls" ] || urls="$HUNT_URLS"
+	sp="socks5://127.0.0.1:$(uget main.socks_port || echo 10808)"
+	running && r=1
+	echo "Takılma avı: her adres $n kez (tünelden). Aşamalar: DNS | bağlantı | TLS | ilk bayt"
+	echo
+	for u in $urls; do
+		echo "$(echo "$u" | sed 's|https*://||; s|/.*||')"
+		i=0; ok_=0; fail=0; dns_slow=0; con_slow=0
+		while [ $i -lt "$n" ]; do
+			i=$((i + 1))
+			line=$(curl -s -o /dev/null --noproxy '*' -m 25 $([ $r = 1 ] && echo "-x $sp") \
+				-w '%{time_namelookup} %{time_connect} %{time_appconnect} %{time_starttransfer} %{time_total} %{http_code}' "$u" 2>/dev/null)
+			set -- ${line:-0 0 0 0 0 0}
+			if [ "${6:-0}" -ge 200 ] 2>/dev/null && [ "${6:-0}" -lt 400 ] 2>/dev/null; then
+				ok_=$((ok_ + 1))
+				awk -v d="$1" -v c="$2" -v t="$3" -v b="$4" -v o="$5" -v i="$i" 'BEGIN {
+					if (o > 3) printf "  %2d. deneme  DNS %5d ms | bağlantı %5d ms | TLS %5d ms | ilk bayt %5d ms | TOPLAM %5d ms  <-- YAVAŞ\n", i, d*1000, (c-d)*1000, (t-c)*1000, (b-t)*1000, o*1000
+				}'
+				[ "$(awk -v d="$1" 'BEGIN{print (d > 1) ? 1 : 0}')" = 1 ] && dns_slow=$((dns_slow + 1))
+				[ "$(awk -v c="$2" -v d="$1" 'BEGIN{print (c-d > 1) ? 1 : 0}')" = 1 ] && con_slow=$((con_slow + 1))
+			else
+				fail=$((fail + 1))
+				awk -v d="$1" -v c="$2" -v o="$5" -v i="$i" 'BEGIN {
+					printf "  %2d. deneme  BAŞARISIZ: %s aşamasında, %d ms sonra\n", i,
+						(d >= 3 ? "DNS" : (c <= d ? "bağlantı kurulamadı" : "yanıt gelmedi")), o*1000
+				}'
+			fi
+		done
+		printf "  -> %d/%d başarılı · %d başarısız · %d kez DNS 1 sn üstü · %d kez bağlantı 1 sn üstü\n\n" "$ok_" "$n" "$fail" "$dns_slow" "$con_slow"
+	done
+	echo "Yorum:"
+	echo "  Başarısızlıklar 'DNS aşamasında' diyorsa sorun ad çözümlemede; ayarları DNS tarafında değiştiririz."
+	echo "  'bağlantı kurulamadı' diyorsa sorun tünelin sunucuya bağlanmasında; sunucu/port/SNI tarafına bakarız."
+	echo "  Hiç başarısızlık yoksa sorun modemde değil, tarayıcı tarafındadır (ör. Chrome'un kendi Güvenli DNS'i)."
+	return 0
+}
+
+cmd_doctor() { # [--apply]  yolları dener; --apply en iyi çalışan DNS'i ayarlara yazar
+	local apply=0 r=0 w h
+	[ "${1:-}" = --apply ] && apply=1
+	mkdir -p "$RUN"; : > "$RUN/doctor.best"
+	running && r=1
+	h=$(doc_host 1)
+	echo "KediRay $(kr_version) · yakalama: $(cat "$RUN/capture" 2>/dev/null || echo ?) · DNS modu: $(uget main.dns_mode || echo '(ayarsız)')"
+	echo "VPN: $([ $r = 1 ] && echo çalışıyor || echo kapalı) · test adı: $h"
+	echo
+	echo "0) Modemin kendi (VPN'siz) internet erişimi:"
+	doc_row "443 portu (1.1.1.1)" p_tcp 1.1.1.1 443
+	doc_row "443 portu (8.8.8.8)" p_tcp 8.8.8.8 443
+	doc_row "443 portu (9.9.9.9)" p_tcp 9.9.9.9 443
+	echo "  -> $(cmd_direct)"
+	echo
+	echo "1) DNS yolları (her biri ayrı ayrı):"
+	for w in $(wan_dns); do doc_row "operatör DNS'i $w (düz UDP)" p_udp "$w" "$h"; done
+	doc_row "1.1.1.1 (düz UDP)" p_udp 1.1.1.1 "$h"
+	doc_row "8.8.8.8 (düz UDP)" p_udp 8.8.8.8 "$h"
+	doc_row "Cloudflare DoH (direkt)" p_doh "https://1.1.1.1/dns-query" "$h"
+	doc_row "Google DoH (direkt)" p_doh "https://dns.google/resolve" "$h"
+	doc_row "Quad9 DoH (direkt)" p_doh "https://dns.quad9.net:5053/dns-query" "$h"
+	[ $r = 1 ] && doc_row "Cloudflare DoH (tünelden)" p_doh_tun "https://1.1.1.1/dns-query" "$h"
+	echo
+	echo "2) Modemin kendi çözümlemesi (istemcilerin gördüğü yol, her ad 3 kez):"
+	local i k fail=0 tot=0 n=0 ms t0 hh worst=0
+	for i in 1 2 3 4 5; do
+		hh=$(doc_host $i)
+		k=0
+		while [ $k -lt 3 ]; do
+			k=$((k + 1)); n=$((n + 1)); t0=$(now_cs)
+			if p_udp 127.0.0.1 "$hh"; then ms=$(el_ms "$t0")
+			else ms=$(el_ms "$t0"); fail=$((fail + 1)); printf '  %-36s %6s ms   BAŞARISIZ\n' "$hh" "$ms"; fi
+			tot=$((tot + ms)); [ "$ms" -gt "$worst" ] && { worst=$ms; }
+		done
+		[ $fail = 0 ] && printf '  %-36s %6s ms   tamam\n' "$hh" "$ms"
+	done
+	printf '  %-36s %6s ms ortalama · en yavaş %s ms · %d/%d başarısız\n' "toplam" "$((tot / n))" "$worst" "$fail" "$n"
+	echo
+	if [ $r = 1 ]; then
+		echo "3) Tünel:"
+		# Sayfa açılırken onlarca yeni bağlantı açılır; kaçının kurulamadığı asıl sorun.
+		# Tarayıcı, kurulamayan bağlantıyı dakikalarca bekler ("beklemede" kalan istekler).
+		local n=20 okc=0 badc=0 i slow=0 ms t0
+		i=0
+		while [ $i -lt $n ]; do
+			i=$((i + 1))
+			t0=$(now_cs)
+			if curl -s -m 8 -o /dev/null --noproxy '*' -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 10808)" \
+				"$(probe_url_list | head -1)" 2>/dev/null; then
+				okc=$((okc + 1)); ms=$(el_ms "$t0"); [ "$ms" -gt "$slow" ] && slow=$ms
+			else badc=$((badc + 1)); fi
+		done
+		printf '  %-36s %d/%d başarılı, %d başarısız (en yavaş %s ms)\n' "20 yeni bağlantı" "$okc" "$n" "$badc" "$slow"
+		if [ "$badc" -gt 0 ]; then
+			echo "  -> Yeni bağlantıların %$(( badc * 100 / n ))'i kurulamıyor. Bir sayfa 70-100 bağlantı açar;"
+			echo "     bu oranda her sayfada birkaç istek askıda kalır ve tarayıcı dönmeye devam eder."
+			echo "     Çözüm: Ayarlar → Kararlılık → 'TCP mux' değerini 8 yap (bir bağlantı çok isteği taşır,"
+			echo "     açılan bağlantı sayısı ~10 kat azalır) ya da ikinci bir sunucu ekle."
+		fi
+		local cw
+		cw=$(probe_socks2 "$(uget main.socks_port || echo 10808)" 8) \
+			&& printf '  %-36s %6s ms (yeni bağlantı) · %s ms (açık bağlantı)\n' "tünel testi" "${cw%% *}" "${cw##* }" \
+			|| echo "  tünel testi                          ÇALIŞMIYOR"
+		echo
+	fi
+	echo "4) Bağlantı zaman aşımları (mobil hatta önemli):"
+	printf '  %-36s %s (3 önerilir; 6 = düşen SYN 50 sn bekletir)\n' "tcp_syn_retries" "$(cat /proc/sys/net/ipv4/tcp_syn_retries 2>/dev/null || echo ?)"
+	printf '  %-36s %s (8 önerilir; 15 = ölü bağlantı dakikalarca beklenir)\n' "tcp_retries2" "$(cat /proc/sys/net/ipv4/tcp_retries2 2>/dev/null || echo ?)"
+	echo
+	echo "5) Son DNS/tünel hataları:"
+	logread 2>/dev/null | tail -n 400 | grep -E 'app/dns|failed to dial|connection reset|context deadline' | tail -n 4 | sed 's/^/  /'
+	echo
+	echo "Öneri:"
+	local best bestlabel
+	best=$(sort "$RUN/doctor.best" 2>/dev/null | grep -E 'DoH|UDP' | head -1)
+	if [ -z "$best" ]; then
+		echo "  Hiçbir DNS yolu çalışmadı."
+		echo "  Modemin kendi internet erişimi (0. bölüm) da çalışmıyorsa sorun DNS değil, WAN bağlantısındadır."
+	else
+		bestlabel=${best#* }
+		echo "  En hızlı çalışan yol: $bestlabel"
+		local newdns=""
+		case "$bestlabel" in
+			"operatör DNS'i "*) newdns=$(echo "$bestlabel" | awk '{print $3}') ;;
+			"1.1.1.1 (düz UDP)") newdns="1.1.1.1" ;;
+			"8.8.8.8 (düz UDP)") newdns="8.8.8.8" ;;
+			"Cloudflare DoH (direkt)") newdns="https+local://1.1.1.1/dns-query" ;;
+			"Google DoH (direkt)") newdns="https+local://dns.google/dns-query" ;;
+			"Quad9 DoH (direkt)") newdns="https+local://dns.quad9.net:5053/dns-query" ;;
+			"Cloudflare DoH (tünelden)") newdns="tunnel" ;;
+		esac
+		if [ "$newdns" = tunnel ]; then
+			echo "  Direkt yolların hepsi kapalı: DNS tünelden gitmeli."
+			[ $apply = 1 ] && { uci set "$CONF.main.dns_mode=private"; uci commit "$CONF"; echo "  -> DNS modu 'tünelden' yapıldı."; apply_changes; }
+			[ $apply = 0 ] && echo "  Uygulamak için: kediray doctor --apply"
+		elif [ -n "$newdns" ]; then
+			echo "  Ayarlanacak değer: dns_direct = $newdns"
+			if [ $apply = 1 ]; then
+				uci set "$CONF.main.dns_direct=$newdns"
+				uci commit "$CONF"
+				echo "  -> Uygulandı (direkt alan adları için DNS: $newdns; DNS modu değiştirilmedi)."
+				apply_changes
+			else
+				echo "  Uygulamak için: kediray doctor --apply"
+			fi
+		fi
+	fi
+	rm -f "$RUN/doctor.best"
+	return 0
+}
+
+cmd_webtest() { # [--json] [url...]  sayfa açılma gecikmesi: DNS / bağlantı / TLS / ilk bayt (direkt ve VPN)
+	local json=0 urls="" a sp r=0 host d v
+	for a in "$@"; do case "$a" in --json) json=1 ;; http*) urls="$urls $a" ;; esac; done
+	# Varsayılan: küçük ve hızlı iki adres (biri yurt dışı, biri Türkiye). Panelden çağrıldığında
+	# uzun sürerse arayüz zaman aşımına uğruyor; bu yüzden az sayıda adres ve kısa zaman aşımı.
+	[ -n "$urls" ] || urls="https://www.gstatic.com/generate_204 https://www.trendyol.com/"
+	sp="socks5://127.0.0.1:$(uget main.socks_port || echo 10808)"
+	running && r=1
+	mkdir -p "$RUN"
+	: > "$RUN/webtest.tsv"
+	# %{time_namelookup}: modemin kendi DNS yolu (dnsmasq -> KediRay DNS) = istemcilerin beklediği süre
+	# socks5:// (socks5h değil) -> ad çözümü yerelde yapılır, yani DNS süresi ayrı ölçülür
+	local W='%{time_namelookup} %{time_connect} %{time_appconnect} %{time_starttransfer} %{time_total} %{http_code}'
+	for a in $urls; do
+		host=$(echo "$a" | sed 's|https*://||; s|/.*||')
+		d=$(curl -s -o /dev/null --noproxy '*' -m 8 -w "$W" "$a" 2>/dev/null)
+		v=""
+		[ $r = 1 ] && v=$(curl -s -o /dev/null --noproxy '*' -m 8 -x "$sp" -w "$W" "$a" 2>/dev/null)
+		printf '%s\t%s\t%s\n' "$host" "${d:-0 0 0 0 0 0}" "${v:-0 0 0 0 0 0}" >> "$RUN/webtest.tsv"
+	done
+	# curl'de SOCKS desteği yoksa VPN sütunu boş kalır; bunu ölçümün içinde bildir
+	local socks_ok=1
+	[ $r = 1 ] && { curl --help all 2>/dev/null | grep -q -- '--socks5' || socks_ok=0; }
+	KR_SOCKS_OK=$socks_ok ucode "$SHARE/cli.uc" webtest "$RUN/webtest.tsv" "$r" > "$RUN/webtest.json" || return 1
+	if [ $json = 1 ]; then cat "$RUN/webtest.json"; return 0; fi
+	ucode -e '
+	let s = json(require("fs").readfile(ARGV[0]));
+	let ms = v => sprintf("%d ms", v);
+	printf("\n%-24s %9s %10s %8s %10s %10s\n", "adres", "DNS", "bağlantı", "TLS", "ilk bayt", "TOPLAM");
+	for (let t in s.tests) {
+		printf("%-24s\n", t.host);
+		let row = (l, x) => printf("  %-22s %9s %10s %8s %10s %10s  %s\n", l, ms(x.dns), ms(x.connect), ms(x.tls), ms(x.ttfb), ms(x.total), x.code ? "HTTP " + x.code : "yanıt yok");
+		row("direkt", t.direct);
+		if (s.running) row("VPN", t.vpn);
+	}
+	printf("\nOrtalama: DNS %d ms · VPN toplam %d ms · direkt toplam %d ms\n", s.avg.dns, s.avg.vpn_total, s.avg.direct_total);
+	for (let v in s.verdict) printf("  - %s\n", v);
+	' "$RUN/webtest.json"
+	return 0
+}
+
+cmd_best() { # en hızlıyı ölç ve ona geç (seçim sabitlenir)
+	cmd_ping all >/dev/null 2>&1
+	local best
+	best=$(awk -F"$T" '$2 >= 0 { if (b == "" || $2 < m) { m = $2; b = $1 } } END { print b }' "$RUN/ping.tsv")
+	[ -n "$best" ] || { echo "Çalışan sunucu bulunamadı" >&2; return 1; }
+	if [ "$(uget main.node)" = auto ] && running; then
+		set_override "$(awk -F"$T" -v s="$best" '$2 == s { print $1 }' "$RUN/nodes.tsv")"
+		echo "Sunucu: $best (otomatik geçiş açık kaldı)"
+	else
+		cmd_use "$best"
+	fi
+}
+
+cmd_use() { # <sec|auto>
+	[ -n "$1" ] || { echo "kullanım: kediray use <sunucu|auto>" >&2; return 1; }
+	if [ "$1" != auto ] && [ "$1" != none ]; then
+		[ "$(uci -q get "$CONF.$1")" = node ] || { echo "böyle bir sunucu yok: $1" >&2; return 1; }
+	fi
+	local old
+	old=$(uci -q get "$CONF.main.node")
+	uci set "$CONF.main.node=$1"
+	uci commit "$CONF"   # uci commit ile servis yeniden başlamaz -> bağlantılar kopmaz
+	[ "$1" = auto ] && [ -n "$2" ] && rm -f "$RUN/sticky"
+	if [ "$1" = none ] || [ "$old" = none ]; then
+		# "Bağlantıyı kes": VPN açık kalır, hiçbir sunucuya bağlanılmaz, trafik direkt çıkar (yapılandırma değişir)
+		[ "$1" = none ] && rm -f "$RUN/sticky" "$RUN/sticky.fail"
+		running && { apply_changes; [ "$1" != none ] && apply_node; }
+	else
+		running && apply_node
+	fi
+	echo "Sunucu: $1"
+}
+
+cmd_add() { # link/JSON ekle (argüman, dosya veya stdin)
+	local f="$RUN/add.$$" n
+	mkdir -p "$RUN"
+	if [ $# -gt 0 ]; then
+		if [ -f "$1" ]; then cat "$1" > "$f"; else printf '%s\n' "$@" > "$f"; fi
+	else
+		cat > "$f"
+	fi
+	case "$(tr -d ' \t\r\n' < "$f" | cut -c1)" in
+		'{'|'[')
+			# JSON yapıştırıldıysa önce yazım denetimi: hatanın satır/sütununu söyle
+			if ! ucode "$SHARE/node.uc" check-json "$(cat "$f")" > "$f.chk"; then
+				ucode -e 'let e = json(require("fs").readfile(ARGV[0])).errors[0]; warn("JSON hatası: satır " + e.line + ", sütun " + e.col + " — " + e.msg + "\n");' "$f.chk"
+				rm -f "$f" "$f.chk"; return 1
+			fi
+			rm -f "$f.chk" ;;
+	esac
+	n=$(ucode "$SHARE/link.uc" apply "$f")
+	rm -f "$f"
+	[ -n "$n" ] && [ "$n" -gt 0 ] 2>/dev/null || { echo "Geçerli link veya JSON bulunamadı" >&2; return 1; }
+	echo "$n sunucu eklendi"
+	apply_changes
+	return 0
+}
+
+fetch() { # url dosya
+	curl -fsSL --noproxy '' -m 30 -A "v2rayNG/1.10" -o "$2" "$1" 2>/dev/null && return 0
+	running && curl -fsSL --noproxy '' -m 30 -A "v2rayNG/1.10" -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" -o "$2" "$1" 2>/dev/null
+}
+
+# Güncelleme denetimi için kısa zaman aşımlı indirme: panel (rpcd) ~20 sn içinde yanıt bekler; eski 30+30 sn "panel yanıt vermedi" diyordu.
+ufetch() { # url dosya [saniye]
+	local t="${3:-7}"
+	# VPN çalışıyorsa önce tünelden dene: modemin doğrudan GitHub çıkışı bazı hatlarda 30 sn askıda kalıp zaman aşımına uğruyor
+	running && curl -fsSL --noproxy '' -m "$t" -A "v2rayNG/1.10" -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" -o "$2" "$1" 2>/dev/null && return 0
+	curl -fsSL --noproxy '' -m "$t" -A "v2rayNG/1.10" -o "$2" "$1" 2>/dev/null
+}
+
+cmd_sub() {
+	local url id f n total=0 fail=0
+	mkdir -p "$RUN"
+	for url in $(uget main.sub_url); do
+		id=$(printf '%s' "$url" | md5sum | cut -c1-8)
+		f="$RUN/sub.$id"
+		if fetch "$url" "$f" && [ -s "$f" ]; then
+			n=$(ucode "$SHARE/link.uc" apply "$f" "$id" 2>/dev/null)
+			if [ -n "$n" ] && [ "$n" -gt 0 ] 2>/dev/null; then total=$((total + n)); log "abonelik güncellendi: $n sunucu"; else fail=$((fail + 1)); say "abonelik boş/okunamadı: $url"; fi
+		else
+			fail=$((fail + 1)); sayerr "abonelik indirilemedi: $url"
+		fi
+		rm -f "$f"
+	done
+	date +%s > /etc/kediray.sub_last 2>/dev/null
+	echo "Toplam $total sunucu güncellendi, $fail hata"
+	[ $total -gt 0 ] && apply_changes
+	return 0
+}
+
+cmd_app() { # <app> <vpn|direct> | <app> add-ip <cidr> | <app> add-port <port|a-b>
+	[ "$(uci -q get "$CONF.$1")" = app ] || { echo "böyle bir uygulama yok: $1" >&2; return 1; }
+	local nm cur x
+	nm=$(uci -q get "$CONF.$1.name")
+	case "$2" in
+		vpn|direct|warp|frag)
+			[ "$2" = warp ] && [ -z "$(uget main.warp_key)" ] && { echo "önce WARP hesabı aç: kediray warp register" >&2; return 1; }
+			uci set "$CONF.$1.route=$2" ;;
+		on) uci set "$CONF.$1.enabled=1" ;;
+		off) uci set "$CONF.$1.enabled=0" ;;
+		dns)
+			case "$3" in
+				on) uci set "$CONF.$1.tunnel_dns=1" ;;
+				off) uci -q delete "$CONF.$1.tunnel_dns" ;;
+				*) echo "kullanım: kediray app <ad> dns on|off" >&2; return 1 ;;
+			esac ;;
+		add-domain)
+			echo "$3" | grep -qE '^[A-Za-z0-9._:-]+$' || { echo "geçersiz alan adı: $3" >&2; return 1; }
+			case "$3" in *:*) x="$3" ;; *) x="domain:$3" ;; esac
+			uci -q get "$CONF.$1.domain" | tr ' ' '\n' | grep -qx "$x" && { echo "$nm: $3 zaten listede"; return 0; }
+			uci add_list "$CONF.$1.domain=$x" ;;
+		add-ip)
+			# Tek IP verilirse komşularıyla (aynı /24) eklenir: oyun başka bir kanal sunucusuna geçince de direkt kalır
+			echo "$3" | grep -qE '^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$' || { echo "geçersiz IP: $3" >&2; return 1; }
+			uci -q get "$CONF.$1.ip" | tr ' ' '\n' | grep -qx "$3" && { echo "$nm: $3 zaten listede"; return 0; }
+			uci add_list "$CONF.$1.ip=$3" ;;
+		add-port)
+			echo "$3" | grep -qE '^[0-9]{1,5}(-[0-9]{1,5})?$' || { echo "geçersiz port: $3" >&2; return 1; }
+			cur=$(uci -q get "$CONF.$1.ports")
+			case " $cur " in *" $3 "*) echo "$nm: $3 zaten listede"; return 0 ;; esac
+			uci set "$CONF.$1.ports=$(echo "$cur $3" | sed 's/^ *//')" ;;
+		*) echo "kullanım: kediray app <ad> vpn|direct|warp|frag|on|off | dns on|off | add-domain <ad> | add-ip <cidr> | add-port <port>" >&2; return 1 ;;
+	esac
+	uci commit "$CONF"
+	echo "$nm: ${3:-$2}"
+	apply_changes
+	return 0
+}
+
+cmd_domain_find() { # <alan adı> -> "alan adı<TAB>tür" (ana|alt|ilgili|yok); yalnız çözülenler (ana hariç)
+	local in host base tld sld lab t t2 n d k
+	in=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's#^[a-z]*://##; s#[/?#:].*$##; s#^\*\.##; s#^\.##')
+	echo "$in" | grep -qE '^[a-z0-9-]+(\.[a-z0-9-]+)+$' || { echo "geçerli bir alan adı yaz (ör. discord.com)" >&2; return 1; }
+	tld=${in##*.}; t=${in%.*}; sld=${t##*.}
+	base="$sld.$tld"
+	case "$sld" in co|com|net|org|gov|edu|gen|k12|web|av|tel|bel)
+		if [ ${#tld} -eq 2 ] && [ "$t" != "$sld" ]; then t2=${t%.*}; base="${t2##*.}.$sld.$tld"; fi ;; esac
+	lab=${base%%.*}
+	d=$(mktemp -d /tmp/kr-find.XXXXXX) || return 1
+	# aday listesi: ana alan adı, girilen ad, yaygın alt alan adları, bilinen hizmetin ilgili alan adları
+	{
+		echo "$base ana"
+		[ "$in" != "$base" ] && echo "$in alt"
+		for k in www api cdn gateway media static images assets app login status dl download updates discovery; do echo "$k.$base alt"; done
+		case "$lab" in
+			discord) for k in discordapp.com discord.gg discord.media discordapp.net discordcdn.com discord.gift discordstatus.com; do echo "$k ilgili"; done ;;
+			youtube|youtu|google) for k in youtube.com youtu.be googlevideo.com ytimg.com ggpht.com youtube-nocookie.com googleusercontent.com; do echo "$k ilgili"; done ;;
+			instagram|facebook|fb) for k in instagram.com cdninstagram.com fbcdn.net facebook.com fb.com; do echo "$k ilgili"; done ;;
+			telegram|t) for k in telegram.org t.me telegram.me tdesktop.com telesco.pe; do echo "$k ilgili"; done ;;
+			spotify) for k in spotify.com scdn.co spotifycdn.com spoti.fi; do echo "$k ilgili"; done ;;
+			twitter|x) for k in twitter.com x.com twimg.com t.co; do echo "$k ilgili"; done ;;
+			tiktok) for k in tiktok.com tiktokcdn.com tiktokv.com byteoversea.com ibytedtos.com; do echo "$k ilgili"; done ;;
+			netflix) for k in netflix.com nflxvideo.net nflximg.net nflxso.net nflxext.com; do echo "$k ilgili"; done ;;
+			twitch) for k in twitch.tv ttvnw.net jtvnw.net twitchcdn.net; do echo "$k ilgili"; done ;;
+			reddit) for k in reddit.com redd.it redditmedia.com redditstatic.com; do echo "$k ilgili"; done ;;
+			steampowered|steamcommunity) for k in steampowered.com steamcommunity.com steamstatic.com steamcontent.com; do echo "$k ilgili"; done ;;
+			zoom) for k in zoom.us zoom.com zoomgov.com; do echo "$k ilgili"; done ;;
+		esac
+	} | awk '!s[$1]++' > "$d/list"
+	n=0
+	while read -r host k; do
+		n=$((n + 1))
+		(
+			t=""; command -v timeout >/dev/null 2>&1 && t="timeout 5"
+			if $t nslookup "$host" 127.0.0.1 2>/dev/null | sed -n '/^Name:/,$p' | grep -qE '^Address[^:]*: *[0-9]+\.[0-9]+'; then
+				printf '%s\t%s\n' "$host" "$k" > "$d/r.$n"
+			elif [ "$k" = ana ]; then
+				printf '%s\tyok\n' "$host" > "$d/r.$n"
+			fi
+		) &
+	done < "$d/list"
+	wait
+	for n in $(ls "$d" | grep '^r\.' | sed 's/^r\.//' | sort -n); do cat "$d/r.$n"; done
+	rm -rf "$d"
+	return 0
+}
+
+# ---- Otomatik en iyi bant / frekans (isteğe bağlı; qmodem gerekir) ----
+# Her bandı tek tek kilitleyip sinyali ölçer (RSRP + SINR + bant genişliği), en iyi N bandı birlikte kilitler.
+# Tarama sırasında hat ~25 sn/bant kesilir; bu yüzden varsayılan olarak yalnızca seçilen saatte (gece) çalışır.
+band_sec() { uci -q show qmodem 2>/dev/null | awk -F'[.=]' '$3 == "modem-device" { print $2; exit }'; }
+band_qm() { ubus call qmodem "$1" "$2" 2>/dev/null; }
+band_prog() { echo "$*" > "$RUN/band.progress"; }
+band_ifup() { # bant kilidi modemi yeniden kayıt ettirir; wwan arayüzü (ör. wwan0_1) düştüyse tekrar kaldır
+	local n up i=0
+	for n in $(uci -q show network 2>/dev/null | awk -F'[.=]' '$3 == "interface" && $2 ~ /^wwan/ { print $2 }'); do
+		while [ $i -lt 6 ]; do
+			up=$(ifstatus "$n" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null)
+			[ "$up" = true ] && break
+			[ $i = 0 ] || ifup "$n" >/dev/null 2>&1
+			i=$((i + 1)); sleep 5
+		done
+		up=$(ifstatus "$n" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null)
+		[ "$up" = true ] || { ifup "$n" >/dev/null 2>&1; log "bant: $n arayüzü kapalıydı, yeniden açıldı"; }
+		i=0
+	done
+}
+band_cur() { # <sec> -> şu an bağlı olunan ana hücrenin bandı (örn. "LTE_B3" / "B3" / "N78"); bilinmiyorsa boş
+	local js
+	js=$(band_qm get_current_band "{\"config_section\":\"$1\"}")
+	jsonfilter -s "$js" -e '@.current_band.cells[0].band_name' 2>/dev/null | head -n1
+}
+band_online() { # internet (wwan üzerinden) geldi mi? ~40 sn dener
+	local i=0
+	while [ $i -lt 8 ]; do
+		ping -c1 -W3 1.1.1.1 >/dev/null 2>&1 && return 0
+		ping -c1 -W3 8.8.8.8 >/dev/null 2>&1 && return 0
+		i=$((i + 1)); sleep 5
+	done
+	return 1
+}
+band_avail() { # <sec> <sınıf>
+	jsonfilter -s "$(band_qm get_lockband "{\"config_section\":\"$1\"}")" -e "@.lockband.$2.available_band[*].band_id" 2>/dev/null
+}
+band_locked() { # <sec> <sınıf>  (lock_band dizi de olabilir, "1,3,5" gibi metin de)
+	local js out
+	js=$(band_qm get_lockband "{\"config_section\":\"$1\"}")
+	out=$(jsonfilter -s "$js" -e "@.lockband.$2.lock_band[*]" 2>/dev/null)
+	[ -n "$out" ] || out=$(jsonfilter -s "$js" -e "@.lockband.$2.lock_band" 2>/dev/null | tr -d '[]" ' | tr ',' '\n')
+	echo "$out" | sed '/^$/d'
+}
+band_lock() { # <sec> <sınıf> <id,id,...>  — boş liste ASLA yazılmaz (tüm bantları kapatır, hat gider)
+	local p
+	[ -n "$3" ] || { say "bant kilidi: boş liste reddedildi ($2)"; return 1; }
+	p=$(printf '{"band_class":"%s","lock_band":"%s"}' "$2" "$3" | sed 's/"/\\"/g')
+	band_qm set_lockband "{\"config_section\":\"$1\",\"params\":\"$p\"}" >/dev/null
+}
+band_meas() { # <sec> -> "rsrp sinr bw" (3 örneğin ortalaması); ölçülemezse boş
+	local js r s n=0 sr=0 ss=0 i bw
+	i=0
+	while [ $i -lt 3 ]; do
+		js=$(band_qm cell_info "{\"config_section\":\"$1\"}")
+		r=$(jsonfilter -s "$js" -e '@.modem_info[@.key="RSRP"].value' 2>/dev/null | head -n1)
+		s=$(jsonfilter -s "$js" -e '@.modem_info[@.key="SINR"].value' 2>/dev/null | head -n1)
+		case "$r" in ''|*[!0-9.-]*) ;; *) case "$s" in ''|*[!0-9.-]*) s=0 ;; esac; sr=$(awk -v a="$sr" -v b="$r" 'BEGIN{print a+b}'); ss=$(awk -v a="$ss" -v b="$s" 'BEGIN{print a+b}'); n=$((n + 1)) ;; esac
+		i=$((i + 1)); sleep 3
+	done
+	[ $n -gt 0 ] || return 1
+	bw=$(jsonfilter -s "$(band_qm get_current_band "{\"config_section\":\"$1\"}")" -e '@.current_band.cells[0].dl_bandwidth' 2>/dev/null | head -n1 | tr -cd '0-9.')
+	awk -v a="$sr" -v b="$ss" -v n="$n" -v w="${bw:-0}" 'BEGIN{printf "%.1f %.1f %s\n", a/n, b/n, w+0}'
+}
+band_wait() { # <sec>: modem yeniden kayıt olana kadar bekle (en çok ~45 sn)
+	local i=0 js r
+	sleep 8
+	while [ $i -lt 16 ]; do
+		js=$(band_qm cell_info "{\"config_section\":\"$1\"}")
+		r=$(jsonfilter -s "$js" -e '@.modem_info[@.key="RSRP"].value' 2>/dev/null | head -n1)
+		case "$r" in ''|*[!0-9.-]*) ;; *) sleep 5; return 0 ;; esac
+		i=$((i + 1)); sleep 2
+	done
+	return 1
+}
+
+band_scan() {
+	local cb sec cls classes cand cands avail keep list best res sc lockf orig="$RUN/band.orig" resf="$RUN/band.result" m rsrp sinr bw tot n k
+	mkdir -p "$RUN"
+	sec=$(band_sec)
+	[ -n "$sec" ] && ubus list qmodem >/dev/null 2>&1 || { band_prog "hata: qmodem/modem bulunamadı"; echo "qmodem/modem bulunamadı" >&2; return 1; }
+	classes=$(uget main.band_auto_class); classes=${classes:-LTE}
+	[ "$classes" = LTE+NR ] && classes="LTE NR"
+	keep=$(uget main.band_auto_keep); keep=${keep:-2}
+	list=$(uget main.band_auto_bands | tr ',' ' ')
+	: > "$orig"; : > "$resf"
+	for cls in $classes; do
+		echo "$cls $(band_locked "$sec" "$cls" | paste -sd, -)" >> "$orig"
+	done
+	cp "$orig" /etc/kediray.band.orig 2>/dev/null   # elle geri dönmek için kalıcı kopya
+	band_prog "başlıyor"
+	: > /etc/kediray.band.scanning                  # tarama yarıda kalırsa (yeniden kurulum, elektrik) band_recover eski kilidi geri yükler
+	log "bant taraması başladı ($classes)"
+	for cls in $classes; do
+		avail=$(band_avail "$sec" "$cls")
+		[ -n "$avail" ] || continue
+		cands=""
+		if [ -n "$list" ]; then
+			for cand in $avail; do echo " $list " | grep -q " $cand " && cands="$cands $cand"; done
+		else
+			# Liste boşsa: önce Türkiye'de yaygın bantlar (sinyal olmayan bantlarda boşuna beklenmesin)
+			if [ "$cls" = LTE ]; then
+				for cand in 1 3 7 8 20 28 38 40 41; do echo " $avail " | tr '\n' ' ' | grep -q " $cand " && cands="$cands $cand"; done
+			else
+				cands=$(echo $avail)
+			fi
+		fi
+		n=0; tot=$(echo $cands | wc -w)
+		for cand in $cands; do
+			n=$((n + 1)); [ $n -gt 10 ] && break
+			band_prog "taranıyor: $cls B$cand ($n/$tot)"
+			band_lock "$sec" "$cls" "$cand"
+			band_wait "$sec" || { echo "$cls $cand - - 0 -99" >> "$resf"; continue; }
+			# Kilitlenen bant gerçekten bağlı mı? (Bu bantta kapsama yoksa modem eski hücrenin değerlerini gösterir; o ölçüm geçersiz)
+			cb=$(band_cur "$sec")
+			if [ -n "$cb" ] && ! echo "$cb" | grep -Eq "(^|[^0-9])$cand([^0-9]|$)"; then
+				echo "$cls $cand - - 0 -99" >> "$resf"
+				log "bant taraması: $cls B$cand bağlanamadı (bağlı bant: $cb), atlandı"
+				continue
+			fi
+			m=$(band_meas "$sec") || { echo "$cls $cand - - 0 -99" >> "$resf"; continue; }
+			set -- $m; rsrp=$1; sinr=$2; bw=$3
+			sc=$(awk -v r="$rsrp" -v s="$sinr" -v b="$bw" 'BEGIN{printf "%.1f", s + (r + 110) / 2 + b / 5}')
+			echo "$cls $cand $rsrp $sinr $bw $sc" >> "$resf"
+		done
+		best=$(awk -v c="$cls" '$1 == c && $6 > -50 { print $6, $2 }' "$resf" | sort -rn | head -n "$keep" | awk '{print $2}' | paste -sd, -)
+		if [ -n "$best" ]; then
+			band_lock "$sec" "$cls" "$best"
+			log "bant taraması: $cls -> $best"
+		else
+			# ölçüm yok: eski kilide dön
+			res=$(awk -v c="$cls" '$1 == c { print $2 }' "$orig")
+			[ -n "$res" ] || res=$(echo $avail | tr ' ' ',')
+			band_lock "$sec" "$cls" "$res"
+			say "bant taraması: $cls için ölçüm alınamadı, bant kilidi geri yüklendi ($res)"
+		fi
+	done
+	band_wait "$sec" >/dev/null 2>&1
+	band_ifup
+	if ! band_online; then
+		# Seçilen bant(lar)la internet gelmedi: eski kilide dön (bu bantta kapsama yok demektir)
+		say "bant taraması: seçilen bantla internet gelmedi, eski bant kilidi geri yükleniyor"
+		while read -r cls res; do
+			[ -n "$cls" ] || continue
+			[ -n "$res" ] || res=$(band_avail "$sec" "$cls" | paste -sd, -)
+			band_lock "$sec" "$cls" "$res"
+		done < "$orig"
+		band_wait "$sec" >/dev/null 2>&1; band_ifup
+		uci set "$CONF.main.band_last=$(date '+%d.%m.%Y %H:%M') — seçilen bantla internet gelmedi, eski kilide dönüldü"
+		uci commit "$CONF"; band_prog "bitti (geri alındı)"; rm -f /etc/kediray.band.scanning
+		return 0
+	fi
+	uci set "$CONF.main.band_last=$(date '+%d.%m.%Y %H:%M') — $(for cls in $classes; do printf '%s: %s  ' "$cls" "$(band_locked "$sec" "$cls" | paste -sd, -)"; done)"
+	uci commit "$CONF"
+	band_prog "bitti"
+	rm -f /etc/kediray.band.scanning
+	return 0
+}
+
+band_unlock() { # tüm bantlar açık
+	local sec cls
+	sec=$(band_sec); [ -n "$sec" ] || { echo "qmodem/modem bulunamadı" >&2; return 1; }
+	for cls in LTE NR NR_NSA; do
+		avail=$(band_avail "$sec" "$cls" | paste -sd, -)
+		[ -n "$avail" ] && band_lock "$sec" "$cls" "$avail"
+	done
+	band_wait "$sec" >/dev/null 2>&1; band_ifup
+	uci set "$CONF.main.band_last=$(date '+%d.%m.%Y %H:%M') — kilit kaldırıldı (tüm bantlar açık)"
+	uci commit "$CONF"
+	log "bant kilidi kaldırıldı"
+	echo "Bant kilidi kaldırıldı (tüm bantlar açık)"
+}
+
+# ---- Akıllı band seçimi (1.19.32): ZTE panelindeki gibi ----
+# Seçilen bantları tek tek kilitler; her birinde gerçek hızı (VPN açıksa tünel üzerinden, değilse direkt) ve sinyali
+# (RSRP, SINR) ölçer, skora göre sıralar. İstenirse en iyi bandı kilitler; iptalde, hatada ya da internet gelmezse eski kilit geri yüklenir.
+# Çıktı: $RUN/band.smart.state (aşama/ilerleme) ve $RUN/band.smart.result (satır: id ad kullanılan hız sinyal rsrp bw skor durum)
+BS_URLS="https://speed.cloudflare.com/__down?bytes=200000000 http://speedtest.tele2.net/100MB.zip"
+bs_cancelled() { [ -f "$RUN/band.cancel" ]; }
+bs_sleep() { # <sn>: iptal edilirse erken döner (1)
+	local i=0
+	while [ "$i" -lt "$1" ]; do bs_cancelled && return 1; sleep 1; i=$((i + 1)); done
+	return 0
+}
+bs_put() { # <aşama> [bitti]  — arayüzün okuduğu durum dosyası (band_smart içindeki yerel değişkenleri kullanır)
+	printf 'cls=%s\ntotal=%s\ndone=%s\nphase=%s\nfinished=%s\nbest=%s\napplied=%s\nmeasure=%s\nnote=%s\n' \
+		"$cls" "$tot" "$dn" "$1" "${2:-0}" "$best" "$applied" "$meas" "$note" > "$RUN/band.smart.state"
+	band_prog "${1:-bitti}"
+}
+bs_cells() { # <sec> -> bağlı hücrelerin bantları (örn. N78+B3)
+	jsonfilter -s "$(band_qm get_current_band "{\"config_section\":\"$1\"}")" -e '@.current_band.cells[*].band_name' 2>/dev/null | sed '/^$/d' | paste -sd+ -
+}
+bs_rsrp() { # <sec> -> RSRP (sayı) ya da hata
+	local r
+	r=$(jsonfilter -s "$(band_qm cell_info "{\"config_section\":\"$1\"}")" -e '@.modem_info[@.key="RSRP"].value' 2>/dev/null | head -n1)
+	case "$r" in ''|*[!0-9.-]*) return 1 ;; esac
+	echo "$r"
+}
+bs_wait() { # <sec> <bant id> <azami sn>: kilitlenen bant gerçekten bağlanana kadar bekle. 0=bağlandı 1=bağlanamadı 2=iptal
+	local end used
+	bs_sleep 2 || return 2
+	end=$(( $(date +%s) + $3 ))
+	while [ "$(date +%s)" -lt "$end" ]; do
+		bs_cancelled && return 2
+		if bs_rsrp "$1" >/dev/null; then
+			used=$(bs_cells "$1")
+			# bant adı bilinmiyorsa (boş) yalnızca sinyalin gelmesi yeter; biliniyorsa kilitlenen bant listede olmalı
+			if [ -z "$used" ] || echo "$used" | grep -Eq "(^|[^0-9])$2([^0-9]|\$)"; then
+				bs_sleep 2 || return 2
+				return 0
+			fi
+		fi
+		sleep 1
+	done
+	return 1
+}
+bs_meas() { # <sec> -> "rsrp sinr bw" (2 örneğin ortalaması, ~2 sn; band_meas'in hızlı hali)
+	local js r sv n=0 sr=0 ss=0 i=0 bw
+	while [ "$i" -lt 2 ]; do
+		js=$(band_qm cell_info "{\"config_section\":\"$1\"}")
+		r=$(jsonfilter -s "$js" -e '@.modem_info[@.key="RSRP"].value' 2>/dev/null | head -n1)
+		sv=$(jsonfilter -s "$js" -e '@.modem_info[@.key="SINR"].value' 2>/dev/null | head -n1)
+		case "$r" in ''|*[!0-9.-]*) ;; *) case "$sv" in ''|*[!0-9.-]*) sv=0 ;; esac; sr=$(awk -v a="$sr" -v b="$r" 'BEGIN{print a+b}'); ss=$(awk -v a="$ss" -v b="$sv" 'BEGIN{print a+b}'); n=$((n + 1)) ;; esac
+		i=$((i + 1)); [ "$i" -lt 2 ] && sleep 1
+	done
+	[ "$n" -gt 0 ] || return 1
+	bw=$(jsonfilter -s "$(band_qm get_current_band "{\"config_section\":\"$1\"}")" -e '@.current_band.cells[0].dl_bandwidth' 2>/dev/null | head -n1 | tr -cd '0-9.')
+	awk -v a="$sr" -v b="$ss" -v n="$n" -v w="${bw:-0}" 'BEGIN{printf "%.1f %.1f %s\n", a/n, b/n, w+0}'
+}
+bs_speed() { # <sn> -> Mbps (ölçülemezse 0). 4 paralel indirme; VPN açıksa SOCKS üzerinden (hattın direkt interneti olmayabilir)
+	local dur="$1" sp px="" u i pids p f t0 el fin tot
+	if running; then sp=$(uget main.socks_port); px="socks5h://127.0.0.1:${sp:-10808}"; fi
+	for u in $BS_URLS; do
+		rm -f "$RUN"/bs.dl.* 2>/dev/null
+		pids=""; i=0; t0=$(date +%s)
+		while [ "$i" -lt 4 ]; do
+			if [ -n "$px" ]; then
+				curl -s -o /dev/null -m "$dur" --noproxy '' -x "$px" -w '%{size_download}\n' "$u" > "$RUN/bs.dl.$i" 2>/dev/null &
+			else
+				curl -s -o /dev/null -m "$dur" -w '%{size_download}\n' "$u" > "$RUN/bs.dl.$i" 2>/dev/null &
+			fi
+			pids="$pids $!"; i=$((i + 1))
+		done
+		# curl işini bitirince boyutu dosyaya yazar; dördü de yazdıysa ya da süre dolduysa dur
+		i=0
+		while [ "$i" -le $((dur + 3)) ]; do
+			if bs_cancelled; then kill $pids 2>/dev/null; rm -f "$RUN"/bs.dl.* 2>/dev/null; echo 0; return 0; fi
+			fin=0; for f in "$RUN"/bs.dl.*; do [ -s "$f" ] && fin=$((fin + 1)); done
+			[ "$fin" -ge 4 ] && break
+			sleep 1; i=$((i + 1))
+		done
+		el=$(( $(date +%s) - t0 )); [ "$el" -lt 1 ] && el=1; [ "$el" -gt "$dur" ] && el=$dur
+		kill $pids 2>/dev/null
+		tot=$(cat "$RUN"/bs.dl.* 2>/dev/null | awk '{ s += $1 } END { printf "%d", s }')
+		rm -f "$RUN"/bs.dl.* 2>/dev/null
+		if [ "${tot:-0}" -gt 100000 ]; then
+			awk -v b="$tot" -v d="$el" 'BEGIN { printf "%.1f\n", b * 8 / d / 1000000 }'
+			return 0
+		fi
+	done
+	echo 0
+}
+bs_online() { # seçilen bantla internet geldi mi? (VPN açıksa tünel üzerinden, ~40 sn dener)
+	local i=0 sp
+	if running; then
+		sp=$(uget main.socks_port); sp=${sp:-10808}
+		while [ "$i" -lt 8 ]; do
+			curl -s -m 6 -o /dev/null --noproxy '' -x "socks5h://127.0.0.1:$sp" "https://www.gstatic.com/generate_204" 2>/dev/null && return 0
+			i=$((i + 1)); sleep 5
+		done
+		return 1
+	fi
+	band_online
+}
+bs_restore() { # band_smart içinden: eski kilidi geri yükle
+	local r="$orig"
+	[ -n "$r" ] || r=$(band_avail "$sec" "$cls" | paste -sd, -)
+	band_lock "$sec" "$cls" "$r"
+	band_wait "$sec" >/dev/null 2>&1; band_ifup
+}
+
+band_smart() { # --class NR_NSA|NR|LTE --bands "78 1 3" --wait 15 --measure speed|signal --apply 1|0
+	local cls="" list="" wait=15 meas=speed apply=1 sec avail cands cand name js tot=0 dn=0 best="" applied=0 note="" orig="" rc m rsrp sinr bw mb sc used status resf="$RUN/band.smart.result" nf="$RUN/band.smart.names"
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--class) cls="$2"; shift ;;
+			--bands) list="$2"; shift ;;
+			--wait) wait="$2"; shift ;;
+			--measure) meas="$2"; shift ;;
+			--apply) apply="$2"; shift ;;
+		esac
+		shift
+	done
+	case "$cls" in LTE|NR|NR_NSA) ;; *) echo "geçersiz şebeke sınıfı: $cls" >&2; return 1 ;; esac
+	case "$meas" in speed|signal) ;; *) meas=speed ;; esac
+	case "$wait" in ''|*[!0-9]*) wait=15 ;; esac
+	[ "$wait" -lt 10 ] && wait=10
+	[ "$wait" -gt 120 ] && wait=120
+	mkdir -p "$RUN"
+	sec=$(band_sec)
+	[ -n "$sec" ] && ubus list qmodem >/dev/null 2>&1 || { echo "qmodem/modem bulunamadı" >&2; return 1; }
+	js=$(band_qm get_lockband "{\"config_section\":\"$sec\"}")
+	avail=$(band_avail "$sec" "$cls")
+	[ -n "$avail" ] || { echo "$cls için bant listesi alınamadı" >&2; return 1; }
+	cands=""
+	if [ -n "$list" ]; then
+		for cand in $avail; do echo " $list " | grep -q " $cand " && cands="$cands $cand"; done
+	else
+		cands=$(echo $avail)
+	fi
+	cands=$(echo $cands | cut -d' ' -f1-16)   # en çok 16 bant
+	tot=$(echo $cands | wc -w)
+	[ "$tot" -gt 0 ] || { echo "seçilen bantlar modemde yok" >&2; return 1; }
+	# bant kimliği -> görünen ad (N78, B3 ...)
+	jsonfilter -s "$js" -e "@.lockband.$cls.available_band[*].band_id" 2>/dev/null > "$nf.1"
+	jsonfilter -s "$js" -e "@.lockband.$cls.available_band[*].band_name" 2>/dev/null > "$nf.2"
+	paste "$nf.1" "$nf.2" > "$nf" 2>/dev/null; rm -f "$nf.1" "$nf.2"
+
+	rm -f "$RUN/band.cancel"; : > "$resf"
+	orig=$(band_locked "$sec" "$cls" | paste -sd, -)
+	echo "$cls $orig" > "$RUN/band.orig"
+	cp "$RUN/band.orig" /etc/kediray.band.orig 2>/dev/null   # tarama yarıda kalırsa band_recover buradan geri yükler
+	: > /etc/kediray.band.scanning
+	log "akıllı bant taraması başladı ($cls, $tot bant, ölçüm: $meas)"
+	bs_put "Hazırlanıyor"
+
+	for cand in $cands; do
+		bs_cancelled && break
+		name=$(awk -F'\t' -v i="$cand" '$1 == i { print $2; exit }' "$nf" 2>/dev/null | tr -d ' ')
+		name=${name:-$cand}
+		bs_put "Kilitleniyor: $name"
+		band_lock "$sec" "$cls" "$cand"
+		bs_wait "$sec" "$cand" "$wait"; rc=$?
+		[ "$rc" = 2 ] && break
+		if [ "$rc" != 0 ]; then
+			echo "$cand $name - - - - - -99 nocov" >> "$resf"
+			dn=$((dn + 1)); continue
+		fi
+		used=$(bs_cells "$sec"); used=${used:--}
+		bs_put "Sinyal ölçülüyor: $name"
+		m=$(bs_meas "$sec") || m=""
+		bs_cancelled && break
+		if [ -z "$m" ]; then
+			echo "$cand $name $used - - - - -99 nomeas" >> "$resf"
+			dn=$((dn + 1)); continue
+		fi
+		set -- $m; rsrp=$1; sinr=$2; bw=$3
+		mb="-"; status=ok
+		if [ "$meas" = speed ]; then
+			bs_put "Hız ölçülüyor: $name"
+			mb=$(bs_speed 6)
+			bs_cancelled && break
+			sc=$(awk -v m="$mb" -v s="$sinr" 'BEGIN { if (m + 0 > 0) printf "%.1f", m * 10 + s; else print "-99" }')
+			[ "$(awk -v m="$mb" 'BEGIN { print (m + 0 > 0) ? 1 : 0 }')" = 1 ] || status=nospeed
+		else
+			# gece taramasıyla aynı sinyal puanı: SINR + (RSRP+110)/2 + bant genişliği/5
+			sc=$(awk -v r="$rsrp" -v s="$sinr" -v b="$bw" 'BEGIN { printf "%.1f", s + (r + 110) / 2 + b / 5 }')
+		fi
+		echo "$cand $name $used $mb $sinr $rsrp $bw $sc $status" >> "$resf"
+		dn=$((dn + 1))
+	done
+
+	best=$(awk '$9 == "ok" { print $8, $1 }' "$resf" | sort -rn | head -n1 | awk '{ print $2 }')
+	if bs_cancelled; then
+		bs_put "Eski band kilidi geri yükleniyor"
+		bs_restore
+		note="İptal edildi; eski band kilidi geri yüklendi."
+	elif [ "$apply" = 1 ] && [ -n "$best" ]; then
+		bs_put "En iyi bant uygulanıyor"
+		band_lock "$sec" "$cls" "$best"; applied=1
+		band_wait "$sec" >/dev/null 2>&1; band_ifup
+		if bs_online; then
+			note="En iyi bant uygulandı."
+		else
+			applied=0
+			bs_put "İnternet gelmedi, eski kilide dönülüyor"
+			bs_restore
+			note="Seçilen bantla internet gelmedi; eski band kilidi geri yüklendi."
+		fi
+	else
+		bs_put "Eski band kilidi geri yükleniyor"
+		bs_restore
+		if [ -n "$best" ]; then note="Eski band kilidi geri yüklendi (en iyi bant tabloda işaretli)."
+		else note="Hiçbir bantta ölçüm alınamadı; eski band kilidi geri yüklendi."; fi
+	fi
+	uci set "$CONF.main.band_last=$(date '+%d.%m.%Y %H:%M') — akıllı seçim ($cls): $(band_locked "$sec" "$cls" | paste -sd, -)"
+	uci commit "$CONF"
+	dn=$tot
+	bs_put "" 1
+	rm -f /etc/kediray.band.scanning "$RUN/band.cancel"
+	log "akıllı bant taraması bitti ($note)"
+	return 0
+}
+
+band_smart_status() { # arayüz için JSON
+	local run=0 st="$RUN/band.smart.state" rs="$RUN/band.smart.result"
+	band_recover >/dev/null 2>&1
+	[ -f "$RUN/band.pid" ] && kill -0 "$(cat "$RUN/band.pid" 2>/dev/null)" 2>/dev/null && run=1
+	printf '{"running":%s' "$run"
+	[ -f "$st" ] && awk '{ i = index($0, "="); if (i < 2) next; k = substr($0, 1, i - 1); v = substr($0, i + 1); gsub(/\\/, "\\\\", v); gsub(/"/, "\\\"", v); printf ",\"%s\":\"%s\"", k, v }' "$st"
+	printf ',"rows":['
+	[ -f "$rs" ] && awk 'function n(x) { return (x == "-" || x == "") ? "null" : x } NF >= 9 { printf "%s{\"id\":\"%s\",\"name\":\"%s\",\"used\":\"%s\",\"mbps\":%s,\"sinr\":%s,\"rsrp\":%s,\"bw\":%s,\"score\":%s,\"status\":\"%s\"}", (c++ ? "," : ""), $1, $2, $3, n($4), n($5), n($6), n($7), n($8), $9 }' "$rs"
+	printf ']}\n'
+}
+
+band_info() { # modemin bant listesi (qmodem get_lockband çıktısı, JSON)
+	local sec
+	sec=$(band_sec)
+	[ -n "$sec" ] && ubus list qmodem >/dev/null 2>&1 || { echo '{"error":"qmodem/modem bulunamadı"}'; return 1; }
+	band_qm get_lockband "{\"config_section\":\"$sec\"}"
+}
+
+cmd_band() { # scan [--bg] | unlock | status | auto on|off
+	case "$1" in
+		scan)
+			# --bg: dnstest ile aynı yöntem (stdout/stderr/stdin kapalı) — aksi halde rpcd çıktının bitmesini bekler, web arayüzü "XHR timed out" der
+			if [ "$2" = --bg ]; then bg_start band band_scan
+			elif [ -f "$RUN/band.pid" ] && kill -0 "$(cat "$RUN/band.pid" 2>/dev/null)" 2>/dev/null; then echo "tarama zaten sürüyor" >&2; return 1
+			else band_scan; fi ;;
+		unlock) band_unlock ;;
+		restore) band_recover --force ;;
+		smart) # kediray band smart [--bg] --class NR_NSA --bands "78 1" --wait 15 --measure speed|signal --apply 1|0
+			shift
+			if [ "$1" = --bg ]; then
+				shift
+				if [ -f "$RUN/band.pid" ] && kill -0 "$(cat "$RUN/band.pid" 2>/dev/null)" 2>/dev/null; then echo "tarama zaten sürüyor" >&2; return 1; fi
+				mkdir -p "$RUN"; rm -f "$RUN/band.smart.state" "$RUN/band.smart.result" "$RUN/band.cancel"
+				bg_start band band_smart "$@"
+			else
+				band_smart "$@"
+			fi ;;
+		smart-status) band_smart_status ;;
+		cancel) mkdir -p "$RUN"; : > "$RUN/band.cancel"; echo "iptal istendi" ;;
+		info) band_info ;;
+		status)
+			band_recover >/dev/null
+			local run=0
+			[ -f "$RUN/band.pid" ] && kill -0 "$(cat "$RUN/band.pid" 2>/dev/null)" 2>/dev/null && run=1
+			echo "calisiyor: $run"
+			echo "ilerleme: $(cat "$RUN/band.progress" 2>/dev/null)"
+			echo "son: $(uget main.band_last)"
+			[ -s "$RUN/band.result" ] && { echo "--- sınıf bant RSRP SINR BW(MHz) puan"; cat "$RUN/band.result"; } ;;
+		auto)
+			case "$2" in
+				on) uci set "$CONF.main.band_auto=1" ;;
+				off) uci set "$CONF.main.band_auto=0" ;;
+				*) echo "kullanım: kediray band auto on|off" >&2; return 1 ;;
+			esac
+			uci commit "$CONF"; echo "Otomatik bant seçimi: $2" ;;
+		*) echo "kullanım: kediray band scan [--bg] | smart [--bg] --class C --bands \"id id\" | cancel | info | unlock | restore | status | auto on|off" >&2; return 1 ;;
+	esac
+}
+
+band_recover() { # [--force]  yarım kalan taramadan sonra bantları eski kilide döndür (tüm bantlar kapalı/tek bantta kalmasın)
+	local sec cls ids av
+	[ -f /etc/kediray.band.scanning ] || [ "$1" = --force ] || return 0
+	if [ "$1" != --force ]; then
+		# tarama sürüyorsa dokunma: ilerleme dosyası son 4 dakikada güncellendiyse canlı say
+		[ -f "$RUN/band.progress" ] && [ -z "$(find "$RUN/band.progress" -mmin +4 2>/dev/null)" ] && return 0
+	fi
+	sec=$(band_sec); [ -n "$sec" ] || return 0
+	if [ -s /etc/kediray.band.orig ]; then
+		while read -r cls ids; do
+			[ -n "$cls" ] || continue
+			[ -n "$ids" ] || ids=$(band_avail "$sec" "$cls" | paste -sd, -)
+			band_lock "$sec" "$cls" "$ids"
+		done < /etc/kediray.band.orig
+	else
+		band_unlock >/dev/null
+	fi
+	rm -f /etc/kediray.band.scanning
+	band_wait "$sec" >/dev/null 2>&1; band_ifup
+	log "bant: yarım kalan tarama sonrası eski bant kilidi geri yüklendi"
+	echo "Eski bant kilidi geri yüklendi"
+}
+
+band_tick() { # watchdog içinden: seçilen saatte günde bir kez tara
+	band_recover
+	[ "$(uget main.band_auto)" = 1 ] || return 0
+	local h d want
+	h=$(date +%H); h=${h#0}; h=${h:-0}
+	want=$(uget main.band_auto_hour); want=${want:-4}
+	[ "$h" = "$want" ] || return 0
+	d=$(date +%F)
+	[ "$(cat "$RUN/band.day" 2>/dev/null)" = "$d" ] && return 0
+	mkdir -p "$RUN"; echo "$d" > "$RUN/band.day"
+	cmd_band scan --bg >/dev/null 2>&1
+}
+
+cmd_warp() { # register | on | off | via vpn|direct | status [--json] | forget
+	local x priv pub body resp sp bin ts
+	case "$1" in
+		register)
+			bin=$(corebin 2>/dev/null); [ -x "$bin" ] || { echo "Xray çekirdeği bulunamadı" >&2; return 1; }
+			x=$("$bin" x25519 2>/dev/null)
+			priv=$(echo "$x" | sed -n 's/^[Pp]rivate[ ]*[Kk]ey *: *//p' | head -1)
+			pub=$(echo "$x" | sed -n 's/^[Pp]ublic[ ]*[Kk]ey *: *//p; s/^Password[^:]*: *//p' | head -1)
+			[ -n "$priv" ] && [ -n "$pub" ] || { echo "anahtar üretilemedi" >&2; return 1; }
+			# Xray anahtarları URL-güvenli, dolgusuz base64 verir; WireGuard/Cloudflare standart (dolgulu) base64 ister
+			priv=$(echo "$priv" | tr '_-' '/+'); pub=$(echo "$pub" | tr '_-' '/+')
+			while [ $(( ${#priv} % 4 )) -ne 0 ]; do priv="$priv="; done
+			while [ $(( ${#pub} % 4 )) -ne 0 ]; do pub="$pub="; done
+			ts=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+			body="{\"key\":\"$pub\",\"install_id\":\"\",\"fcm_token\":\"\",\"tos\":\"$ts\",\"type\":\"Android\",\"model\":\"PC\",\"locale\":\"en_US\"}"
+			echo "Cloudflare WARP'a kaydoluyor…"
+			sp=$(uget main.socks_port); [ -n "$sp" ] || sp=10808
+			resp=$(curl -s -m 20 --noproxy '' -X POST -H 'Content-Type: application/json' -H 'User-Agent: okhttp/3.12.1' -H 'CF-Client-Version: a-6.3-1922' \
+				-d "$body" "https://api.cloudflareclient.com/v0a2158/reg" 2>/dev/null)
+			echo "$resp" | grep -q '"peers"' || resp=$(curl -s -m 25 --noproxy '' -x "socks5h://127.0.0.1:$sp" -X POST -H 'Content-Type: application/json' -H 'User-Agent: okhttp/3.12.1' -H 'CF-Client-Version: a-6.3-1922' \
+				-d "$body" "https://api.cloudflareclient.com/v0a2158/reg" 2>/dev/null)
+			echo "$resp" | grep -q '"peers"' || { echo "WARP kaydı alınamadı (Cloudflare'a ulaşılamadı ya da reddetti). VPN açıkken tekrar dene." >&2; return 1; }
+			KR_RESP="$resp" ucode -e '
+				let r = json(getenv("KR_RESP")), c = r?.config, i = c?.interface?.addresses, p = c?.peers?.[0];
+				if (!p?.public_key || !i?.v4) exit(3);
+				let res = [];
+				let b = b64dec(c.client_id ?? "");
+				if (b) for (let k = 0; k < 3; k++) push(res, ord(b, k) ?? 0);
+				print(join("\n", [p.public_key, i.v4, i.v6 ?? "", join(",", length(res) == 3 ? res : [0, 0, 0]), p.endpoint?.host ?? ""]), "\n");
+			' > "$RUN/warp.reg" 2>/dev/null || { echo "WARP yanıtı çözülemedi" >&2; return 1; }
+			uci set "$CONF.main.warp_key=$priv"
+			uci set "$CONF.main.warp_pub=$(sed -n 1p "$RUN/warp.reg")"
+			uci set "$CONF.main.warp_v4=$(sed -n 2p "$RUN/warp.reg")"
+			uci set "$CONF.main.warp_v6=$(sed -n 3p "$RUN/warp.reg")"
+			uci set "$CONF.main.warp_reserved=$(sed -n 4p "$RUN/warp.reg")"
+			uci set "$CONF.main.warp=1"
+			[ -n "$(uget main.warp_via)" ] || uci set "$CONF.main.warp_via=vpn"
+			rm -f "$RUN/warp.reg"
+			uci commit "$CONF"
+			echo "WARP hesabı oluşturuldu ve açıldı. VPN Ayırma'da bir uygulamayı 'WARP' yap."
+			apply_changes
+			return 0 ;;
+		on|off)
+			[ -n "$(uget main.warp_key)" ] || { echo "önce: kediray warp register" >&2; return 1; }
+			uci set "$CONF.main.warp=$([ "$1" = on ] && echo 1 || echo 0)"; uci commit "$CONF"
+			echo "WARP: $1"; apply_changes; return 0 ;;
+		via)
+			case "$2" in vpn|direct) ;; *) echo "kullanım: kediray warp via vpn|direct" >&2; return 1 ;; esac
+			uci set "$CONF.main.warp_via=$2"; uci commit "$CONF"
+			echo "WARP yolu: $2"; apply_changes; return 0 ;;
+		forget)
+			for x in warp warp_key warp_pub warp_v4 warp_v6 warp_reserved warp_via; do uci -q delete "$CONF.main.$x"; done
+			uci commit "$CONF"; echo "WARP hesabı silindi"; apply_changes; return 0 ;;
+		status|"")
+			local reg=0 en=0 via
+			[ -n "$(uget main.warp_key)" ] && reg=1
+			[ "$(uget main.warp)" = 1 ] && en=1
+			via=$(uget main.warp_via); [ -n "$via" ] || via=vpn
+			if [ "$2" = --json ] || [ "$1" = "--json" ]; then
+				printf '{"registered":%s,"enabled":%s,"via":"%s"}\n' "$([ $reg = 1 ] && echo true || echo false)" "$([ $en = 1 ] && echo true || echo false)" "$via"
+			else
+				echo "WARP: $([ $reg = 1 ] && echo kayıtlı || echo kayıtsız), $([ $en = 1 ] && echo açık || echo kapalı), yol: $via"
+			fi
+			return 0 ;;
+		*) echo "kullanım: kediray warp register|on|off|via vpn|direct|status|forget" >&2; return 1 ;;
+	esac
+}
+
+cmd_device() { # <mac> <vpn|direct|default> [ad]
+	local mac sec
+	mac=$(echo "$1" | tr 'A-F' 'a-f')
+	echo "$mac" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || { echo "geçersiz MAC: $1" >&2; return 1; }
+	sec=$(uci show "$CONF" 2>/dev/null | awk -F'[.=]' -v m="$mac" 'tolower($0) ~ "\\.mac=.?" m { print $2; exit }')
+	case "$2" in
+		default|remove)
+			[ -n "$sec" ] && uci delete "$CONF.$sec" ;;
+		vpn|direct|block)
+			[ -n "$sec" ] || { sec=$(uci add "$CONF" device); uci set "$CONF.$sec.mac=$mac"; }
+			uci set "$CONF.$sec.mode=$2"
+			[ -n "$3" ] && uci set "$CONF.$sec.name=$3" ;;
+		*) echo "kullanım: kediray device <mac> vpn|direct|block|default [ad]" >&2; return 1 ;;
+	esac
+	uci commit "$CONF"
+	echo "$mac: $2"
+	apply_changes
+	return 0
+}
+
+# ---------- trafik sayaçları ----------
+wan_dev() {
+	local net="" dev="" f="$RUN/wan_dev"
+	[ -s "$f" ] && [ -d "/sys/class/net/$(cat "$f")" ] && { cat "$f"; return 0; }
+	if [ -f /lib/functions/network.sh ]; then
+		. /lib/functions/network.sh
+		network_flush_cache 2>/dev/null
+		network_find_wan net 2>/dev/null && network_get_device dev "$net" 2>/dev/null
+	fi
+	[ -n "$dev" ] || dev=$(ip -4 route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
+	[ -n "$dev" ] && { mkdir -p "$RUN"; echo "$dev" > "$f"; }
+	echo "$dev"
+}
+nft_counter() { nft list counter inet kediray "$1" 2>/dev/null | awk '/bytes/ { for (i = 1; i < NF; i++) if ($i == "bytes") { print $(i + 1); exit } }'; }
+# ---------- cihaz bazlı trafik (1.19.6) ----------
+# Ayrı bir nft tablosu (inet kediray_acct): VPN açık/kapalı fark etmez, KediRay yeniden başlasa da sayaçlar sıfırlanmaz.
+# up = cihazdan gelen (yükleme, prerouting), dn = cihaza giden (indirme, postrouting). NAT-redirect ile çekirdeğe
+# giden TCP de bu iki noktadan geçtiği için VPN ve direkt trafik birlikte sayılır.
+dev_ips() { # LAN'daki cihazların IPv4 adresleri (DHCP kiraları + komşu tablosu)
+	local d
+	{
+		awk 'NF >= 4 { print $3 }' /tmp/dhcp.leases 2>/dev/null
+		for d in $(lan_ifs); do
+			ip -4 neigh show dev "$d" 2>/dev/null | awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && $0 !~ /FAILED|INCOMPLETE/ { print $1 }'
+		done
+	} | awk '!s[$0]++ && $0 ~ /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/' | head -n 128
+}
+dev_acct_sync() {
+	local lanset i ip up dn
+	command -v nft >/dev/null 2>&1 || return 0
+	lanset=$(for i in $(lan_ifs); do printf '"%s",' "$i"; done | sed 's/,$//')
+	nft list table inet kediray_acct >/dev/null 2>&1 || nft -f - <<EOF 2>/dev/null
+table inet kediray_acct {
+	chain up { type filter hook prerouting priority raw; policy accept; }
+	chain dn { type filter hook postrouting priority 100; policy accept; }
+}
+EOF
+	up=$(nft list chain inet kediray_acct up 2>/dev/null)
+	dn=$(nft list chain inet kediray_acct dn 2>/dev/null)
+	for ip in $(dev_ips); do
+		echo "$up" | grep -q "saddr $ip counter" || nft add rule inet kediray_acct up iifname "{ $lanset }" ip saddr "$ip" counter 2>/dev/null
+		echo "$dn" | grep -q "daddr $ip counter" || nft add rule inet kediray_acct dn oifname "{ $lanset }" ip daddr "$ip" counter 2>/dev/null
+	done
+	return 0
+}
+dev_read() { # "ip<TAB>rx|tx<TAB>bayt" (rx = cihaza gelen/indirme, tx = cihazdan giden/yükleme)
+	nft list chain inet kediray_acct up 2>/dev/null | awk '/saddr/ && /bytes/ { ip = ""; b = ""; for (i = 1; i <= NF; i++) { if ($i == "saddr") ip = $(i + 1); if ($i == "bytes") b = $(i + 1) } if (ip != "" && b != "") print ip "\ttx\t" b }'
+	nft list chain inet kediray_acct dn 2>/dev/null | awk '/daddr/ && /bytes/ { ip = ""; b = ""; for (i = 1; i <= NF; i++) { if ($i == "daddr") ip = $(i + 1); if ($i == "bytes") b = $(i + 1) } if (ip != "" && b != "") print ip "\trx\t" b }'
+}
+traffic_env() { # sayaçları ortam değişkeni olarak ver
+	local dev
+	dev=$(wan_dev)
+	mkdir -p "$RUN"; dev_read > "$RUN/dev.cur" 2>/dev/null
+	export KR_DEVF="$RUN/dev.cur"
+	KR_VR=$(nft_counter vpn_rx); KR_VT=$(nft_counter vpn_tx)
+	KR_WR=$(cat "/sys/class/net/$dev/statistics/rx_bytes" 2>/dev/null); KR_WT=$(cat "/sys/class/net/$dev/statistics/tx_bytes" 2>/dev/null)
+	export KR_VR="${KR_VR:-0}" KR_VT="${KR_VT:-0}" KR_WR="${KR_WR:-0}" KR_WT="${KR_WT:-0}"
+	[ -f /etc/TZ ] && { TZ=$(cat /etc/TZ); export TZ; }
+}
+traffic_sample() { # [save]
+	( dev_acct_sync; traffic_env; ucode "$SHARE/traffic.uc" sample "$@" >/dev/null 2>&1 )
+}
+
+cmd_stats() { # panel: canlı sayaçlar + bugün/hafta/ay/30 gün
+	( traffic_env; ucode "$SHARE/traffic.uc" report )
+}
+
+cmd_traffic() { # sample|save|restore|reset|report
+	case "$1" in
+		sample) traffic_sample "$2" ;;
+		save|restore|reset) ucode "$SHARE/traffic.uc" "$1" ;;
+		*) cmd_stats ;;
+	esac
+}
+
+kr_version() { cat "$SHARE/version" 2>/dev/null || echo "?"; }
+
+cmd_version() { # [--json]
+	local ver core
+	ver=$(kr_version)
+	core=$(xr version 2>/dev/null | awk 'NR==1{print $2}')
+	if [ "${1:-}" = --json ]; then
+		printf '{"version":"%s","core":"%s"}\n' "$ver" "$core"
+	else
+		echo "KediRay $ver"
+		echo "Xray çekirdeği: ${core:-yok}"
+		echo "Geliştirici: Şaban Vurgun · 2026"
+	fi
+	return 0
+}
+
+# ---- Lisans: kediray license status [--json] | id | activate <anahtar> | remove --------------------------
+# Anahtar biçimi: KR1.<yük>.<imza>   yük = "<modem IMEI, 15 hane>|<bitiş YYYYMMDD ya da 0 = süresiz>" (base64url)
+# İmza: Ed25519 (openssl). Anahtar yalnızca IMEI'si yazılı modemde çalışır: IMEI'nin tek hanesi farklıysa geçersizdir.
+# Üretici araç depoda DEĞİL, sahibindedir. Lisanssızken VPN çalışmaya devam eder; yalnızca sunucu / uygulama /
+# cihaz ayarı değiştiren komutlar kilitlenir.
+LIC_FILE=/etc/kediray.license
+# 1 = lisans zorunlu (ayar değiştiren komutlar lisanssızken kilitlenir); 0 = denetim kapalı, her şey serbest
+LIC_ENFORCE=0
+LIC_IMEI_CACHE=/tmp/kediray.imei
+LIC_PUB='-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAhi19Va+hGurNKdiSvVg0mzUR1Up8joh3aCVoEo3y58k=
+-----END PUBLIC KEY-----'
+
+# 15 hane + Luhn sağlaması (gerçek IMEI'ler geçer; çöp sayıları ve ICCID parçalarını eler)
+lic_luhn() {
+	printf '%s' "$1" | awk '{ n = length($0); if (n != 15 || $0 !~ /^[0-9]+$/) exit 1; s = 0
+		for (i = 1; i <= n; i++) { d = substr($0, n - i + 1, 1) + 0; if (i % 2 == 0) { d *= 2; if (d > 9) d -= 9 } s += d }
+		exit (s % 10 == 0 ? 0 : 1) }'
+}
+lic_imei_find() { # stdin'deki ilk geçerli 15 haneli IMEI
+	local c
+	for c in $(grep -o '[0-9]\{15,16\}' | cut -c1-15); do
+		lic_luhn "$c" && { echo "$c"; return 0; }
+	done
+	return 1
+}
+# Modemin IMEI'sini QModem'den oku: önce ubus (base_info), olmazsa AT+CGSN (sms_tool ya da seri port)
+lic_imei_read() {
+	local sec js m port out t pid
+	sec=$(band_sec)
+	[ -n "$sec" ] || return 1
+	if ubus list qmodem >/dev/null 2>&1; then
+		for m in base_info get_info; do
+			js=$(band_qm "$m" "{\"config_section\":\"$sec\"}")
+			[ -n "$js" ] || continue
+			out=$(printf '%s' "$js" | tr ',{}[]' '\n\n\n\n\n' | grep -i -A3 imei | lic_imei_find) && { echo "$out"; return 0; }
+		done
+	fi
+	port=$(uci -q get "qmodem.$sec.at_port")
+	[ -c "$port" ] || return 1
+	if command -v sms_tool >/dev/null 2>&1; then
+		out=$(sms_tool -d "$port" at 'AT+CGSN' 2>/dev/null | lic_imei_find) && { echo "$out"; return 0; }
+	fi
+	t=/tmp/kr-imei.$$
+	cat "$port" > "$t" 2>/dev/null &
+	pid=$!
+	printf 'AT+CGSN\r' > "$port" 2>/dev/null
+	sleep 2; kill "$pid" 2>/dev/null
+	out=$(lic_imei_find < "$t"); rm -f "$t"
+	[ -n "$out" ] && { echo "$out"; return 0; }
+	return 1
+}
+# IMEI, 10 dk önbellekten gelir (her panel yenilemesinde modeme AT göndermemek için). Okuma o an başarısız olursa
+# (modem meşgul / açılıyor) en çok 24 saatlik eski değer kullanılır; okunan IMEI FARKLIYSA anında o geçerlidir.
+lic_imei() {
+	local i
+	if [ -s "$LIC_IMEI_CACHE" ] && [ -n "$(find "$LIC_IMEI_CACHE" -mmin -10 2>/dev/null)" ]; then
+		cat "$LIC_IMEI_CACHE"; return 0
+	fi
+	if i=$(lic_imei_read) && [ -n "$i" ]; then
+		printf '%s\n' "$i" > "$LIC_IMEI_CACHE" 2>/dev/null
+		echo "$i"; return 0
+	fi
+	if [ -s "$LIC_IMEI_CACHE" ] && [ -n "$(find "$LIC_IMEI_CACHE" -mmin -1440 2>/dev/null)" ]; then
+		cat "$LIC_IMEI_CACHE"; return 0
+	fi
+	return 1
+}
+lic_b64d() { # base64url -> ham bayt (stdout)
+	local s m
+	s=$(printf '%s' "$1" | tr '_-' '/+')
+	m=$(( ${#s} % 4 ))
+	[ "$m" = 2 ] && s="$s=="
+	[ "$m" = 3 ] && s="$s="
+	printf '%s\n' "$s" | openssl base64 -d -A 2>/dev/null
+}
+lic_date() { echo "$1" | sed 's/\(....\)\(..\)\(..\)/\1-\2-\3/'; }
+# <anahtar> -> LIC_STATE=ok|invalid|mismatch|expired|noopenssl|noimei, LIC_EXP
+lic_verify() {
+	local key t pl sg id exp now me
+	LIC_STATE=invalid; LIC_EXP=0
+	command -v openssl >/dev/null 2>&1 || { LIC_STATE=noopenssl; return 1; }
+	key=$(printf '%s' "$1" | tr -d ' \t\r\n')
+	printf '%s' "$key" | grep -Eq '^KR1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' || return 1
+	pl=$(printf '%s' "$key" | cut -d. -f2); sg=$(printf '%s' "$key" | cut -d. -f3)
+	t=/tmp/kr-lic.$$; rm -rf "$t"; mkdir -m 700 "$t" 2>/dev/null || return 1
+	lic_b64d "$pl" > "$t/p"; lic_b64d "$sg" > "$t/s"
+	printf '%s\n' "$LIC_PUB" > "$t/k.pem"
+	if [ "$(wc -c < "$t/s" | tr -d ' ')" != 64 ] || ! openssl pkeyutl -verify -rawin -pubin -inkey "$t/k.pem" -in "$t/p" -sigfile "$t/s" >/dev/null 2>&1; then
+		rm -rf "$t"; return 1
+	fi
+	pl=$(cat "$t/p"); rm -rf "$t"
+	id=${pl%%|*}; exp=${pl#*|}
+	printf '%s' "$id" | grep -Eq '^[0-9]{15}$' || return 1
+	printf '%s' "$exp" | grep -Eq '^(0|[0-9]{8})$' || return 1
+	me=$(lic_imei) || { LIC_STATE=noimei; return 1; }
+	# IMEI birebir aynı olmalı; tek hane farkı bile lisansı geçersiz kılar
+	[ "$id" = "$me" ] || { LIC_STATE=mismatch; return 1; }
+	LIC_EXP=$exp
+	if [ "$exp" != 0 ]; then
+		now=$(date +%Y%m%d)
+		# saat henüz ayarlanmamışsa (1970 gibi) süreyi dolmuş sayma
+		if [ "$now" -ge 20260101 ] && [ "$now" -gt "$exp" ]; then LIC_STATE=expired; return 1; fi
+	fi
+	LIC_STATE=ok
+	return 0
+}
+lic_state() { # kayıtlı anahtarı denetle (0 = geçerli)
+	local k
+	LIC_STATE=none; LIC_EXP=0
+	[ "$LIC_ENFORCE" = 1 ] || { LIC_STATE=off; return 0; }
+	[ -s "$LIC_FILE" ] || return 1
+	k=$(head -n1 "$LIC_FILE")
+	lic_verify "$k"
+}
+lic_msg() {
+	case "$LIC_STATE" in
+		ok) if [ "$LIC_EXP" = 0 ]; then echo "Lisans geçerli (süresiz)"; else echo "Lisans geçerli (bitiş: $(lic_date "$LIC_EXP"))"; fi ;;
+		off) echo "Lisans şu an gerekmiyor" ;;
+		none) echo "Lisans girilmemiş" ;;
+		mismatch) echo "Bu anahtar bu modemin IMEI numarası için üretilmemiş" ;;
+		expired) echo "Lisansın süresi dolmuş ($(lic_date "$LIC_EXP"))" ;;
+		noimei) echo "Modem IMEI numarası okunamadı (modem hazır değil ya da QModem yok)" ;;
+		noopenssl) echo "openssl-util kurulu değil (apk add openssl-util ya da opkg install openssl-util)" ;;
+		*) echo "Anahtar geçersiz (yanlış yazılmış ya da imzası tutmuyor)" ;;
+	esac
+}
+# Ayar değiştiren komutlar lisanssızken burada durur (çıkış kodu 7). VPN'in kendisi (başlat/durdur, sunucu seçimi,
+# abonelik yenileme, watchdog) lisanssız da çalışır: güncelleme sonrası internet kesilmesin.
+lic_gate() {
+	lic_state && return 0
+	echo "Lisans gerekli: $(lic_msg). VPN çalışmaya devam eder; sunucu, uygulama ve cihaz ayarları lisans girilene kadar değiştirilemez." >&2
+	echo "Modem IMEI: $(lic_imei 2>/dev/null || echo okunamadı)   →   kediray license activate <anahtar>   (panel: Hakkında → Lisans)" >&2
+	exit 7
+}
+cmd_license() { # status [--json] | id | activate <anahtar|-> | remove
+	local act="${1:-status}" id k js=0 rc=0
+	# denetim kapalıyken durum sorgusu (panel her sayfada sorar) modeme IMEI sormaz
+	if [ "$LIC_ENFORCE" != 1 ] && { [ "$act" = status ] || [ "$act" = --json ]; }; then id=""; else id=$(lic_imei) || id=""; fi
+	case "$act" in
+		id)
+			[ -n "$id" ] || { echo "Modem IMEI numarası okunamadı (modem hazır değil ya da QModem yok)" >&2; return 1; }
+			echo "$id" ;;
+		status|--json)
+			[ "$act" = --json ] || [ "$2" = --json ] && js=1
+			lic_state || rc=1
+			if [ $js = 1 ]; then
+				printf '{"licensed":%s,"state":"%s","imei":"%s","exp":%s,"msg":"%s"}\n' \
+					"$([ $rc = 0 ] && echo true || echo false)" "$LIC_STATE" "$id" "$LIC_EXP" "$(lic_msg)"
+			else
+				lic_msg
+				echo "Modem IMEI: ${id:-okunamadı}"
+			fi
+			return $rc ;;
+		activate)
+			k="$2"; [ "$k" = - ] && k=$(cat)
+			k=$(printf '%s' "$k" | tr -d ' \t\r\n')
+			[ -n "$k" ] || { echo "kullanım: kediray license activate <anahtar>   (bu modemin IMEI numarası: ${id:-okunamadı})" >&2; return 1; }
+			if lic_verify "$k"; then
+				( umask 077; printf '%s\n' "$k" > "$LIC_FILE" )
+				log "lisans etkinleştirildi (${LIC_EXP:-0})"
+				lic_msg
+			else
+				lic_msg >&2
+				[ "$LIC_STATE" = mismatch ] && echo "Bu modemin IMEI numarası: ${id:-okunamadı}" >&2
+				return 1
+			fi ;;
+		remove)
+			rm -f "$LIC_FILE"
+			echo "Lisans kaldırıldı" ;;
+		*) echo "kullanım: kediray license status [--json] | id | activate <anahtar> | remove" >&2; return 1 ;;
+	esac
+}
+
+cmd_watch() { # [ip] [saniye] [--json]  -> bağlantıları kaydet: hangi yoldan gitti, ne zaman koptu
+	local ip="" secs=180 json=0 a
+	for a in "$@"; do
+		case "$a" in
+			--json) json=1 ;;
+			*[!0-9]*) ip="$a" ;;
+			[0-9]*) secs="$a" ;;
+		esac
+	done
+	[ -n "$ip" ] || { echo "Kullanım: kediray watch <cihaz-ip> [saniye]   (ör. kediray watch 192.168.1.20 300)" >&2; return 1; }
+	mkdir -p "$RUN"
+	[ -r /proc/net/nf_conntrack ] || command -v conntrack >/dev/null 2>&1 || \
+		echo "not: conntrack okunamıyor (kmod-nf-conntrack-netlink / conntrack paketi gerekebilir)" >&2
+	[ $json = 1 ] || echo "Kayıt başladı: $ip, $secs saniye. Şimdi sorunu yaşa (oyunda ışınlan / bildirimi bekle), sonra burada sonucu gör."
+	ucode "$SHARE/watch.uc" "$secs" "$ip" "$((MARK_TUN))" 1000 > "$RUN/watch.json" || return 1
+	if [ $json = 1 ]; then cat "$RUN/watch.json"; return 0; fi
+	ucode -e '
+	let s = json(require("fs").readfile(ARGV[0]));
+	let hm = t => { let l = localtime(t); return sprintf("%02d:%02d:%02d", l.hour, l.min, l.sec); };
+	let dur = d => d >= 60 ? sprintf("%d dk %02d sn", d / 60, d % 60) : sprintf("%d sn", d);
+	printf("\nKayıt: %s - %s (%d sn, %d örnek)\n", hm(s.t0), hm(s.t1), s.secs, s.samples);
+	if (s.conntrack)
+		printf("Bağlantı tablosu: %d / %d%s\n", s.conntrack.count, s.conntrack.max,
+			s.conntrack.pct > 80 ? "  <-- DOLMAK ÜZERE: kayıtlar düşünce bağlantılar sebepsiz kopar" : "");
+	printf("\n%-4s %-22s %-7s %-12s %-12s %s\n", "prot", "hedef", "yol", "süre", "en uzun boş", "bitiş");
+	let n = 0;
+	for (let f in s.flows) {
+		if (f.web && (f.dur < 30 || n > 25)) continue;   // kısa web bağlantıları gürültü
+		n++;
+		printf("%-4s %-22s %-7s %-12s %-12s %s\n", f.proto, f.dst + ":" + f.port, f.vpn ? "VPN" : "Direkt",
+			dur(f.dur), dur(f.idle),
+			f.end == null ? "açık" : (f.cut_active ? hm(f.end) + "  <-- kullanılırken koptu" : hm(f.end) + " (boştaydı)"));
+	}
+	if (length(s.flips)) {
+		printf("\n!! YOL DEĞİŞİMİ (oyundan atılmanın sebebi bu olur):\n");
+		for (let x in s.flips)
+			printf("   %s  %s:%d  %s -> %s\n", hm(x.t), x.dst, x.port, x.from, x.to);
+	} else printf("\nYol değişimi yok: aynı sunucuya giden bağlantıların hepsi aynı yoldan gitti.\n");
+	let iv = s.idle?.vpn, id = s.idle?.direct;
+	printf("\nBoşta kalma dayanıklılığı (bildirim gecikmesinin ölçüsü):\n");
+	let idl = (l, x) => printf("   %-7s: %s · hayatta kalan en uzun boşluk %d sn\n", l,
+		x?.killed_at != null ? sprintf("%d sn boşta kalan bağlantı KOPTU", x.killed_at) : "boştayken kopan yok", x?.survived ?? 0);
+	idl("VPN", iv); idl("Direkt", id);
+	if (iv?.killed_at != null && (id?.killed_at == null || id.killed_at > iv.killed_at))
+		printf("   -> Tünelden geçen boştaki bağlantılar %d saniyede kesiliyor: bildirim gecikmesinin sebebi bu.\n", iv.killed_at);
+	let cut = filter(s.flows, f => f.cut_active && !f.web);
+	if (length(cut)) {
+		printf("\nKullanılırken kopan bağlantılar (oyun/uygulama kopması):\n");
+		for (let f in cut) printf("   %s  %s:%d  (%s, %s sonra)\n", hm(f.end), f.dst, f.port, f.vpn ? "VPN" : "Direkt", dur(f.dur));
+	}
+	' "$RUN/watch.json"
+	return 0
+}
+
+cmd_conns() { # [ip] [--json]  -> oyun/uygulama portlarını bulmak için
+	local ip="" json=0 a
+	for a in "$@"; do case "$a" in --json) json=1 ;; *) ip="$a" ;; esac; done
+	{ cat /proc/net/nf_conntrack 2>/dev/null || conntrack -L 2>/dev/null; } | ucode "$SHARE/cli.uc" conns "$ip" "$((MARK_TUN))" > "$RUN/conns.json"
+	if [ $json = 1 ]; then cat "$RUN/conns.json"; else
+		ucode -e 'for (let c in json(require("fs").readfile(ARGV[0]))) print(sprintf("%-4s %-15s %5d  x%-3d %-7s %s\n", c.proto, c.dst, c.port, c.n, c.vpn ? "VPN" : "DIREKT", c.web ? "(web)" : "<- oyun/uygulama olabilir"));' "$RUN/conns.json"
+		echo "İpucu: oyunu açıkken çalıştır; çıkan portu Uygulamalar > Metin2 > Portlar'a ekle." >&2
+	fi
+}
+
+cmd_check() { # bağlantı teşhisi
+	local ok_dns=0 ok_vpn=0 ok_direct=0 ip
+	running || { echo '{"running":false}'; return 0; }
+	nslookup www.google.com 127.0.0.1 >/dev/null 2>&1 && ok_dns=1
+	curl -s -o /dev/null --noproxy '' -m 8 -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" http://www.gstatic.com/generate_204 && ok_vpn=1
+	curl -s -o /dev/null --noproxy '' -m 8 http://www.gstatic.com/generate_204 && ok_direct=1
+	ip=$(curl -s --noproxy '' -m 8 -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" https://api.ipify.org 2>/dev/null)
+	printf '{"running":true,"dns":%s,"vpn":%s,"direct":%s,"vpn_ip":"%s"}\n' \
+		"$([ $ok_dns = 1 ] && echo true || echo false)" "$([ $ok_vpn = 1 ] && echo true || echo false)" \
+		"$([ $ok_direct = 1 ] && echo true || echo false)" "$(echo "$ip" | tr -cd '0-9a-fA-F.:')"
+}
+
+cmd_watchdog() {
+	local last now iv
+	traffic_sample
+	ucode "$SHARE/cli.uc" devices >/dev/null 2>&1   # cihaz yoklaması: "bağlı süre" güncel kalsın
+	# Panel/uygulama girişi rpcd'ye bağlı. Kurulum yeniden başlatma isteği bıraktıysa burada (cron altında) yap; rpcd ölmüşse kaldır
+	if [ -f /tmp/kediray.rpcd-restart ]; then
+		rm -f /tmp/kediray.rpcd-restart
+		log "watchdog: rpcd yeniden başlatılıyor (eklenti güncellendi)"
+		/etc/init.d/rpcd restart >/dev/null 2>&1
+	elif [ -x /etc/init.d/rpcd ] && ! pidof rpcd >/dev/null 2>&1; then
+		log "watchdog: rpcd çalışmıyor, başlatılıyor"
+		/etc/init.d/rpcd start >/dev/null 2>&1
+	fi
+	[ "$(uget main.enabled)" = 1 ] || return 0
+	[ -f /tmp/kediray.waiting ] && return 0   # açılışta WAN bekleniyor: müdahale etme
+	# Modem açılırken cron, KediRay'in kendi açılış başlatması gelmeden watchdog'u çalıştırıyordu: "Xray çalışmıyor"
+	# deyip erken başlatıyor, sonra açılış betiği de başlatınca iki başlatma çarpışıyor (TUN aygıtı açılmıyor) ve
+	# VPN dakikalarca gecikiyordu. Açılış betiği ilk başlatmayı yapana kadar (en çok 10 dk) bekle.
+	if [ ! -f /tmp/kediray.started ] && [ "$(cut -d. -f1 /proc/uptime)" -lt 600 ]; then return 0; fi
+	if ! running; then
+		log "watchdog: Xray çalışmıyor, yeniden başlatılıyor"
+		/etc/init.d/kediray restart >/dev/null 2>&1
+		sleep 5
+		if ! running; then
+			if [ "$(uget main.failsafe)" = open ]; then
+				fw_down_real; log "watchdog: failsafe=open, internet direkt açıldı"
+			else
+				dns_down; log "watchdog: killswitch - VPN trafiği kesik, DNS normale döndü"
+			fi
+		fi
+	elif [ -f "$RUN/fw" ] && ! nft list table inet kediray >/dev/null 2>&1; then
+		log "watchdog: kurallar silinmiş (güvenlik duvarı yeniden yüklenmiş olabilir), geri yükleniyor"
+		with_lock fw_up_real
+	elif [ ! -f "$RUN/fw" ]; then
+		# Xray çalışıyor ama kurallar hiç uygulanmamış (ör. açılışta UDP tüneli/TUN gecikti). Bir dakika tolerans, sonra yeniden dene.
+		if [ -f "$RUN/nofw" ]; then
+			rm -f "$RUN/nofw"
+			log "watchdog: kurallar uygulanmamış, yeniden deneniyor"
+			with_lock fw_up_real || { log "watchdog: kurallar yine uygulanamadı, KediRay yeniden başlatılıyor"; /etc/init.d/kediray restart >/dev/null 2>&1; }
+		else
+			: > "$RUN/nofw"
+		fi
+	elif case "$(cat "$RUN/capture" 2>/dev/null)" in mixed|tun) ! ip link show "$TUN_DEV" >/dev/null 2>&1 ;; *) false ;; esac; then
+		# Kurallar var ama UDP tüneli (hev) düşmüş: TUN aygıtı kayboldu
+		log "watchdog: TUN aygıtı ($TUN_DEV) yok, UDP tüneli yeniden başlatılıyor"
+		/etc/init.d/kediray restart >/dev/null 2>&1
+	else
+		rm -f "$RUN/nofw"
+		sticky_check
+	fi
+	dns_guard
+	band_tick
+	running && { direct_watch; mvpn_watch; }
+	iv=$(uget main.sub_interval); iv=${iv:-0}
+	if [ "$iv" -gt 0 ] 2>/dev/null && [ -n "$(uget main.sub_url)" ]; then
+		now=$(date +%s); last=$(cat /etc/kediray.sub_last 2>/dev/null || echo 0)
+		[ $((now - last)) -ge $((iv * 3600)) ] && cmd_sub >/dev/null 2>&1
+	fi
+	return 0
+}
+
+xray_asset_name() {
+	local a
+	a=$(. /etc/openwrt_release 2>/dev/null; echo "$DISTRIB_ARCH")
+	[ -n "$a" ] || a=$(uname -m)
+	case "$a" in
+		aarch64*|arm64*) echo arm64-v8a ;;
+		arm_cortex-a15*|arm_cortex-a17*|arm_cortex-a7*|arm_cortex-a8*|arm_cortex-a9_vfp*|arm_cortex-a9_neon*|arm_cortex-a5_vfp*|arm_cortex-a53*|armv7*) echo arm32-v7a ;;
+		arm_arm1176*|armv6*) echo arm32-v6 ;;
+		arm_*|arm*) echo arm32-v5 ;;
+		x86_64*) echo 64 ;;
+		i386*|i686*|x86*) echo 32 ;;
+		mipsel*|mipsle*) echo mips32le ;;
+		mips64el*) echo mips64le ;;
+		mips64*) echo mips64 ;;
+		mips*) echo mips32 ;;
+		riscv64*) echo riscv64 ;;
+		loongarch64*) echo loong64 ;;
+		*) return 1 ;;
+	esac
+}
+
+# unzip olmadan zip açma (yalnızca stored/deflate): zip_extract <zip> <hedef-dizin> <dosya...>
+# Mantık: merkez dizinden boyut/CRC okunur, her deflate verisi gzip başlığı+bitişiyle sarılıp gzip -dc ile açılır.
+# gzip, CRC ve boyutu da doğruladığı için bozuk arşiv sessizce geçmez.
+_zle() { # <dosya> <ofset> <bayt>  -> küçük-endian tamsayı
+	set -- $(od -An -tu1 -j "$2" -N "$3" "$1"); local v=0 m=1 b
+	for b in "$@"; do v=$((v + b * m)); m=$((m * 256)); done
+	echo "$v"
+}
+_zle32() { # <değer> -> 4 bayt küçük-endian ham çıktı
+	printf "\\$(printf %03o $(($1 & 255)))\\$(printf %03o $(($1 >> 8 & 255)))\\$(printf %03o $(($1 >> 16 & 255)))\\$(printf %03o $(($1 >> 24 & 255)))"
+}
+zip_extract() {
+	local zip="$1" dir="$2" size eocd cdoff cdcnt pos i name n m k method crc csize usize lho nl ml start w want found
+	shift 2
+	command -v gzip >/dev/null 2>&1 || { echo "gzip yok" >&2; return 1; }
+	size=$(wc -c < "$zip")
+	eocd=$((size - 22))
+	[ "$(_zle "$zip" "$eocd" 4)" = 101010256 ] || { echo "zip sonu okunamadı (yorumlu arşiv?)" >&2; return 1; }
+	cdcnt=$(_zle "$zip" $((eocd + 10)) 2)
+	cdoff=$(_zle "$zip" $((eocd + 16)) 4)
+	pos=$cdoff; i=0
+	while [ $i -lt "$cdcnt" ]; do
+		[ "$(_zle "$zip" "$pos" 4)" = 33639248 ] || { echo "merkez dizin bozuk" >&2; return 1; }
+		method=$(_zle "$zip" $((pos + 10)) 2)
+		crc=$(_zle "$zip" $((pos + 16)) 4)
+		csize=$(_zle "$zip" $((pos + 20)) 4)
+		usize=$(_zle "$zip" $((pos + 24)) 4)
+		n=$(_zle "$zip" $((pos + 28)) 2)
+		m=$(_zle "$zip" $((pos + 30)) 2)
+		k=$(_zle "$zip" $((pos + 32)) 2)
+		lho=$(_zle "$zip" $((pos + 42)) 4)
+		name=$(dd if="$zip" bs=1 skip=$((pos + 46)) count="$n" 2>/dev/null)
+		for want in "$@"; do
+			[ "$name" = "$want" ] || continue
+			nl=$(_zle "$zip" $((lho + 26)) 2)
+			ml=$(_zle "$zip" $((lho + 28)) 2)
+			start=$((lho + 30 + nl + ml))
+			case "$method" in
+				0) tail -c +$((start + 1)) "$zip" | head -c "$csize" > "$dir/$name" ;;
+				8) { printf '\037\213\010\000\000\000\000\000\000\003'
+				     tail -c +$((start + 1)) "$zip" | head -c "$csize"
+				     _zle32 "$crc"; _zle32 "$usize"; } | gzip -dc > "$dir/$name" 2>/dev/null ;;
+				*) echo "desteklenmeyen sıkıştırma ($name)" >&2; return 1 ;;
+			esac
+			[ -s "$dir/$name" ] || { echo "açılamadı: $name" >&2; return 1; }
+			found="$found $name"
+		done
+		pos=$((pos + 46 + n + m + k)); i=$((i + 1))
+	done
+	for want in "$@"; do case " $found " in *" $want "*) ;; *) echo "arşivde yok: $want" >&2; return 1 ;; esac; done
+	return 0
+}
+
+cmd_update_core() { # [sürüm]
+	local asset ver base zip tmp want got
+	asset=$(xray_asset_name) || { echo "Mimari tanınmadı" >&2; return 1; }
+	ver=${1:-latest}
+	if [ "$ver" = latest ]; then base="https://github.com/XTLS/Xray-core/releases/latest/download"
+	else base="https://github.com/XTLS/Xray-core/releases/download/$ver"; fi
+	[ -n "$GH_PROXY" ] && base="$GH_PROXY/$base"
+	tmp=/tmp/kediray-core; rm -rf "$tmp"; mkdir -p "$tmp"
+	zip="Xray-linux-$asset.zip"
+	echo "İndiriliyor: $zip ($ver)"
+	fetch "$base/$zip" "$tmp/x.zip" || { echo "İndirme başarısız" >&2; rm -rf "$tmp"; return 1; }
+	if fetch "$base/$zip.dgst" "$tmp/x.dgst"; then
+		want=$(grep -i '256' "$tmp/x.dgst" | grep -oE '[0-9a-f]{64}' | head -n1)
+		got=$(sha256sum "$tmp/x.zip" | awk '{print $1}')
+		[ -n "$want" ] && [ "$want" != "$got" ] && { echo "SHA256 doğrulaması BAŞARISIZ" >&2; rm -rf "$tmp"; return 1; }
+		echo "SHA256 doğrulandı"
+	fi
+	if command -v unzip >/dev/null 2>&1; then
+		unzip -o -q "$tmp/x.zip" xray geoip.dat geosite.dat -d "$tmp" || { echo "Arşiv açılamadı" >&2; rm -rf "$tmp"; return 1; }
+	else
+		echo "unzip yok: yerleşik çıkarıcı kullanılıyor"
+		zip_extract "$tmp/x.zip" "$tmp" xray geoip.dat geosite.dat || { echo "Arşiv açılamadı" >&2; rm -rf "$tmp"; return 1; }
+	fi
+	chmod 755 "$tmp/xray"
+	"$tmp/xray" version >/dev/null 2>&1 || { echo "İndirilen çekirdek bu cihazda çalışmıyor ($asset)" >&2; rm -rf "$tmp"; return 1; }
+	mkdir -p "$SHARE/bin"
+	mv -f "$tmp/xray" "$SHARE/bin/xray"
+	[ -s "$tmp/geoip.dat" ] && mv -f "$tmp/geoip.dat" "$SHARE/geoip.dat"
+	[ -s "$tmp/geosite.dat" ] && mv -f "$tmp/geosite.dat" "$SHARE/geosite.dat"
+	rm -rf "$tmp" "$RUN/core.ver"
+	"$SHARE/bin/xray" version | head -n1
+	[ "$(uget main.enabled)" = 1 ] && /etc/init.d/kediray restart >/dev/null 2>&1
+	return 0
+}
+
+cmd_update_geo() {
+	local b="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download" f
+	[ -n "$GH_PROXY" ] && b="$GH_PROXY/$b"
+	for f in geoip.dat geosite.dat; do
+		fetch "$b/$f" "/tmp/kr.$f" && [ -s "/tmp/kr.$f" ] && mv -f "/tmp/kr.$f" "$SHARE/$f" && echo "$f güncellendi"
+	done
+	[ "$(uget main.enabled)" = 1 ] && /etc/init.d/kediray restart >/dev/null 2>&1
+	return 0
+}
+
+cmd_import_xwrt() { # xDivine-Ray (xwrt) sunucularını/aboneliklerini aktar
+	local f=/etc/config/xwrt tmp="$RUN/xwrt.links" u n=0
+	[ -f "$f" ] || { echo "xDivine-Ray yapılandırması bulunamadı" >&2; return 1; }
+	mkdir -p "$RUN"
+	grep -oE "(vless|vmess|trojan|ss)://[^' ]+" "$f" > "$tmp" 2>/dev/null
+	[ -s "$tmp" ] && n=$(ucode "$SHARE/link.uc" apply "$tmp" 2>/dev/null)
+	for u in $(grep -oE "https?://[^' ]+" "$f" | grep -viE 'github|gstatic|google|cloudflare-dns|dns-query'); do
+		uci add_list "$CONF.main.sub_url=$u"; echo "abonelik bulundu: $u"
+	done
+	uci commit "$CONF"
+	rm -f "$tmp"
+	echo "${n:-0} sunucu aktarıldı"
+}
+
+cmd_uninstall() {
+	nft delete table inet kediray_acct 2>/dev/null
+	/etc/init.d/kediray stop >/dev/null 2>&1
+	/etc/init.d/kediray disable >/dev/null 2>&1
+	fw_down_real
+	ip link del "$TUN_DEV" 2>/dev/null
+	if uci -q get firewall.kediray >/dev/null || uci -q get firewall.kediray_fwd >/dev/null; then
+		uci -q delete firewall.kediray; uci -q delete firewall.kediray_fwd; uci -q commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
+	rm -f /etc/hotplug.d/firewall/99-kediray
+	sed -i '/kediray watchdog/d;/kediray update auto/d' /etc/crontabs/root 2>/dev/null
+	rm -f /tmp/kediray-upd.json /etc/kediray.upd.json
+	/etc/init.d/cron restart >/dev/null 2>&1
+	rm -rf "$SHARE" "$RUN" /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray \
+		/www/luci-static/resources/view/kediray /usr/share/luci/menu.d/luci-app-kediray.json \
+		/usr/share/rpcd/acl.d/luci-app-kediray.json /www/luci-static/kedi-logo.svg /etc/kediray.sub_last /etc/kediray.traffic.json
+	[ "$1" = "--purge" ] && rm -f /etc/config/kediray
+	rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
+	/etc/init.d/rpcd reload >/dev/null 2>&1
+	rm -f /usr/bin/kediray
+	echo "KediRay kaldırıldı${1:+ (ayarlar dahil)}"
+}
+
+cmd_logs() { # [clear-errors|clear-stream]  panel için sınıflandırılmış günlük (JSON)
+	case "$1" in clear-errors|clear-stream) ucode "$SHARE/logs.uc" "$1"; return ;; esac
+	mkdir -p "$RUN"
+	if ubus call log read '{"lines":1000,"stream":false}' > "$RUN/log.raw" 2>/dev/null && grep -q '"log"' "$RUN/log.raw"; then
+		ucode "$SHARE/logs.uc" read "$RUN/log.raw"
+	else
+		logread 2>/dev/null | tail -n 1000 > "$RUN/log.raw"
+		ucode "$SHARE/logs.uc" read "$RUN/log.raw" --text
+	fi
+}
+
+node_env() { KR_XRAY="$(corebin 2>/dev/null)" KR_ASSET="$(assetdir)" "$@"; }
+
+cmd_node() { # get|save|del|check-json
+	local sub="$1" rc
+	[ $# -gt 0 ] && shift
+	case "$sub" in
+		get) ucode "$SHARE/node.uc" get "$1" ;;
+		check-json) ucode "$SHARE/node.uc" check-json "$1" ;;
+		save|del)
+			node_env ucode "$SHARE/node.uc" "$sub" "$@"
+			rc=$?
+			if [ $rc = 0 ] && [ "$(uget main.enabled)" = 1 ]; then
+				apply_changes
+			fi
+			return $rc ;;
+		*) echo "kullanım: kediray node get|save|del|check-json ..." >&2; return 1 ;;
+	esac
+}
+
+cmd_node_enable() { # <sec> 0|1  — sunucuyu aç/kapat
+	[ "$(uci -q get "$CONF.$1")" = node ] || { echo "böyle bir sunucu yok: $1" >&2; return 1; }
+	case "$2" in 0|1) ;; *) echo "kullanım: kediray node-enable <sunucu> 0|1" >&2; return 1 ;; esac
+	uci set "$CONF.$1.enabled=$2"
+	uci commit "$CONF"
+	[ "$(uget main.enabled)" = 1 ] && apply_changes
+	echo "ok"
+	return 0
+}
+
+cmd_validate() { # [--json]
+	local r
+	r=$(node_env ucode "$SHARE/node.uc" validate)
+	if [ "$1" = "--json" ]; then echo "$r"; else
+		echo "$r" | ucode -e 'let r = json(require("fs").stdin.read("all"));
+			if (r.ok) { print("Yapılandırma hatasız.\n"); exit(0); }
+			for (let e in r.errors) print("HATA [", e.stage, "] ", e.name ? e.name + ": " : "", e.field ? e.field + " — " : "",
+				e.line ? "satır " + e.line + (e.col ? ", sütun " + e.col : "") + " — " : "", e.msg, "\n");
+			exit(3);'
+	fi
+}
+
+usage() {
+	cat <<'EOF'
+KediRay - OpenWrt Xray VPN yöneticisi
+
+  kediray status            Durum (--json)
+  kediray start|stop|restart
+  kediray takeover [servis] Çalışan diğer VPN'den (ör. xwrt) KediRay'e güvenli geçiş;
+                            internet gelmezse otomatik geri alır
+  kediray direct [check]    Direkt (VPN'siz) çıkış var mı? Yoksa direkt giden her şey otomatik VPN'e alınır
+  kediray rollback <servis> KediRay'i kapat, eski VPN'i geri aç
+  kediray add <link|dosya>  vless/vmess/trojan/ss linki veya Xray JSON ekle (stdin de olur)
+  kediray sub               Abonelikleri güncelle
+  kediray use <id|auto>     Sunucu değiştir (bağlantıları koparmadan)
+  kediray ping [id|all]     Sunucu gecikmesini ölç
+  kediray best              En hızlı sunucuyu bul ve ona geç
+  kediray auto on|off       Otomatik geçiş (açık: en hızlıya geç / kapalı: seçili sunucuda kal)
+  kediray speedtest         Hız testi: direkt ve VPN (Mbps, gecikme, DNS süresi)
+  kediray show-config       Üretilen tam Xray yapılandırmasını göster
+  kediray app <ad> vpn|direct        Uygulama yönü (whatsapp, metin2, teams...)
+  kediray device <mac> vpn|direct|block|default [ad]   (block = ağdan engelle)
+  kediray conns [ip]        Aktif bağlantılar (oyun portu bulmak için)
+  kediray watch <ip> [sn]   Bağlantı kaydı: hangi yoldan gitti, ne zaman koptu (kopma teşhisi)
+  kediray hunt              Takılan adresleri defalarca çek: hangi aşamada takılıyor (DNS mi bağlantı mı)
+  kediray dialtest          Sunucu el sıkışmayı kaç kez düşürüyor (IP IP ölçer; günlükteki EOF'un kaynağı)
+  kediray doctor            Hangi DNS yolu çalışıyor / tünel sağlıklı mı (tek komutluk teşhis)
+  kediray webtest           Sayfa açılma gecikmesi: DNS / bağlantı / TLS / ilk bayt (direkt ve VPN)
+  kediray dnstest [ad...]   Metin2/Gameforge adlarını her DNS yolundan çöz (yanıt var mı, kaç ms)
+  kediray version           Sürüm ve çekirdek bilgisi
+  kediray check             Bağlantı teşhisi
+  kediray band <scan|unlock|status|auto on|off>  Otomatik en iyi bant/frekans (isteğe bağlı)
+  kediray band smart --bg --class NR_NSA --bands "78 1 3" [--wait 20] [--measure speed|signal] [--apply 1|0]
+                            Akıllı band seçimi: bantları tek tek kilitle, hız+sinyal ölç, en iyisini seç (iptal: kediray band cancel)
+  kediray validate          Yapılandırmayı denetle (yazım/alan hataları + Xray testi)
+  kediray node get <id>     Sunucuyu düzenleme için göster
+  kediray node save <id|new> form|json '<veri>' [ad]   Denetleyip kaydet (hatalıysa kaydetmez)
+  kediray node del <id>     Sunucuyu sil
+  kediray node-enable <id> 0|1       Sunucuyu aç/kapat
+  kediray pin [id]          Sunucu sertifikasını şimdi elle sabitle (değiştiyse tüneli yeniden başlatır)
+  kediray cert <id>         Sunucunun sunduğu sertifikayı göster (konu, veren, geçerlilik, SHA-256)
+  kediray update-core [sürüm] | update-geo
+  kediray import-xwrt       xDivine-Ray sunucularını aktar
+  kediray log               Son kayıtlar
+  kediray autodirect on|off          Direkt çıkış yokken "direkt" seçilenleri otomatik VPN'e çevir (on) ya da seçime hep uy (off)
+  kediray engines                    VPN motorları ve durumları (JSON)
+  kediray engine <ad> start|stop     Motoru başlat/durdur (aynı anda yalnızca biri çalışır)
+  kediray app-add <ad> <vpn|direct> <portlar> <alan adları> <IP'ler>   Uygulama kuralı ekle
+  kediray app-del <app>              Uygulama kuralını sil
+  kediray selfupdate <dosya>         Kurulum dosyasıyla güncelle (panel: Hakkında > Güncelle)
+  kediray update check [--json]      GitHub'da yeni sürüm var mı
+  kediray update install             GitHub Release'ten indir (sha256sums doğrulamalı) ve kur
+  kediray license status|id|activate <anahtar>|remove   Lisans (modem IMEI'si: kediray license id)
+  kediray backup [dosya]             Sunucu ve ayarları yedekle (UUID içerir, paylaşma)
+  kediray restore <dosya>            Yedeği geri yükle (önce denenir, bozuksa dokunmaz)
+  kediray fixboot                    QModem açılış yavaşlığı yamasını uygula (otomatik de yapılır)
+  kediray uninstall [--purge]
+EOF
+}
+
+cmd="$1"; [ $# -gt 0 ] && shift
+# Lisanssızken kilitli olanlar: sunucu/uygulama/cihaz/band ayarını değiştirenler (okuma ve VPN işletimi serbest)
+case "$cmd" in
+	add|app|app-add|app-del|device|node-enable|import-xwrt|restore|autodirect) lic_gate ;;
+	node) case "$1" in save|del) lic_gate ;; esac ;;
+	warp) case "$1" in status|"") ;; *) lic_gate ;; esac ;;
+	band) case "$1" in status|info|scan|"") ;; *) lic_gate ;; esac ;;
+esac
+case "$cmd" in
+	license) cmd_license "$@" ;;
+	gen) cmd_gen ;;
+	fw-up) with_lock fw_up_real ;;
+	fw-down) with_lock fw_down_real ;;
+	fw-zone) fw_zone ;;
+	status) cmd_status "$@" ;;
+	start|enable)
+		cf=$(conflicts)
+		if [ -n "$cf" ] && [ "$1" != "--force" ]; then
+			echo "Şu an başka VPN çalışıyor: $cf" >&2
+			echo "İkisi aynı anda trafiği yönetemez. Güvenli geçiş için: kediray takeover" >&2
+			echo "(internet gelmezse otomatik geri alır; zorla başlatmak için: kediray start --force)" >&2
+			exit 1
+		fi
+		uci set "$CONF.main.enabled=1"; uci commit "$CONF"
+		/etc/init.d/kediray enable >/dev/null 2>&1; svc restart ;;
+	stop|disable)
+		uci set "$CONF.main.enabled=0"; uci commit "$CONF"
+		svc stop ;;
+	restart) svc restart ;;
+	takeover) cmd_takeover "$@" ;;
+	rollback) cmd_rollback "$@" ;;
+	conflicts) conflicts ;;
+	add) cmd_add "$@" ;;
+	sub) cmd_sub ;;
+	use) cmd_use "$@" ;;
+	ping) cmd_ping "$@" ;;
+	best) cmd_best ;;
+	auto) cmd_auto "$@" ;;
+	speedtest) cmd_speedtest "$@" ;;
+	show-config) cat "$RUN/config.json" 2>/dev/null || { echo "Henüz yapılandırma üretilmedi (VPN hiç başlamadı)" >&2; exit 1; } ;;
+	app) cmd_app "$@" ;;
+	app-add) cmd_app_add "$@" ;;
+	domain-find) cmd_domain_find "$@" ;;
+	app-del) cmd_app_del "$@" ;;
+	engines) cmd_engines ;;
+	engine) cmd_engine "$@" ;;
+	engine-bg) cmd_engine_bg "$@" ;;
+	engine-log) cmd_engine_log ;;
+	device) cmd_device "$@" ;;
+	nodes) ucode "$SHARE/cli.uc" nodes ;;
+	apps) ucode "$SHARE/cli.uc" apps ;;
+	devices) ucode "$SHARE/cli.uc" devices ;;
+	stats) cmd_stats ;;
+	traffic) cmd_traffic "$@" ;;
+	conns) cmd_conns "$@" ;;
+	watch) cmd_watch "$@" ;;
+	webtest) cmd_webtest "$@" ;;
+	doctor) cmd_doctor "$@" ;;
+	dnstest) cmd_dnstest "$@" ;;
+	direct) cmd_direct "$@" ;;
+	autodirect) cmd_autodirect "$@" ;;
+	warp) cmd_warp "$@" ;;
+	band) cmd_band "$@" ;;
+	wan-ready) cmd_wan_ready ;;
+	fixboot) cmd_fixboot "$@" ;;
+	selfupdate) cmd_selfupdate "$@" ;;
+	update) cmd_update "$@" ;;
+	backup) cmd_backup "$@" ;;
+	restore) cmd_restore "$@" ;;
+	hunt) cmd_hunt "$@" ;;
+	dialtest) cmd_dialtest "$@" ;;
+	version|-V|--version) cmd_version "$@" ;;
+	check) cmd_check ;;
+	validate) cmd_validate "$@" ;;
+	logs) cmd_logs "$@" ;;
+	node) cmd_node "$@" ;;
+	node-enable) cmd_node_enable "$@" ;;
+	pin) mkdir -p "$RUN"; ucode "$SHARE/gen.uc" nodes > "$RUN/nodes.tsv" 2>/dev/null; cmd_pin "${1:-force}" ;;
+	cert) cmd_cert "$@" ;;
+	watchdog) cmd_watchdog ;;
+	dns-guard) dns_guard ;;
+	update-core) cmd_update_core "$@" ;;
+	update-geo) cmd_update_geo ;;
+	import-xwrt) cmd_import_xwrt ;;
+	corebin) corebin ;;
+	hevbin) hevbin ;;
+	capture) capture_eff ;;
+	assetdir) assetdir ;;
+	log) logread -e kediray 2>/dev/null | tail -n "${1:-80}"; logread -e xray 2>/dev/null | tail -n 20 ;;
+	uninstall) cmd_uninstall "$@" ;;
+	""|help|-h|--help) usage ;;
+	*) echo "Bilinmeyen komut: $cmd" >&2; usage; exit 1 ;;
+esac

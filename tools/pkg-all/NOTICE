@@ -1,0 +1,7 @@
+KediRay — Copyright (C) 2026 Şaban Vurgun
+SPDX-License-Identifier: GPL-3.0-or-later
+Bu paketteki tüm dosyalar GNU GPL 3. sürüm ya da (isteğe bağlı) sonrası koşullarıyla dağıtılır (LICENSE).
+Kaynak: https://github.com/sabanvurgun03-ui/kediray
+
+AW1K Panel (modem Android uygulaması) tarafı da dahildir: aw1k-usage, rpcd "aw1k" eklentisi ve aw1k-panel ACL dosyası.
+Android uygulamasının kendisi (APK / Android Studio projesi) bu pakette yoktur.

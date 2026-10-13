@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================================
-#  KediRay 1.19.63 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
+#  KediRay 1.19.64 — OpenWrt için Xray tabanlı akıllı VPN (tek tık kurulum)
 #
 #  Copyright (C) 2026 Şaban Vurgun
 #  SPDX-License-Identifier: GPL-3.0-or-later
@@ -25,7 +25,7 @@
 #  Not: Xray çekirdeği ve paketler zaten kuruluysa indirilmez; yeniden kurulum hızlıdır.
 # ============================================================================
 
-KR_VERSION="1.19.63"
+KR_VERSION="1.19.64"
 AUTO=0; ARG_METIN2=""; ARG_TEAMS=""; ARG_SUB=""; ARG_LINK=""; ARG_LICENSE=""; CORE_VER="latest"; FORCE_CORE=0
 
 while [ $# -gt 0 ]; do
@@ -837,13 +837,26 @@ cmd_selfupdate() { # <dosya> | log  — panelden yüklenen kurulum dosyasıyla k
 
 # ---- GitHub'dan güncelleme: kediray update check [--json] | install -----------------------------------
 # Depo: uci kediray.main.update_repo (varsayılan sabanvurgun03-ui/kediray), dal: update_branch (main).
-# Depoda: VERSION, kediray-install.sh, kediray-install.sh.sha256. İndirilen dosya SHA256 ile doğrulanır.
+# Sürüm numarası depodaki VERSION dosyasından okunur; kurulum dosyası o sürümün GitHub Release'inden (v<sürüm>)
+# indirilir ve release'teki sha256sums ile doğrulanır. sha256sums yoksa ya da uyuşmazsa kurulmaz.
 UPD_REPO_DEF="sabanvurgun03-ui/kediray"
 upd_base() {
 	local r b
 	r=$(uget main.update_repo); r=${r:-$UPD_REPO_DEF}
 	b=$(uget main.update_branch); b=${b:-main}
 	echo "https://raw.githubusercontent.com/$r/$b"
+}
+upd_rel() { # sürüm -> release indirme adresi
+	local r; r=$(uget main.update_repo); r=${r:-$UPD_REPO_DEF}
+	echo "https://github.com/$r/releases/download/v$1"
+}
+upd_sum() { # sürüm dosya_adı -> release'in sha256sums dosyasından o dosyanın SHA256'sı (yoksa hata)
+	local f="/tmp/kediray-upd.$$.sums" out
+	ufetch "$(upd_rel "$1")/sha256sums" "$f" 10 || { rm -f "$f"; return 1; }
+	out=$(awk -v n="$2" '{ g=$2; sub(/^\*/, "", g); if (g == n) { print $1; exit } }' "$f")
+	rm -f "$f"
+	echo "$out" | grep -Eq '^[0-9a-f]{64}$' || return 1
+	echo "$out"
 }
 ver_gt() { # a b -> a, b'den yeni mi (1.19.36 > 1.19.9)
 	awk -v a="$1" -v b="$2" 'BEGIN { na = split(a, x, "."); nb = split(b, y, "."); n = (na > nb ? na : nb)
@@ -905,22 +918,25 @@ cmd_update() { # check [--json] | install | auto | cached
 			now=$(date +%s)
 			printf '%s|%s|%s\n' "$now" "$src" "$latest" > "$UPD_LAST" 2>/dev/null
 			if ver_gt "$latest" "$cur"; then
-				[ $js = 1 ] && upd_json true "$latest" "$cur" true "" "$now" "$src" || echo "Yeni sürüm var: $cur -> $latest"
+				# VERSION duyurdu ama release (sha256sums) henüz yayınlanmadıysa "yeni sürüm var" deme
+				if upd_sum "$latest" kediray-install.sh >/dev/null; then
+					[ $js = 1 ] && upd_json true "$latest" "$cur" true "" "$now" "$src" || echo "Yeni sürüm var: $cur -> $latest"
+				else
+					[ $js = 1 ] && upd_json true "$latest" "$cur" false "" "$now" "$src" || echo "Yeni sürüm duyuruldu ($latest) ama GitHub Release dosyaları henüz hazır değil; sonra tekrar dene."
+				fi
 			else
 				[ $js = 1 ] && upd_json true "$latest" "$cur" false "" "$now" "$src" || echo "Güncelsin ($cur)"
 			fi
 			return 0 ;;
 		install)
 			ver_gt "$latest" "$cur" || [ "$3" = force ] || [ "$2" = force ] || { echo "Zaten güncel ($cur). Zorla kurmak için: kediray update install force"; return 0; }
-			ufetch "$base/kediray-install.sh.sha256?t=$(date +%s)" "$t.s" 7 && sum=$(awk '{print $1}' "$t.s" | head -n1); rm -f "$t.s"
-			echo "$sum" | grep -Eq '^[0-9a-f]{64}$' || { echo "SHA256 dosyası okunamadı; güvenlik için kurulmadı."; return 1; }
-			ufetch "$base/kediray-install.sh?t=$(date +%s)" /tmp/kediray-update.sh 15 || { echo "Kurulum dosyası indirilemedi."; rm -f /tmp/kediray-update.sh; return 1; }
+			sum=$(upd_sum "$latest" kediray-install.sh) || { echo "Release'te sha256sums bulunamadı ya da kediray-install.sh satırı yok (v$latest); güvenlik için kurulmadı."; return 1; }
+			ufetch "$(upd_rel "$latest")/kediray-install.sh" /tmp/kediray-update.sh 20 || { echo "Kurulum dosyası indirilemedi."; rm -f /tmp/kediray-update.sh; return 1; }
 			got=$(sha256sum /tmp/kediray-update.sh | awk '{print $1}')
 			[ "$got" = "$sum" ] || { echo "SHA256 uyuşmuyor (indirme bozuk ya da dosya değişmiş); kurulmadı."; rm -f /tmp/kediray-update.sh; return 1; }
 			ver=$(sed -n 's/^KR_VERSION="\(.*\)"/\1/p' /tmp/kediray-update.sh | head -1)
-			# GitHub önbelleği dosyaları farklı anlarda yenileyebilir: VERSION eski, betik yeni olabilir (sorun değil, SHA256 betikle eşleşti).
-			# Betik duyurulandan ESKİYSE (bayat önbellek) kurma.
-			[ -n "$ver" ] && ! ver_gt "$latest" "$ver" || { echo "Dosya sürümü ($ver) duyurulan sürümden ($latest) eski; GitHub önbelleği henüz yenilenmemiş olabilir, birkaç dakika sonra tekrar dene. Kurulmadı."; rm -f /tmp/kediray-update.sh; return 1; }
+			# Release dosyasının sürümü duyurulanla aynı olmalı (etiket/dosya karışmasına karşı)
+			[ "$ver" = "$latest" ] || { echo "Release dosyasının sürümü ($ver) duyurulan sürümle ($latest) uyuşmuyor; kurulmadı."; rm -f /tmp/kediray-update.sh; return 1; }
 			cmd_selfupdate /tmp/kediray-update.sh
 			return $? ;;
 		*) echo "kullanım: kediray update check [--json] | install [force] | auto | cached" >&2; return 1 ;;
@@ -3543,7 +3559,7 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray app-del <app>              Uygulama kuralını sil
   kediray selfupdate <dosya>         Kurulum dosyasıyla güncelle (panel: Hakkında > Güncelle)
   kediray update check [--json]      GitHub'da yeni sürüm var mı
-  kediray update install             GitHub'dan indir (SHA256 doğrulamalı) ve kur
+  kediray update install             GitHub Release'ten indir (sha256sums doğrulamalı) ve kur
   kediray license status|id|activate <anahtar>|remove   Lisans (modem IMEI'si: kediray license id)
   kediray backup [dosya]             Sunucu ve ayarları yedekle (UUID içerir, paylaşma)
   kediray restore <dosya>            Yedeği geri yükle (önce denenir, bozuksa dokunmaz)
@@ -9970,7 +9986,7 @@ return view.extend({
 			]),
 			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
 				title('github', 'GitHub\'dan güncelle'),
-				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, 'En son sürüm GitHub\'dan indirilir, SHA256 ile doğrulanır ve kurulur.'),
+				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, 'En son sürüm GitHub Release\'ten indirilir, yayınlanan sha256sums ile doğrulanır ve kurulur. Doğrulama dosyası yoksa ya da uyuşmazsa kurulmaz.'),
 				h('div', { 'id': 'ka-upd-msg', 'style': 'margin-bottom:10px;font-weight:600' }, ''),
 				h('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, 'doCheck') }, 'Güncellemeyi denetle'),
 				' ',

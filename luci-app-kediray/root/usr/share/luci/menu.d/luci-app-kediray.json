@@ -1,0 +1,46 @@
+{
+	"admin/vpn": {
+		"title": "VPN",
+		"order": 60,
+		"action": {
+			"type": "firstchild"
+		}
+	},
+
+	"admin/vpn/kediray": {
+		"title": "KediRay VPN",
+		"order": 5,
+		"action": { "type": "firstchild" },
+		"depends": { "acl": [ "luci-app-kediray" ], "uci": { "kediray": true } }
+	},
+	"admin/vpn/kediray/status": {
+		"title": "Kontrol Paneli",
+		"order": 1,
+		"action": { "type": "view", "path": "kediray/status" }
+	},
+	"admin/vpn/kediray/trafik": {
+		"title": "Trafik",
+		"order": 2,
+		"action": { "type": "view", "path": "kediray/trafik" }
+	},
+	"admin/vpn/kediray/ayir": {
+		"title": "VPN Ayırma",
+		"order": 3,
+		"action": { "type": "view", "path": "kediray/ayir" }
+	},
+	"admin/vpn/kediray/settings": {
+		"title": "Ayarlar",
+		"order": 4,
+		"action": { "type": "view", "path": "kediray/settings" }
+	},
+	"admin/vpn/kediray/log": {
+		"title": "Günlük",
+		"order": 5,
+		"action": { "type": "view", "path": "kediray/log" }
+	},
+	"admin/vpn/kediray/about": {
+		"title": "Hakkında",
+		"order": 6,
+		"action": { "type": "view", "path": "kediray/about" }
+	}
+}

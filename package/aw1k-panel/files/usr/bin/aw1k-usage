@@ -1,0 +1,44 @@
+#!/bin/sh
+# Günlük mobil veri kaydı. Satır biçimi: YYYY-MM-DD rx_bayt tx_bayt
+DEV="wwan0_1"
+# Bu ad yoksa (AW1000 dışı ya da farklı modem arayüzü) wan arayüzünün cihazına, o da yoksa "wan"a düş
+if ! ubus call network.device status "{\"name\":\"$DEV\"}" >/dev/null 2>&1; then
+    DEV=$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.l3_device')
+    [ -n "$DEV" ] || DEV="wan"
+fi
+PERSIST="/etc/aw1k-usage.db"   # kalıcı kopya (flash), saatte bir yazılır
+RUN="/tmp/aw1k-usage.db"       # çalışma kopyası (RAM)
+LAST="/tmp/aw1k-usage.last"    # önceki sayaç değerleri
+
+st=$(ubus call network.device status "{\"name\":\"$DEV\"}" 2>/dev/null) || exit 0
+rx=$(echo "$st" | jsonfilter -e '@.statistics.rx_bytes')
+tx=$(echo "$st" | jsonfilter -e '@.statistics.tx_bytes')
+[ -n "$rx" ] && [ -n "$tx" ] || exit 0
+
+if [ ! -f "$RUN" ]; then
+    if [ -f "$PERSIST" ]; then cp "$PERSIST" "$RUN"; else : > "$RUN"; fi
+fi
+
+if [ -f "$LAST" ]; then
+    read prx ptx < "$LAST"
+elif [ -f "$PERSIST" ]; then
+    prx=0; ptx=0            # modem yeniden başlamış: sayaçlar sıfırdan başladı
+else
+    prx=$rx; ptx=$tx        # ilk kurulum: geçmiş sayaçlar yok sayılır
+fi
+
+# Sayaç geriye gittiyse (yeniden başlatma) mevcut değer yeni farktır
+if [ "$rx" -lt "$prx" ]; then drx=$rx; else drx=$((rx - prx)); fi
+if [ "$tx" -lt "$ptx" ]; then dtx=$tx; else dtx=$((tx - ptx)); fi
+echo "$rx $tx" > "$LAST"
+
+today=$(date +%F)
+awk -v d="$today" -v rx="$drx" -v tx="$dtx" '
+    $1 == d { $2 += rx; $3 += tx; found = 1 }
+    { printf "%s %.0f %.0f\n", $1, $2, $3 }
+    END { if (!found) printf "%s %.0f %.0f\n", d, rx, tx }
+' "$RUN" | tail -n 400 > "$RUN.new" && mv "$RUN.new" "$RUN"
+
+if [ ! -f "$PERSIST" ] || [ "$(date +%M)" -lt 2 ]; then
+    cp "$RUN" "$PERSIST"
+fi

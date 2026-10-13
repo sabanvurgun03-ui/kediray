@@ -1,0 +1,971 @@
+'use strict';
+// KediRay yapılandırma üreticisi
+// Kullanım: ucode gen.uc <xray|nft|dnsmasq|nodes|test|check> [config.json]
+//           ucode gen.uc outbound <bölüm>          -> o sunucunun Xray outbound'u (+ test için mini config)
+//           ucode gen.uc outbound-json '<json>'    -> kaydedilmemiş aday sunucunun outbound'u
+// config.json verilmezse UCI 'kediray' okunur (test için KR_CFG ile JSON fikstürü de verilebilir).
+
+const fs = require('fs');
+const WHAT = ARGV[0] || 'xray';
+const DATA_MODES = { 'outbound': 1, 'outbound-json': 1 };
+
+function load() {
+	let f = DATA_MODES[WHAT] ? getenv('KR_CFG') : (ARGV[1] || getenv('KR_CFG'));
+	if (f)
+		return json(fs.readfile(f));
+	return require('uci').cursor().get_all('kediray');
+}
+
+let raw = load() || {};
+if (raw.values) raw = raw.values;
+const SECS = sort(values(raw), (a, b) => (a['.index'] ?? 0) - (b['.index'] ?? 0));
+const M = raw.main || {};
+
+function of(t) { return filter(SECS, s => s['.type'] == t); }
+function opt(k, d) { let v = M[k]; return (v == null || v === '') ? d : v; }
+function on(v, d) { if (v == null || v === '') return d; return (v == '1' || v == 'true' || v == 'on' || v == 'yes'); }
+function num(v, d) { let n = int(v); return (v == null || v === '' || n != n) ? d : n; }
+function die(msg, code) { warn('kediray: ' + msg + '\n'); exit(code ?? 1); }
+
+// Liste değerlerini diziye çevir (UCI list veya boşlukla ayrılmış option)
+function L(v, sep) {
+	if (v == null) return [];
+	if (type(v) != 'array') v = [v];
+	let out = [];
+	for (let x in v)
+		for (let y in split(trim('' + x), sep ?? /\s+/))
+			if (length(y)) push(out, y);
+	return out;
+}
+
+function dom(d) {
+	d = trim(d);
+	if (!length(d)) return null;
+	if (index(d, ':') >= 0) return d;
+	d = replace(d, /^\*?\./, '');
+	return 'domain:' + d;
+}
+
+function is_v4(x) { return !!match(x, /^[0-9]{1,3}(\.[0-9]{1,3}){3}(\/[0-9]{1,2})?$/); }
+
+// Tek IP'yi (ya da /25-/32'yi) komşularıyla birlikte /24'e genişletir.
+// Oyun sunucuları aynı /24'te sıralanır: ışınlanırken başka bir kanal sunucusuna bağlanınca da direkt kalır.
+function ip24(x) {
+	let p = split(x, '/');
+	if (length(p) > 1 && int(p[1]) <= 24) return x;
+	let o = split(p[0], '.');
+	if (length(o) != 4) return x;
+	return o[0] + '.' + o[1] + '.' + o[2] + '.0/24';
+}
+// Uygulamanın IP listesi; expand='24' ise tek IP'ler /24'e genişletilir
+function app_ips(a) {
+	let l = L(a.ip);
+	return int(a.expand ?? 0) == 24 ? uniq(map(l, ip24)) : l;
+}
+function is_v6(x) { return !!match(x, /^[0-9a-fA-F:]+:[0-9a-fA-F:.]*(\/[0-9]{1,3})?$/); }
+function ipn(x) {
+	x = trim(x);
+	if (!length(x)) return null;
+	if (match(x, /^(geoip|ext):/)) return x;
+	if (is_v4(x) || is_v6(x)) return x;
+	return null;
+}
+
+// Port aralıklarını ayrıştır, sırala ve birleştir -> [[a,b],...]
+function ranges(v) {
+	let r = [];
+	for (let p in L(v, /[ \t\r\n,]+/)) {
+		let m = match(p, /^([0-9]+)(-([0-9]+))?$/);
+		if (!m) continue;
+		let a = int(m[1]), b = m[3] ? int(m[3]) : a;
+		if (a > b) { let t = a; a = b; b = t; }
+		if (a < 1 || b > 65535) continue;
+		push(r, [a, b]);
+	}
+	r = sort(r, (x, y) => x[0] - y[0]);
+	let out = [];
+	for (let x in r) {
+		let last = out[length(out) - 1];
+		if (last && x[0] <= last[1] + 1) { if (x[1] > last[1]) last[1] = x[1]; }
+		else push(out, [x[0], x[1]]);
+	}
+	return out;
+}
+function rstr(r, sep) { return join(sep ?? ',', map(r, x => x[0] == x[1] ? '' + x[0] : x[0] + '-' + x[1])); }
+
+// ---------- Sunucular ----------
+function split_hostport(o) {
+	// JSON outbound içinden adres/port çıkar (görüntüleme ve DNS için)
+	let s = o?.settings || {};
+	let t = s.vnext?.[0] || s.servers?.[0] || s;
+	return { address: t.address, port: t.port };
+}
+
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const PROTOS = { vless: 1, vmess: 1, trojan: 1, shadowsocks: 1 };
+const NETS = { tcp: 1, raw: 1, ws: 1, grpc: 1, xhttp: 1, httpupgrade: 1 };
+
+// Bir sunucu bölümünü hazırla; sorunları 'errs' dizisine yaz. Kullanılamazsa null döner.
+function prep_node(n, errs) {
+	let name = n.remarks || n['.name'] || 'yeni sunucu';
+	let e = (field, msg) => push(errs, { node: n['.name'], name: name, field: field, msg: msg });
+	if (n.raw) {
+		let o = null;
+		try { o = json(n.raw); } catch (x) { o = null; }
+		if (type(o) != 'object') { e('raw', 'JSON okunamadı (yazım hatası)'); return null; }
+		if (!o.protocol) { e('raw', 'JSON içinde "protocol" alanı yok'); return null; }
+		if (!PROTOS[o.protocol]) { e('raw', '"' + o.protocol + '" protokolü desteklenmiyor (vless, vmess, trojan, shadowsocks)'); return null; }
+		let hp = split_hostport(o);
+		if (!hp.address) { e('raw', 'JSON içinde sunucu adresi (settings…address) yok'); return null; }
+		if (!hp.port) { e('raw', 'JSON içinde port (settings…port) yok'); return null; }
+		n.address = hp.address;
+		n.port = '' + hp.port;
+		n.protocol = o.protocol;
+		n._json = o;
+		return n;
+	}
+	let ok = true;
+	if (!PROTOS[n.protocol]) { e('protocol', 'protokol seçilmemiş ya da desteklenmiyor'); ok = false; }
+	if (!n.address) { e('address', 'adres boş'); ok = false; }
+	let p = int(n.port);
+	if (!n.port || p != p || p < 1 || p > 65535) { e('port', 'port 1-65535 arasında olmalı'); ok = false; }
+	if (n.protocol == 'vless' || n.protocol == 'vmess') {
+		if (!n.uuid) { e('uuid', 'UUID boş'); ok = false; }
+		else if (!match(n.uuid, UUID_RE) && length(n.uuid) > 30) { e('uuid', 'UUID biçimi hatalı (ör. b831381d-6324-4d53-ad4f-8cda48b30811)'); ok = false; }
+	}
+	if ((n.protocol == 'trojan' || n.protocol == 'shadowsocks') && !n.password) { e('password', 'parola boş'); ok = false; }
+	if (n.protocol == 'shadowsocks' && !n.method) { e('method', 'şifreleme yöntemi seçilmemiş'); ok = false; }
+	if (n.network && !NETS[n.network]) { e('network', '"' + n.network + '" aktarımı desteklenmiyor'); ok = false; }
+	if (n.path && substr(n.path, 0, 1) != '/') { e('path', 'yol (path) "/" ile başlamalı'); ok = false; }
+	if (n.tls == 'reality') {
+		if (!n.pbk) { e('pbk', 'REALITY public key boş'); ok = false; }
+		if (!n.sni) { e('sni', 'REALITY için SNI gerekli'); ok = false; }
+	}
+	if (n.flow && n.protocol != 'vless') { e('flow', 'flow sadece VLESS ile kullanılır'); ok = false; }
+	if (n.flow && n.network && n.network != 'tcp' && n.network != 'raw') { e('flow', 'xtls-rprx-vision sadece TCP aktarımıyla çalışır'); ok = false; }
+	return ok ? n : null;
+}
+
+let ERRS = [];
+let NODES = [];
+for (let n in of('node')) {
+	if (n.enabled == '0') continue;
+	let r = prep_node(n, ERRS);
+	if (r) push(NODES, r);
+	else warn('kediray: hatalı sunucu atlandı: ' + (n.remarks || n['.name']) + '\n');
+}
+for (let i = 0; i < length(NODES); i++) {
+	NODES[i]._tag = sprintf('node-%03d', i + 1);
+	NODES[i]._tport = num(getenv('KR_TEST_BASE') || opt('test_base', null), 21000) + i + 1;
+}
+
+const SEL_NAME = opt('node', 'auto');
+const DISC = SEL_NAME == 'none';   // "Bağlantıyı kes": sunucu yok, trafik direkt
+let SEL = null;
+for (let n in NODES) if (n['.name'] == SEL_NAME) SEL = n;
+
+// 1.19.4: WS heartbeat ve TCP keepalive varsayılan 30 sn. Boşta kalan WebSocket tüneli sunucu önündeki proxy/CDN (60-100 sn) ve
+// mobil operatör NAT'ı tarafından sessizce kesilince sunucudan gelen bildirimler (WhatsApp vb.) telefona ulaşmıyordu.
+const HB = num(opt('ws_heartbeat'), 30);
+const KA = num(opt('tcp_keepalive'), 30);
+
+// Yakalama modu (xDivine ile aynı adlar):
+//   mixed   TCP çekirdekte NAT redirect ile (hızlı yol), UDP hev-socks5-tunnel TUN ile   [varsayılan]
+//   tproxy  TCP+UDP TPROXY ile
+//   redirect sadece TCP (UDP tünellenmez, QUIC reddedilir)
+const CAPTURE = getenv('KR_CAPTURE') || opt('capture', 'mixed');
+// Soket işaretleri: çekirdeğin kendi bağlantıları / TPROXY / TUN'a gidecek UDP
+const MARK_CORE = hex(replace(getenv('KR_MARK_CORE') || '0x2e0', /^0x/, ''));
+const MARK_TP = getenv('KR_MARK_TP') || '0x2e1';
+const MARK_TUN = getenv('KR_MARK_TUN') || '0x2e2';
+// Çekirdek allowInsecure destekliyor mu (kediray betiği test edip KR_CAP_INSECURE=1 verir; 26.x'te kaldırıldı)
+const CAP_INSECURE = getenv('KR_CAP_INSECURE') == '1';
+
+// Sunucuya IP ile bağlan: alan adı bir kez IP'ye çevrilir (KR_RESOLVE="alan=ip ..."),
+// alan adı SNI/Host olarak kalır; böylece bağlantı DNS'e bağımlı olmaz.
+const CONNECT_IP = on(opt('connect_ip'), true);
+// Modeme operatörden gelen DNS sunucuları (CLI, KR_WAN_DNS ile geçirir)
+const WAN_DNS = filter(L(getenv('KR_WAN_DNS')), is_v4);
+// Direkt sorguların gideceği DNS: 'auto' -> operatör DNS'i (xDivine-Ray de böyle yapıyor).
+// Ölçüldü: bazı hatlarda DoH adreslerine hiç ulaşılamıyor, her sorgu saniyelerce bekliyor.
+function dns_direct_addr(o, i) {
+	let v = opt(o, 'auto');
+	if (v != 'auto' && v != '') return v;
+	if (length(WAN_DNS) > i) return WAN_DNS[i];
+	// Operatör DNS'i bilinmiyorsa DoH'a düş; yedek yuva her zaman farklı bir sağlayıcı olsun
+	if (i == 0) return 'https+local://1.1.1.1/dns-query';
+	return length(WAN_DNS) ? 'https+local://1.1.1.1/dns-query' : 'https+local://8.8.8.8/dns-query';
+}
+let RES = {};
+for (let kv in L(getenv('KR_RESOLVE'))) {
+	let i = index(kv, '=');
+	if (i > 0) RES[substr(kv, 0, i)] = substr(kv, i + 1);
+}
+function by_ip(a) { return CONNECT_IP && a && RES[a] ? RES[a] : null; }
+
+// Bağlantı varsayılanları xDivine-Ray'in (MIT, github.com/ozgunokan/xDivine-Ray) gerçek hatta ölçtüğü
+// değerlere göre seçildi: TCP mux kapalı, UDP her zaman XUDP ile, QUIC tünelden, hedef IP korunur (routeOnly).
+
+// WebSocket erken veri: varsayılan kapalı (bazı sunucu/CDN kurulumlarında sorun çıkarabiliyor).
+const WS_EARLY = on(opt('ws_early'), false);
+function ws_path(p) {
+	p = p || '/';
+	if (!WS_EARLY || match(p, /[?&]ed=/)) return p;
+	return p + (index(p, '?') >= 0 ? '&' : '?') + 'ed=2048';
+}
+// Mux nesnesi iki ayrı şeyi taşır: TCP çoklama ve UDP'yi taşıyan XUDP.
+//  - XUDP her zaman açık: onsuz bazı hedeflere UDP (oyun, arama, QUIC) tek yönlü kalıyor.
+//  - xudpProxyUDP443 'allow': Xray'in varsayılanı QUIC'i sessizce atar, videolar takılır.
+//  - TCP çoklama (concurrency > 0) varsayılan KAPALI (-1): hız düşürür; Vision ile hiç kullanılmaz.
+const MUX = on(opt('mux'), false);
+function mux_for(proto, flow, net) {
+	return { enabled: true, concurrency: (MUX && !flow) ? 8 : -1, xudpConcurrency: 16, xudpProxyUDP443: 'allow' };
+}
+
+function sockopt(so) {
+	so ??= {};
+	so.mark ??= MARK_CORE;
+	if (KA > 0) {
+		so.tcpKeepAliveIdle ??= KA;
+		so.tcpKeepAliveInterval ??= 15;
+	}
+	return so;
+}
+
+function stream(n) {
+	let net = n.network || 'tcp';
+	if (net == 'raw') net = 'tcp';
+	let s = { network: net };
+	let sec = n.tls || 'none';
+	let host = n.host || '';
+	// IP ile bağlanırken Host başlığı boş kalmasın: CDN/WS sunucusu alan adını görmeli
+	if (!host && by_ip(n.address) && net != 'grpc') host = n.address;
+	if (sec == 'tls') {
+		s.security = 'tls';
+		// fp boşsa telefondaki v2rayNG gibi Go varsayılan TLS kullanılır
+		let t = { serverName: n.sni || host || n.address };
+		if (n.fp && n.fp != 'none') t.fingerprint = n.fp;
+		if (n.alpn) t.alpn = L(n.alpn, /[ \t\r\n,]+/);
+		// xDivine gibi: sabitlenmiş sertifika varsa o; yoksa çekirdek destekliyorsa allowInsecure
+		if (n.pin) t.pinnedPeerCertSha256 = n.pin;
+		else if (n.insecure == '1' && CAP_INSECURE) t.allowInsecure = true;
+		s.tlsSettings = t;
+	}
+	else if (sec == 'reality') {
+		s.security = 'reality';
+		s.realitySettings = {
+			serverName: n.sni || n.host || '', fingerprint: n.fp || 'chrome',
+			publicKey: n.pbk || '', shortId: n.sid || '', spiderX: n.spx || ''
+		};
+	}
+	if (net == 'ws') {
+		s.wsSettings = { path: ws_path(n.path) };
+		if (host) { s.wsSettings.host = host; s.wsSettings.headers = { Host: host }; }
+		if (HB > 0) s.wsSettings.heartbeatPeriod = HB;
+	}
+	else if (net == 'httpupgrade')
+		s.httpupgradeSettings = { path: n.path || '/', host: host };
+	else if (net == 'grpc') {
+		s.grpcSettings = { serviceName: n.service_name || '', multiMode: (n.grpc_mode == 'multi') };
+		if (by_ip(n.address)) s.grpcSettings.authority = n.host || n.address;
+	}
+	else if (net == 'xhttp') {
+		s.xhttpSettings = { path: n.path || '/', host: host, mode: n.xhttp_mode || 'auto' };
+	}
+	else if (net == 'tcp' && n.header_type == 'http')
+		s.tcpSettings = { header: { type: 'http', request: { path: [n.path || '/'], headers: { Host: L(host, /[ \t\r\n,]+/) } } } };
+	s.sockopt = sockopt();
+	return s;
+}
+
+function outbound(n) {
+	let o;
+	if (n._json) {
+		o = n._json;
+		o.tag = n._tag;
+		o.streamSettings ??= {};
+		let ss = o.streamSettings;
+		ss.sockopt = sockopt(ss.sockopt);
+		if (type(ss.tlsSettings) == 'object' && ss.tlsSettings.allowInsecure != null) {
+			if (n.pin) { delete ss.tlsSettings.allowInsecure; ss.tlsSettings.pinnedPeerCertSha256 ??= n.pin; }
+			else if (!CAP_INSECURE) delete ss.tlsSettings.allowInsecure;
+		}
+		if (ss.network == 'ws' || ss.network == 'websocket') {
+			ss.wsSettings ??= {};
+			if (HB > 0) ss.wsSettings.heartbeatPeriod ??= HB;
+			ss.wsSettings.path = ws_path(ss.wsSettings.path);
+		}
+		// JSON'da TCP mux açıkça açılmamışsa XUDP'yi (UDP taşıma) ekle; açıksa kullanıcınınki kalır
+		let uflow = o.settings?.vnext?.[0]?.users?.[0]?.flow;
+		if (o.protocol == 'shadowsocks' && o.settings?.servers?.[0]) o.settings.servers[0].uot ??= true;
+		if (!(o.mux?.enabled && (o.mux?.concurrency ?? 0) > 0)) {
+			let m = mux_for(o.protocol, uflow, ss.network);
+			if (m) o.mux = m;
+		}
+		// IP ile bağlan: adresi IP yap, alan adını SNI/Host olarak koru
+		let st = o.settings || {}, tgt = st.vnext?.[0] || st.servers?.[0] || st;
+		let ip = by_ip(tgt.address);
+		if (ip) {
+			let dom = tgt.address;
+			tgt.address = ip;
+			if (ss.security == 'tls') { ss.tlsSettings ??= {}; ss.tlsSettings.serverName ??= dom; }
+			for (let k in ['wsSettings', 'httpupgradeSettings', 'xhttpSettings']) {
+				let w = ss[k];
+				if (type(w) == 'object' && !w.host) w.host = dom;
+			}
+			if (ss.network == 'ws' && !ss.wsSettings) ss.wsSettings = { host: dom };
+			if (ss.network == 'grpc') { ss.grpcSettings ??= {}; ss.grpcSettings.authority ??= dom; }
+		}
+		return o;
+	}
+	let p = n.protocol, port = int(n.port);
+	o = { tag: n._tag, protocol: p };
+	if (p == 'vless') {
+		let u = { id: n.uuid, encryption: n.encryption || 'none' };
+		if (n.flow) u.flow = n.flow;
+		o.settings = { vnext: [{ address: by_ip(n.address) || n.address, port: port, users: [u] }] };
+	}
+	else if (p == 'vmess')
+		o.settings = { vnext: [{ address: by_ip(n.address) || n.address, port: port, users: [{ id: n.uuid, security: n.cipher || 'auto' }] }] };
+	else if (p == 'trojan')
+		o.settings = { servers: [{ address: by_ip(n.address) || n.address, port: port, password: n.password }] };
+	else if (p == 'shadowsocks')
+		o.settings = { servers: [{ address: by_ip(n.address) || n.address, port: port, method: n.method, password: n.password }] };
+	else
+		return null;
+	o.streamSettings = stream(n);
+	let m = mux_for(p, n.flow, n.network);
+	if (m) o.mux = m;
+	if (p == 'shadowsocks') o.settings.servers[0].uot = true;
+	return o;
+}
+
+// ---------- Uygulamalar / kurallar ----------
+// Direkt çıkış yoksa (KR_DIRECT_DEAD=1, kediray direct) "direkt" olan her şey VPN'e çevrilir
+// Ham ölçüm: hat gerçekten direkt çıkamıyorsa. Otomatik çevirme kapalı olsa da bildirim düzeltmesi bu ölçüme bakar
+// (direkt çıkış yokken FCM'i direkt göndermek bildirimleri tamamen keser).
+const DIRECT_RAW_DEAD = getenv('KR_DIRECT_DEAD') == '1';
+const DIRECT_DEAD = DIRECT_RAW_DEAD && opt('auto_direct', '1') != '0';
+const APPS = map(filter(of('app'), a => a.enabled != '0'), a => (DIRECT_DEAD && a.route != 'warp') ? { ...a, route: 'vpn' } : a);
+// Cloudflare WARP (WireGuard) çıkışı: 'warp' yönlü uygulamalar buradan çıkar. Anahtarlar `kediray warp register` ile alınır.
+// warp_via=vpn: WARP, VPN sunucusunun içinden kurulur (operatör UDP'yi/WARP'ı görmez); direct: doğrudan hattan.
+// TLS parçalama (SNI engeli aşma): 'frag' yönlü uygulamalar direkt çıkar ama TLS el sıkışması küçük parçalara bölünür.
+const FRAG_ON = length(filter(APPS, a => a.route == 'frag')) > 0;
+const WARP_ON = on(opt('warp'), false) && opt('warp_key', '') != '' && opt('warp_pub', '') != '' && opt('warp_v4', '') != '';
+const RULES = map(filter(of('rule'), r => r.enabled != '0'), r => (DIRECT_DEAD && r.target == 'direct') ? { ...r, target: 'proxy' } : r);
+// Bildirim (FCM/APNs) direkt istisnası: direkt çıkış yokken kapalı (yoksa bildirimler hiç gelmez)
+const PUSH_FIX = on(opt('push_fix'), false) && !DIRECT_RAW_DEAD;
+const PUSH_DOMAINS = [
+	'domain:mtalk.google.com', 'regexp:^alt[0-9]*-mtalk\\.google\\.com$', 'domain:mtalk4.google.com',
+	'domain:push.apple.com', 'domain:push-apple.com.akadns.net', 'domain:push.hicloud.com'
+];
+const PUSH_PORTS = '5223,5228-5230';
+// Tarayıcıların kendi "Güvenli DNS"i (DoH): Chrome/Firefox sistem DNS'ini atlayıp doğrudan bu adreslere sorar.
+// Bu hatta DoH adreslerine ulaşılamadığı ölçüldü -> tarayıcı her yeni ad için ~50 sn bekliyor, sayfa yarım kalıyor.
+// Kapatınca (RST ile reddedince) tarayıcı anında sistem DNS'ine döner: KediRay'in DNS'i devreye girer.
+const DOH_DOMAINS = [
+	'domain:dns.google', 'domain:dns64.dns.google', 'domain:cloudflare-dns.com', 'domain:mozilla.cloudflare-dns.com',
+	'domain:chrome.cloudflare-dns.com', 'domain:one.one.one.one', 'domain:security.cloudflare-dns.com',
+	'domain:family.cloudflare-dns.com', 'domain:dns.quad9.net', 'domain:dns9.quad9.net', 'domain:dns11.quad9.net',
+	'domain:doh.opendns.com', 'domain:doh.familyshield.opendns.com', 'domain:dns.nextdns.io', 'domain:doh.dns.sb',
+	'domain:dns.adguard.com', 'domain:dns.adguard-dns.com', 'domain:doh.cleanbrowsing.org', 'domain:dns.alidns.com',
+	'domain:doh.pub', 'domain:dns.controld.com', 'domain:freedns.controld.com', 'domain:dns.mullvad.net'
+];
+// Adresi elle yazan istemciler için IP listesi (yalnız 443/853: bu IP'lerin 53'ü DNS yönlendirmesiyle zaten ele alınır)
+const DOH_IPS = ['1.1.1.1', '1.0.0.1', '8.8.8.8', '8.8.4.4', '9.9.9.9', '149.112.112.112',
+	'208.67.222.222', '208.67.220.220', '94.140.14.14', '94.140.15.15', '45.90.28.0/24', '45.90.30.0/24'];
+// 1.17.1: "Akıllı (Türkiye direkt)" modu kaldırıldı; 'rule' ayarı artık 'global' gibi çalışır (her şey VPN, yalnız seçilen uygulamalar direkt)
+const MODE = (opt('mode', 'global') == 'list' && !DIRECT_DEAD) ? 'list' : 'global';
+// Kullanıcının kendi seçtiği DNS IP'si DoH engelinin içine düşmesin (ör. dns_direct=1.1.1.1 düz DNS)
+function rem_ip4() {
+	let m = match(opt('dns_remote', 'https://1.1.1.1/dns-query'), /([0-9]{1,3}(\.[0-9]{1,3}){3})/);
+	return m ? m[1] : '';
+}
+// DNS: varsayılan 'private' = dnsmasq -> çekirdeğin DNS portu -> tünel (xDivine-Ray'de seçili olan mod).
+// Sorgu tünelin veri yoluna (TUN/TPROXY) girmez, çekirdek kendisi çözer -> hızlı ve sızıntısız.
+// 'off' (DNS'e dokunma) TUN yakalamasında hiçbir adı çözemez (cihazın 53 portu TUN'a girer, yanıt dönmez):
+// bu birleşimde sessizce 'private'a düşüyoruz.
+const DNS_MODE = (opt('dns_mode', 'private') == 'off' && CAPTURE == 'tun') ? 'private' : opt('dns_mode', 'private');
+// Uygulama bazlı "DNS'i tünelden çöz" (tunnel_dns=1): global DNS modu 'off' olsa bile yalnız bu uygulamaların
+// alan adları dnsmasq -> çekirdek -> tünel yolundan çözülür; diğer her şey modemin kendi DNS'inde kalır.
+let TDOMS = [];
+for (let a in APPS) if (a.tunnel_dns == '1') for (let d in L(a.domain)) push(TDOMS, dom(d));
+TDOMS = uniq(TDOMS);
+const DNS_PART = (DNS_MODE == 'off' && length(TDOMS) > 0);
+const DNS_ON = (DNS_MODE != 'off' || DNS_PART);
+
+function tgt(t) {
+	if (t == 'warp' && WARP_ON) return { outboundTag: 'warp' };
+	if (t == 'frag') return { outboundTag: 'direct-frag' };
+	if (t == 'proxy' || t == 'vpn' || t == 'warp') return { balancerTag: 'proxy' };
+	if (t == 'block') return { outboundTag: 'block' };
+	return { outboundTag: 'direct' };
+}
+
+function add_match(R, m, t) {
+	let base = { ruleTag: m.tag };
+	if (m.inbound) base.inboundTag = m.inbound;
+	let d = filter(map(L(m.domain), dom), x => x);
+	let ip = filter(map(L(m.ip), ipn), x => x);
+	let pr = ranges(m.port ?? m.ports);
+	// Yeni Xray sürümleri aynı ruleTag'in tekrarını reddeder ("duplicate ruleTag"): her kural benzersiz etiket alır.
+	if (length(d)) push(R, { ...base, domain: d, ...tgt(t) });
+	if (length(ip)) push(R, { ...base, ruleTag: m.tag + '-ip', ip: ip, ...tgt(t) });
+	if (length(pr)) push(R, { ...base, ruleTag: m.tag + '-port', port: rstr(pr), network: 'tcp,udp', ...tgt(t) });
+}
+
+function xray() {
+	if (!length(NODES))
+		die('hiç sunucu yok; önce link, JSON veya abonelik ekleyin', 2);
+
+	let tp_port = num(opt('tproxy_port'), 12345), dns_port = num(opt('dns_port'), 15353);
+	let socks_port = num(opt('socks_port'), 10808), api_port = num(opt('api_port'), 10085);
+	// xDivine'ın ölçümü: hedefi alan adıyla değiştirmek (sunucuya tekrar çözdürmek) her yeni bağlantıya
+	// bir tur ekliyor (47 ms yerine 100 ms, ara ara 700 ms). routeOnly: alan adı sadece kurallar için okunur,
+	// hedef IP korunur; adres zaten tünelden çözüldüğü için doğru bölgeden gelir.
+	let sniff = {
+		enabled: on(opt('sniff'), true), destOverride: ['http', 'tls', 'quic'],
+		// sniff_mode=off: hiçbir durumda hedefi alan adıyla değiştirme (her bağlantıda sunucuya alan adı çözdürmez; hız testi/indirme daha çabuk açılır)
+		routeOnly: opt('sniff_mode', 'auto') == 'off' || !(on(opt('sniff_override'), false) || length(filter(APPS, x => x.route == 'warp' || x.route == 'frag' || x.tunnel_dns == '1')) > 0)
+	};
+
+	// ÖLÇÜLDÜ (Xray 26.3.27): UDP girişinde içerik tanıma (sniffing) her UDP oturumuna SABİT ~200 ms ekliyor.
+	// Çıplak Xray, ağ gecikmesi sıfır: sniffing kapalı 0 ms, açık 201 ms. TCP'de böyle bir bekleme yok
+	// (TLS ClientHello ilk pakette gelir). DNS ve oyun/arama UDP'si bu yüzden geç açılıyordu.
+	// TCP'de sniffing açık kalır (kural eşleştirme için gerekli), UDP girişlerinde kapatılır.
+	// tun modunda TCP de socks-in'den geldiği için orada içerik tanıma gerekir (alan adı kuralları).
+	// mixed/redirect/tproxy'de socks-in yalnız UDP taşır: kapalı kalır.
+	const sniff_udp = (CAPTURE == 'tun');
+
+	// Yakalama moduna göre LAN girişi
+	let lan_in = { tag: 'lan-in', listen: '0.0.0.0', port: tp_port, protocol: 'dokodemo-door',
+		settings: { network: 'tcp', followRedirect: true }, sniffing: sniff };
+	// tproxy: TCP ve UDP ayrı girişlere ayrılır; UDP girişinde sniffing yok (200 ms bekleme yok)
+	let lan_in_udp = null;
+	if (CAPTURE == 'tproxy') {
+		lan_in.streamSettings = { sockopt: { tproxy: 'tproxy' } };
+		lan_in_udp = { tag: 'lan-in-udp', listen: '0.0.0.0', port: tp_port + 1, protocol: 'dokodemo-door',
+			settings: { network: 'udp', followRedirect: true },
+			streamSettings: { sockopt: { tproxy: 'tproxy' } } };
+	}
+
+	let inb = [
+		lan_in,
+		...(lan_in_udp ? [lan_in_udp] : []),
+		// LAN'dan gelen DNS de buraya yönlendirilir (çekirdekte, tünele hiç girmeden): sniffing yok, hızlı.
+		// WAN tarafı fw4'ün varsayılan kuralıyla kapalıdır. DNS modu 'off' iken bu giriş hiç açılmaz.
+		...(!DNS_ON ? [] : [{ tag: 'dns-in', listen: '0.0.0.0', port: dns_port, protocol: 'dokodemo-door',
+		  settings: { address: '1.1.1.1', port: 53, network: 'tcp,udp' } }]),
+		// mixed modda hev-socks5-tunnel UDP'yi buraya getirir
+		// mixed modda UDP'nin tamamı buradan geçer: sniffing KAPALI (yukarıdaki ölçüme bakın)
+		{ tag: 'socks-in', listen: '127.0.0.1', port: socks_port, protocol: 'socks',
+		  settings: { auth: 'noauth', udp: true, ip: '127.0.0.1' },
+		  ...(sniff_udp ? { sniffing: sniff } : {}) },
+		{ tag: 'api', listen: '127.0.0.1', port: api_port, protocol: 'dokodemo-door',
+		  settings: { address: '127.0.0.1' } }
+	];
+	for (let n in NODES)
+		push(inb, { tag: 't-' + n._tag, listen: '127.0.0.1', port: n._tport, protocol: 'socks', settings: { udp: false } });
+
+	let outb = [
+		{ tag: 'direct', protocol: 'freedom', settings: { domainStrategy: on(opt('ipv6'), false) ? 'UseIP' : 'UseIPv4' },
+		  streamSettings: { sockopt: { mark: MARK_CORE } } },
+		{ tag: 'block', protocol: 'blackhole' },
+		{ tag: 'dns-out', protocol: 'dns', settings: { network: 'tcp', address: '1.1.1.1', port: 53 },
+		  streamSettings: { sockopt: { mark: MARK_CORE } } }
+	];
+	for (let n in NODES) {
+		let o = outbound(n);
+		if (o) push(outb, o);
+	}
+	if (FRAG_ON) push(outb, { tag: 'direct-frag', protocol: 'freedom',
+		settings: { domainStrategy: on(opt('ipv6'), false) ? 'UseIP' : 'UseIPv4',
+			fragment: { packets: opt('frag_packets', 'tlshello'), length: opt('frag_length', '100-200'), interval: opt('frag_interval', '10-20') } },
+		streamSettings: { sockopt: { mark: MARK_CORE } } });
+	if (WARP_ON) {
+		let res = map(split(opt('warp_reserved', '0,0,0'), ','), x => int(x));
+		let via = (opt('warp_via', 'vpn') == 'vpn');
+		let vtag = (SEL ? SEL._tag : NODES[0]._tag);
+		push(outb, { tag: 'warp', protocol: 'wireguard',
+			settings: {
+				secretKey: opt('warp_key'),
+				address: filter([opt('warp_v4') + '/32', opt('warp_v6', '') != '' ? opt('warp_v6') + '/128' : null], x => x),
+				peers: [{ publicKey: opt('warp_pub'), allowedIPs: ['0.0.0.0/0', '::/0'], endpoint: opt('warp_endpoint', 'engage.cloudflareclient.com:2408') }],
+				mtu: num(opt('warp_mtu'), 1280),
+				reserved: length(res) == 3 ? res : [0, 0, 0],
+				domainStrategy: 'ForceIPv4'
+			},
+			streamSettings: { sockopt: via ? { dialerProxy: vtag } : { mark: MARK_CORE } } });
+	}
+
+	// --- Yönlendirme kuralları (ilk eşleşen kazanır) ---
+	let R = [];
+	push(R, { inboundTag: ['api'], outboundTag: 'api' });
+	if (DNS_ON) push(R, { inboundTag: ['dns-in'], outboundTag: 'dns-out' });
+	// İstemcinin kendi seçtiği DNS (8.8.8.8 vb.) de KediRay DNS'inden yanıtlanır (sızıntı yok)
+	// off modunda 53 numaralı port normal trafik gibi yönlendirilir (modemin kendi DNS'i devrede kalır)
+	if (DNS_MODE != 'off') push(R, { inboundTag: ['lan-in', 'lan-in-udp', 'socks-in'], port: '53', outboundTag: 'dns-out' });
+	for (let n in NODES)
+		push(R, { inboundTag: ['t-' + n._tag], outboundTag: n._tag });
+	// Operatör DNS'ine (ve genel olarak düz IP yazılmış direkt DNS'e) giden sorgular tünelden GEÇMEZ:
+	// aksi halde tünel takıldığında alan adı çözülemez ve tarayıcı 50 sn döner.
+	// Uzak DNS ile aynı IP varsa dışarıda bırakılır: yoksa tünelden gitmesi gereken sorgu direkt çıkar (sızıntı).
+	let rem = opt('dns_remote', 'https://1.1.1.1/dns-query');
+	let rem_ip = match(rem, /([0-9]{1,3}(\.[0-9]{1,3}){3})/);
+	rem_ip = rem_ip ? rem_ip[1] : '';
+	let dns_direct_ips = filter([...WAN_DNS, dns_direct_addr('dns_direct', 0), dns_direct_addr('dns_direct2', 1)],
+		x => is_v4(x) && x != rem_ip);
+	if (DNS_ON) {
+		if (length(dns_direct_ips))
+			push(R, { ruleTag: 'dns-local', inboundTag: ['dns-internal'], ip: uniq(dns_direct_ips), outboundTag: 'direct' });
+		push(R, { inboundTag: ['dns-internal'], balancerTag: 'proxy' });
+	}
+
+	// Tarayıcının kendi DoH'u: engelle -> tarayıcı anında sistem DNS'ine düşer (50 sn'lik askıda kalma biter).
+	// Kural DNS kurallarından SONRA: KediRay'in kendi DoH sorguları (dns-internal) yukarıda çözülmüş olur.
+	if (on(opt('block_doh'), true))
+		push(R, { ruleTag: 'doh-block', inboundTag: ['lan-in', 'lan-in-udp', 'socks-in'],
+			domain: DOH_DOMAINS, port: '443,853', outboundTag: 'block' });
+
+	// Uygulamalar (VPN / Direkt kullanıcı seçimi) - en yüksek öncelik
+	for (let a in APPS)
+		add_match(R, { domain: a.domain, ip: app_ips(a), port: a.ports, tag: 'app-' + a['.name'] }, a.route == 'vpn' ? 'proxy' : a.route == 'warp' ? 'warp' : a.route == 'frag' ? 'frag' : 'direct');
+
+	// Bildirim (FCM / APNs) direkt
+	if (PUSH_FIX)
+		add_match(R, { domain: PUSH_DOMAINS, port: PUSH_PORTS, tag: 'push' }, 'direct');
+
+	if (on(opt('ad_block'), false))
+		push(R, { ruleTag: 'ads', domain: ['geosite:category-ads-all'], outboundTag: 'block' });
+
+	for (let r in RULES)
+		add_match(R, { domain: r.domain, ip: r.ip, port: r.port, tag: 'rule-' + r['.name'] }, r.target || 'proxy');
+
+	push(R, { ruleTag: 'private', ip: ['geoip:private'], outboundTag: 'direct' });
+	push(R, { ruleTag: 'final', network: 'tcp,udp', ...tgt(MODE == 'list' ? 'direct' : 'proxy') });
+
+	// --- DNS ---
+	// Gerçek hatta ölçüldü: tünelden DNS-over-TCP kullanılırken sunucu bir bağlantıyı düşürünce
+	// ("failed to read response length -> read/write on closed pipe") sorgu ölüyor ve sayfa askıda kalıyor.
+	// DoH (HTTP/2) aynı durumda kendi içinde yeniden deniyor. Kurulumla gelen varsayılan Google TCP'dir (uyumluluk); bu belirti görülürse DoH seçilir.
+	let remote = opt('dns_remote', 'https://1.1.1.1/dns-query');
+	if (match(remote, /^[0-9.]+$/)) remote = 'tcp://' + remote;
+	let direct = dns_direct_addr('dns_direct', 0);
+	// Direkt sorgular için yedek: ilk DoH takılırsa (5G hatlarında sık) sorgu saniyelerce beklemez
+	let direct2 = dns_direct_addr('dns_direct2', 1);
+	if (direct2 == direct) direct2 = '';
+	let ddom = [], pdom = [];
+	for (let a in APPS) for (let d in L(a.domain)) push((a.route == 'direct' || a.route == 'frag') ? ddom : pdom, dom(d));
+	if (PUSH_FIX) for (let d in PUSH_DOMAINS) push(ddom, d);
+	for (let r in RULES) {
+		if (r.target == 'block') continue;
+		for (let d in L(r.domain)) push(r.target == 'direct' ? ddom : pdom, dom(d));
+	}
+	let servers = [];
+	if (length(TDOMS)) push(servers, { address: remote, domains: TDOMS, skipFallback: true });
+	pdom = filter(uniq(pdom), x => index(TDOMS, x) < 0);
+	if (length(pdom) && DNS_MODE != 'fast') push(servers, { address: remote, domains: pdom, skipFallback: true });
+	if (length(ddom)) {
+		push(servers, { address: direct, domains: uniq(ddom), skipFallback: true });
+		if (length(direct2)) push(servers, { address: direct2, domains: uniq(ddom), skipFallback: true });
+	}
+	// dns_mode=private (varsayılan, xDivine-Ray'de seçili olan): listede olmayan adlar tünelden çözülür
+	//   (hiçbir sorgu operatöre sızmaz; çekirdek kendi çözdüğü için sorgu TUN/TPROXY yoluna girmez).
+	// dns_mode=fast: varsayılan sorgular direkt çıkar (tünel koparsa da ad çözülür, karşılığında gizlilik azalır).
+	if (MODE == 'list' || DNS_MODE == 'fast') { push(servers, direct); if (length(direct2)) push(servers, direct2); push(servers, remote); }
+	else { push(servers, remote); push(servers, direct); if (length(direct2)) push(servers, direct2); }
+
+	let fb = SEL ? SEL._tag : NODES[0]._tag;
+	// connIdle 4 saat (xDivine): telefonun bildirim bağlantısı saatlerce veri taşımadan açık durur
+	let pol = { connIdle: num(opt('conn_idle'), 14400) };
+	// Hız ayarı: bağlantı başına tampon (KB). Küçük tampon yüksek hızda akışı boğar ve hız testinin yükselmesini geciktirir.
+	if (on(opt('speed_tune'), true)) pol.bufferSize = num(opt('buffer_size'), 1024);
+	let cfg = {
+		log: { loglevel: opt('log_level', 'warning'), access: (opt('log_level', 'warning') == 'info' || opt('log_level') == 'debug') ? '' : 'none' },
+		api: { tag: 'api', services: ['RoutingService', 'StatsService'] },
+		stats: {},
+		policy: {
+			// v2rayNG JSON'ları kullanıcı seviyesi 8 kullanır: ikisine de aynı uzun bağlantı süresi
+			levels: { '0': pol, '8': pol },
+			system: { statsOutboundUplink: true, statsOutboundDownlink: true }
+		},
+		// DNS modu 'off': yönlendiricinin kendi DNS'ine hiç dokunulmaz (xDivine-Ray'in "DNS'e dokunma" seçeneği).
+		// Alan adı kuralları yine çalışır: bağlantıdaki SNI okunur (sniffing/routeOnly).
+		...(!DNS_ON ? {} : { dns: {
+			tag: 'dns-internal',
+			queryStrategy: on(opt('ipv6'), false) ? 'UseIP' : 'UseIPv4',
+			// Tünel anlık takılırsa (mobil hatta bağlantı sıfırlanması vb.) bilinen adresi beklemeden ver, arkada yenile:
+			// uygulama/oyun "DNS zaman aşımı" yüzünden bağlantı kuramama yaşamaz.
+			// Süre kısa tutulur: CDN adresleri sık değişir, bir gün önceki adres ölü olabilir ve
+			// tarayıcı o adrese bağlanmaya çalışırken sayfa "yükleniyor" kalır (yuvarlak döner).
+			serveStale: on(opt('dns_stale'), true),
+			serveExpiredTTL: num(opt('dns_stale_ttl'), 600),
+			servers: servers
+		} }),
+		inbounds: inb,
+		outbounds: outb,
+		observatory: {
+			subjectSelector: ['node-'],
+			probeUrl: opt('probe_url', 'https://www.gstatic.com/generate_204'),
+			probeInterval: opt('probe_interval', '2m'),
+			enableConcurrency: true
+		},
+		routing: {
+			domainStrategy: 'AsIs',
+			balancers: [{ tag: 'proxy', selector: DISC ? ['__yok__'] : ['node-'], strategy: { type: 'leastPing' }, fallbackTag: DISC ? 'direct' : fb }],
+			rules: R
+		}
+	};
+	print(sprintf('%.J\n', cfg));
+}
+
+// ---------- nftables ----------
+const BYPASS4 = [
+	'0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16',
+	'172.16.0.0/12', '192.0.0.0/24', '192.168.0.0/16', '224.0.0.0/4', '240.0.0.0/4'
+];
+
+function nft() {
+	let ifs = L(getenv('KR_LAN_IFS') || 'br-lan');
+	let tp_port = num(opt('tproxy_port'), 12345);
+	let bypass = [...BYPASS4, ...filter(L(getenv('KR_SERVER_IPS')), is_v4)];
+	let dips = [], dports = [];
+	for (let a in APPS) {
+		if (a.route == 'vpn' || a.route == 'warp' || a.route == 'frag') continue;
+		for (let x in app_ips(a)) if (is_v4(x)) push(dips, x);
+		for (let r in ranges(a.ports)) push(dports, r);
+	}
+	for (let r in RULES) {
+		if (r.target != 'direct') continue;
+		for (let x in L(r.ip)) if (is_v4(x)) push(dips, x);
+		for (let p in ranges(r.port)) push(dports, p);
+	}
+	dports = ranges(rstr(dports));
+
+	let dev = { vpn: { mac: [], ip: [] }, direct: { mac: [], ip: [] }, block: { mac: [], ip: [] } };
+	for (let d in of('device')) {
+		let m = d.mode;
+		if (m != 'vpn' && m != 'direct' && m != 'block') continue;
+		if (DIRECT_DEAD && m == 'direct') m = 'vpn';
+		if (d.mac && match(d.mac, /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/)) push(dev[m].mac, lc(d.mac));
+		for (let x in L(d.ip)) if (is_v4(x)) push(dev[m].ip, x);
+	}
+	let defdev = DIRECT_DEAD ? 'vpn' : opt('default_device', 'vpn');
+	let q = x => '"' + x + '"';
+	let lanset = '{ ' + join(', ', map(ifs, q)) + ' }';
+
+	let o = [];
+	let set = (name, typ, els, iv) => {
+		push(o, '\tset ' + name + ' {');
+		push(o, '\t\ttype ' + typ + ';' + (iv ? ' flags interval; auto-merge;' : ''));
+		if (length(els)) push(o, '\t\telements = { ' + join(', ', uniq(els)) + ' }');
+		push(o, '\t}');
+	};
+	// Ortak eleme: LAN dışı, yerel/özel hedefler, sunucu IP'leri, Direkt uygulamalar (Metin2/Teams IP ve portları),
+	// bildirim portları; ardından cihaz kuralı ve eylem zinciri.
+	let guards = (act, protos) => {
+		push(o, '\t\tmeta nfproto != ipv4 return');
+		push(o, '\t\tiifname != ' + lanset + ' return');
+		push(o, '\t\tmeta l4proto != ' + protos + ' return');
+		push(o, '\t\tfib daddr type { local, broadcast, multicast } return');
+		// Ağdan engellenen cihaz: yakalanmaz (yakalansa yönlendirme forward zincirini atlar ve engel işlemez)
+		if (length(dev.block.mac)) push(o, '\t\tether saddr @dev_block return');
+		if (length(dev.block.ip)) push(o, '\t\tip saddr @devip_block return');
+		push(o, '\t\tip daddr @bypass4 return');
+		push(o, '\t\tip daddr @direct4 return');
+		if (length(dports))
+			push(o, '\t\tmeta l4proto { tcp, udp } th dport { ' + rstr(dports, ', ') + ' } return');
+		if (PUSH_FIX)
+			push(o, '\t\ttcp dport { 5223, 5228-5230 } return');
+		if (defdev == 'direct') {
+			push(o, '\t\tether saddr @dev_vpn jump ' + act);
+			push(o, '\t\tip saddr @devip_vpn jump ' + act);
+		} else {
+			push(o, '\t\tether saddr @dev_direct return');
+			push(o, '\t\tip saddr @devip_direct return');
+			push(o, '\t\tjump ' + act);
+		}
+	};
+
+	push(o, 'table inet kediray');
+	push(o, 'delete table inet kediray');
+	push(o, 'table inet kediray {');
+	set('bypass4', 'ipv4_addr', bypass, true);
+	set('direct4', 'ipv4_addr', dips, true);
+	set('dev_vpn', 'ether_addr', dev.vpn.mac, false);
+	set('dev_direct', 'ether_addr', dev.direct.mac, false);
+	set('devip_vpn', 'ipv4_addr', dev.vpn.ip, true);
+	set('devip_direct', 'ipv4_addr', dev.direct.ip, true);
+	// Tarayıcıların kendi DoH sunucuları (443/853 reddedilir; 53 zaten DNS yönlendirmesine takılır)
+	set('doh4', 'ipv4_addr', on(opt('block_doh'), true) ? filter(DOH_IPS, x => x != rem_ip4()) : [], true);
+	set('dev_block', 'ether_addr', dev.block.mac, false);
+	set('devip_block', 'ipv4_addr', dev.block.ip, true);
+	// Trafik sayacı: tünelin dış baytları (modemin kendi bağlantısı; donanım hızlandırmaya girmez, kesin sayılır)
+	set('srv4', 'ipv4_addr', filter(L(getenv('KR_SERVER_IPS')), is_v4), true);
+	push(o, '\tcounter vpn_rx { }');
+	push(o, '\tcounter vpn_tx { }');
+	push(o, '\tchain acct_in {');
+	push(o, '\t\ttype filter hook input priority filter - 5; policy accept;');
+	push(o, '\t\tip saddr @srv4 counter name "vpn_rx"');
+	push(o, '\t}');
+	push(o, '\tchain acct_out {');
+	push(o, '\t\ttype filter hook output priority filter - 5; policy accept;');
+	push(o, '\t\tip daddr @srv4 counter name "vpn_tx"');
+	push(o, '\t}');
+
+	if (CAPTURE == 'tun') {
+		// Her şey (TCP+UDP) işaretlenir; ip rule işaretli paketi TUN'a (hev-socks5-tunnel) yollar.
+		// xDivine-Ray'in "tun" modunun karşılığı: çekirdekte NAT yok, tüm oturum hev'in kendi TCP yığınında.
+		push(o, '\tchain tun_pre {');
+		push(o, '\t\ttype filter hook prerouting priority mangle; policy accept;');
+		guards('tun_act', '{ tcp, udp }');
+		push(o, '\t}');
+		push(o, '\tchain tun_act {');
+		if (on(opt('dns_hijack'), true) && DNS_MODE != 'off') push(o, '\t\tmeta l4proto { tcp, udp } th dport 53 return');
+		if (on(opt('block_quic'), true)) push(o, '\t\tudp dport 443 return');
+		push(o, '\t\tmeta mark set ' + MARK_TUN + ' ct mark set ' + MARK_TUN);
+		push(o, '\t}');
+	} else if (CAPTURE == 'tproxy') {
+		push(o, '\tchain prerouting {');
+		push(o, '\t\ttype filter hook prerouting priority mangle; policy accept;');
+		guards('tp', '{ tcp, udp }');
+		push(o, '\t}');
+		push(o, '\tchain tp {');
+		if (on(opt('dns_hijack'), true)) push(o, '\t\tmeta l4proto { tcp, udp } th dport 53 return');
+		if (on(opt('block_quic'), true)) push(o, '\t\tudp dport 443 return');
+		push(o, '\t\tmeta l4proto { tcp, udp } socket transparent 1 meta mark set ' + MARK_TP + ' accept');
+		// TCP ve UDP ayrı portlara: UDP girişinde sniffing kapalı (her UDP oturumuna ~200 ms ekliyordu)
+		push(o, '\t\tmeta l4proto tcp meta mark set ' + MARK_TP + ' tproxy ip to :' + tp_port + ' accept');
+		push(o, '\t\tmeta l4proto udp meta mark set ' + MARK_TP + ' tproxy ip to :' + (tp_port + 1) + ' accept');
+		push(o, '\t}');
+	} else {
+		// TCP: çekirdekte NAT redirect (xDivine'ın hızlı yolu). fw4'ün dstnat'ından (-100) önce.
+		push(o, '\tchain nat_pre {');
+		push(o, '\t\ttype nat hook prerouting priority dstnat - 5; policy accept;');
+		guards('nat_act', 'tcp');
+		push(o, '\t}');
+		push(o, '\tchain nat_act {');
+		push(o, '\t\tmeta l4proto tcp redirect to :' + tp_port);
+		push(o, '\t}');
+		if (CAPTURE == 'mixed') {
+			// UDP: sadece işaretlenir; ip rule işaretli paketi TUN (hev-socks5-tunnel) tablosuna gönderir
+			push(o, '\tchain udp_pre {');
+			push(o, '\t\ttype filter hook prerouting priority mangle; policy accept;');
+			guards('udp_act', 'udp');
+			push(o, '\t}');
+			push(o, '\tchain udp_act {');
+			if (on(opt('dns_hijack'), true) && DNS_MODE != 'off') push(o, '\t\tudp dport 53 return');
+			if (on(opt('block_quic'), true)) push(o, '\t\tudp dport 443 return');
+			push(o, '\t\tmeta mark set ' + MARK_TUN + ' ct mark set ' + MARK_TUN);
+			push(o, '\t}');
+		}
+	}
+
+	// DNS (53): cihaz hangi DNS'i yazarsa yazsın çekirdekte KediRay DNS'ine gider.
+	// Böylece sorgu TUN/hev yoluna hiç girmez (ölçüm: o yol UDP başına ~200 ms ekliyor) ve
+	// Xray'in DNS önbelleği devreye girer. Kural tünelden geçen cihazlar için geçerli (Direkt cihaz kendi DNS'ini kullanır).
+	if (on(opt('dns_hijack'), true) && DNS_MODE != 'off') {
+		push(o, '\tchain dns_nat {');
+		push(o, '\t\ttype nat hook prerouting priority dstnat - 6; policy accept;');
+		guards('dns_act', '{ tcp, udp }');
+		push(o, '\t}');
+		push(o, '\tchain dns_act {');
+		push(o, '\t\tmeta l4proto { tcp, udp } th dport 53 redirect to :' + num(opt('dns_port'), 15353));
+		push(o, '\t}');
+	}
+
+	// QUIC (UDP 443): tünelde (UDP-over-TCP) tarayıcıyı takılı bırakabiliyor — ör. Google giriş sayfası dönüp duruyor.
+	// v2rayNG ve Xray'in kendi varsayılanı gibi reddedilir; ICMP yanıtı anında gider, tarayıcı beklemeden TCP'ye (tünele) geçer.
+	if (on(opt('block_quic'), true)) {
+		push(o, '\tchain quic_fwd {');
+		push(o, '\t\ttype filter hook forward priority filter - 5; policy accept;');
+		guards('quic_act', 'udp');
+		push(o, '\t}');
+		push(o, '\tchain quic_act {');
+		push(o, '\t\tudp dport 443 reject with icmpx type port-unreachable');
+		push(o, '\t}');
+	}
+
+	// Tarayıcının kendi DoH'u, adresi elle yazılmışsa (IP ile): 443/853 anında reddedilir.
+	// Alan adıyla gidenler Xray tarafında engellenir; ikisi birlikte tarayıcıyı sistem DNS'ine döndürür.
+	if (on(opt('block_doh'), true)) {
+		push(o, '\tchain doh_fwd {');
+		push(o, '\t\ttype filter hook forward priority filter - 6; policy accept;');
+		push(o, '\t\tmeta nfproto != ipv4 return');
+		push(o, '\t\tiifname != ' + lanset + ' return');
+		push(o, '\t\tip daddr @doh4 meta l4proto { tcp, udp } th dport { 443, 853 } reject with icmpx type port-unreachable');
+		push(o, '\t}');
+	}
+
+	// Ağdan engellenen cihazlar: internet yok (yerel ağ ve DHCP çalışmaya devam eder)
+	if (length(dev.block.mac) || length(dev.block.ip)) {
+		push(o, '\tchain block_fwd {');
+		push(o, '\t\ttype filter hook forward priority filter - 10; policy accept;');
+		push(o, '\t\tiifname != ' + lanset + ' return');
+		if (length(dev.block.mac)) push(o, '\t\tether saddr @dev_block reject with icmpx type admin-prohibited');
+		if (length(dev.block.ip)) push(o, '\t\tip saddr @devip_block reject with icmpx type admin-prohibited');
+		push(o, '\t}');
+		// modemin kendi DNS'i de cevap vermesin: sayfa beklemeden "bağlanılamadı" desin
+		push(o, '\tchain block_in {');
+		push(o, '\t\ttype filter hook input priority filter - 10; policy accept;');
+		push(o, '\t\tiifname != ' + lanset + ' return');
+		push(o, '\t\tmeta l4proto { tcp, udp } th dport != 53 return');
+		if (length(dev.block.mac)) push(o, '\t\tether saddr @dev_block reject');
+		if (length(dev.block.ip)) push(o, '\t\tip saddr @devip_block reject');
+		push(o, '\t}');
+	}
+
+	// IPv6 sızıntı koruması: VPN cihazlarının IPv6 ile tüneli atlamasını engelle
+	if (!on(opt('ipv6'), false) && on(opt('v6_block'), true)) {
+		push(o, '\tchain forward6 {');
+		push(o, '\t\ttype filter hook forward priority filter - 1; policy accept;');
+		push(o, '\t\tmeta nfproto != ipv6 return');
+		push(o, '\t\tiifname != ' + lanset + ' return');
+		push(o, '\t\tip6 daddr { fc00::/7, fe80::/10, ff00::/8 } return');
+		if (length(dev.block.mac)) push(o, '\t\tether saddr @dev_block reject with icmpv6 type admin-prohibited');
+		if (defdev == 'direct')
+			push(o, '\t\tether saddr @dev_vpn reject with icmpv6 type admin-prohibited');
+		else {
+			push(o, '\t\tether saddr @dev_direct return');
+			push(o, '\t\treject with icmpv6 type admin-prohibited');
+		}
+		push(o, '\t}');
+	}
+	push(o, '}');
+	print(join('\n', o), '\n');
+}
+
+// ---------- hev-socks5-tunnel (mixed modda UDP) ----------
+// Geliştiricinin bulduğu bildirim hatasının düzeltmesi: hev'in kendi zaman aşımları TCP 5 dk / UDP 1 dk.
+// Ayarlanmazsa telefonun bildirim bağlantısı 5 dakikada kapanır, bildirimler toplu ve geç gelir.
+// Burada boşta kalma süresi (conn_idle) hev'e de yazılır; UDP en fazla 10 dk (bellek için).
+function hev() {
+	let idle = num(opt('conn_idle'), 14400);
+	if (idle > 86400) idle = 86400;
+	let udp = idle > 600 ? 600 : idle;
+	let o = [
+		'tunnel:',
+		'  name: ' + (getenv('KR_TUN') || 'kediray0'),
+		'  mtu: ' + (num(opt('tun_mtu'), 8500) < 576 ? 576 : (num(opt('tun_mtu'), 8500) > 9000 ? 9000 : num(opt('tun_mtu'), 8500))),
+		'  multi-queue: false',
+		'  ipv4: ' + (getenv('KR_TUN_ADDR') || '198.19.0.1'),
+		'',
+		'socks5:',
+		'  port: ' + num(opt('socks_port'), 10808),
+		'  address: 127.0.0.1',
+		"  udp: 'udp'",
+		'  pipeline: false',
+		'',
+		'misc:',
+		'  task-stack-size: 86016'
+	];
+	if (idle > 0) {
+		if (getenv('KR_HEV_KEYS') == 'single')
+			push(o, '  read-write-timeout: ' + idle * 1000);
+		else {
+			push(o, '  tcp-read-write-timeout: ' + idle * 1000);
+			push(o, '  udp-read-write-timeout: ' + udp * 1000);
+		}
+	}
+	push(o, '  log-file: stderr');
+	push(o, '  log-level: ' + ({ debug: 'debug', info: 'info', error: 'error', none: 'error' }[opt('log_level', 'warning')] ?? 'warn'));
+	push(o, '  limit-nofile: 65535');
+	print(join('\n', o), '\n');
+}
+
+// ---------- dnsmasq ----------
+function dnsmasq() {
+	// 'off': yönlendiricinin DNS'ine dokunma (xDivine-Ray'deki gibi)
+	if (DNS_MODE == 'off' && !DNS_PART) { print(''); return; }
+	if (DNS_PART) {
+		// Kısmi mod: modemin kendi DNS'i aynen kalır (no-resolv YOK); yalnız listedeki alan adları çekirdeğe gider
+		let q = ['# KediRay - otomatik üretildi (yalnız uygulama bazlı DNS)'];
+		for (let d in TDOMS) {
+			let b = replace(replace(d, /^(domain|full):/, ''), /^[a-z]+:.*$/, '');
+			if (b != '' && match(b, /^[A-Za-z0-9._-]+$/)) push(q, 'server=/' + b + '/127.0.0.1#' + num(opt('dns_port'), 15353));
+		}
+		print(join('\n', q), '\n');
+		return;
+	}
+	// Önyükleme adresleri (sunucu alan adı, saat sunucusu, güncelleme adresleri) tünel kurulmadan çözülmeli.
+	// Ölçüldü: bu hatta 1.1.1.1:53'e ulaşılamıyor -> sabit 1.1.1.1 yazarsak bu adlar HİÇ çözülmüyor
+	// (ör. gstatic.com). Operatörün kendi DNS'i her zaman ayakta, o yüzden önce o kullanılır.
+	let doms = [];
+	for (let n in NODES) if (!is_v4(n.address) && !is_v6(n.address)) push(doms, n.address);
+	for (let u in L(M.sub_url)) {
+		let m = match(u, /^https?:\/\/([^\/:?#]+)/);
+		if (m && !is_v4(m[1])) push(doms, m[1]);
+	}
+	for (let d in ['pool.ntp.org', 'time.google.com', 'time.cloudflare.com', 'openwrt.org', 'github.com', 'githubusercontent.com', 'gstatic.com'])
+		push(doms, d);
+	for (let d in L(getenv('KR_EXTRA_DIRECT'))) push(doms, d);
+	let boots = length(WAN_DNS) ? WAN_DNS : [opt('dns_bootstrap', '1.1.1.1')];
+	let o = ['# KediRay - otomatik üretildi', 'no-resolv', 'server=127.0.0.1#' + num(opt('dns_port'), 15353)];
+	for (let d in uniq(doms)) for (let b in boots) push(o, 'server=/' + d + '/' + b);
+	if (!on(opt('ipv6'), false)) push(o, 'filter-AAAA');
+	print(join('\n', o), '\n');
+}
+
+// ---------- düğüm listesi (CLI/panel için) ----------
+function nodes() {
+	for (let n in NODES) {
+		let j = n._json, ts = j?.streamSettings?.tlsSettings;
+		let insecure = (n.insecure == '1' || ts?.allowInsecure === true) ? 1 : 0;
+		let sni = n.sni || n.host || ts?.serverName || n.address;
+		let net = n.network || (j?.streamSettings?.network ?? 'tcp');
+		print(join('\t', [n._tag, n['.name'], n._tport, n.address, n.port, n.protocol, net, insecure, sni,
+			n.pin || '-', replace(n.remarks || (n.address + ':' + n.port), /[\t\n]/g, ' ')]), '\n');
+	}
+}
+
+// ---------- VPN kapalıyken ping için geçici test çekirdeği ----------
+function testcfg() {
+	if (!length(NODES)) die('hiç geçerli sunucu yok', 2);
+	let inb = [], outb = [{ tag: 'direct', protocol: 'freedom' }], R = [];
+	for (let n in NODES) {
+		let o = outbound(n);
+		if (!o) continue;
+		push(outb, o);
+		push(inb, { tag: 't-' + n._tag, listen: '127.0.0.1', port: n._tport, protocol: 'socks', settings: { udp: false } });
+		push(R, { inboundTag: ['t-' + n._tag], outboundTag: n._tag });
+	}
+	print(sprintf('%.J\n', { log: { loglevel: 'none' }, inbounds: inb, outbounds: outb, routing: { rules: R } }));
+}
+
+// ---------- tek sunucunun outbound'u (düzenleme ekranı ve kayıt öncesi doğrulama) ----------
+function one_outbound(n) {
+	let errs = [];
+	n = prep_node(n, errs);
+	let res = { errors: errs, outbound: null, test: null };
+	if (n) {
+		n._tag = 'node-001';
+		let o = outbound(n);
+		if (o) {
+			res.outbound = o;
+			res.test = { log: { loglevel: 'warning' }, outbounds: [o, { tag: 'direct', protocol: 'freedom' }] };
+		}
+	}
+	print(sprintf('%.J\n', res));
+	exit(length(errs) ? 3 : 0);
+}
+
+if (WHAT == 'xray') xray();
+else if (WHAT == 'nft') nft();
+else if (WHAT == 'dnsmasq') dnsmasq();
+else if (WHAT == 'hev') hev();
+else if (WHAT == 'nodes') nodes();
+else if (WHAT == 'test') testcfg();
+else if (WHAT == 'check') print(sprintf('%.J\n', { errors: ERRS, nodes: length(NODES) }));
+else if (WHAT == 'outbound') {
+	let n = raw[ARGV[1]];
+	if (!n || n['.type'] != 'node') die('böyle bir sunucu yok: ' + ARGV[1]);
+	one_outbound({ ...n });
+}
+else if (WHAT == 'outbound-json') {
+	let n = null, arg = ARGV[1] ?? '';
+	if (substr(arg, 0, 1) == '@') arg = fs.readfile(substr(arg, 1)) ?? '';
+	try { n = json(arg); } catch (e) { n = null; }
+	if (type(n) != 'object') die('aday sunucu JSON olarak okunamadı');
+	one_outbound(n);
+}
+else die('bilinmeyen komut: ' + WHAT);

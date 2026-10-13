@@ -1,0 +1,17 @@
+ucode
+ucode-mod-uci
+ucode-mod-fs
+ip-full
+curl
+ca-bundle
+unzip
+openssl-util
+conntrack
+hev-socks5-tunnel
+kmod-tun
+kmod-nft-tproxy
+kmod-nft-socket
+xray-core
+v2ray-geoip
+v2ray-geosite
+luci-base

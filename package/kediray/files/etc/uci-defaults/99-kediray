@@ -1,0 +1,57 @@
+#!/bin/sh
+# KediRay ilk açılış kurulumu (uci-defaults). Bir kez çalışır; başarılı biterse OpenWrt dosyayı siler.
+# Copyright (C) 2026 Şaban Vurgun — SPDX-License-Identifier: GPL-3.0-or-later
+
+chmod 755 /usr/bin/kediray /usr/bin/aw1k-usage /usr/libexec/rpcd/aw1k /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray /etc/hotplug.d/firewall/99-kediray 2>/dev/null
+chmod 600 /etc/config/kediray 2>/dev/null
+chmod 755 /www/luci-static/resources/view/kediray /usr/share/kediray 2>/dev/null
+chmod 644 /www/luci-static/resources/view/kediray/*.js /usr/share/kediray/*.uc /usr/share/rpcd/acl.d/aw1k-panel.json /usr/share/rpcd/acl.d/luci-app-kediray.json 2>/dev/null
+
+# Trafik yakalama modu: hev-socks5-tunnel + TUN varsa mixed (önerilen), yoksa tproxy, o da yoksa redirect (sadece TCP)
+modprobe tun 2>/dev/null
+MODE=redirect
+if command -v hev-socks5-tunnel >/dev/null 2>&1 && [ -c /dev/net/tun ]; then MODE=mixed
+elif modprobe nft_tproxy 2>/dev/null && modprobe nft_socket 2>/dev/null; then MODE=tproxy; fi
+uci -q set kediray.main.capture="$MODE"
+uci -q commit kediray
+
+# mixed modda TUN arayüzü (kediray0) için güvenlik duvarı bölgesi + LAN yönlendirmesi (kediray fw-zone ile aynı)
+if [ "$MODE" = mixed ]; then
+	if ! uci -q get firewall.kediray >/dev/null; then
+		uci -q batch <<-FWEOF
+			set firewall.kediray=zone
+			set firewall.kediray.name='kediray'
+			set firewall.kediray.input='REJECT'
+			set firewall.kediray.output='ACCEPT'
+			set firewall.kediray.forward='REJECT'
+			set firewall.kediray.masq='1'
+			set firewall.kediray.mtu_fix='1'
+			add_list firewall.kediray.device='kediray0'
+		FWEOF
+	fi
+	if ! uci -q get firewall.kediray_fwd >/dev/null; then
+		lan_zone=lan; i=0
+		while name=$(uci -q get "firewall.@zone[$i].name"); do
+			case " $(uci -q get "firewall.@zone[$i].network") " in *" lan "*) lan_zone="$name"; break ;; esac
+			i=$((i + 1)); [ $i -gt 32 ] && break
+		done
+		uci -q batch <<-FWEOF
+			set firewall.kediray_fwd=forwarding
+			set firewall.kediray_fwd.src='$lan_zone'
+			set firewall.kediray_fwd.dest='kediray'
+		FWEOF
+	fi
+	uci -q commit firewall
+fi
+
+# Dakikalık bekçi (abonelik yenileme, sağlık denetimi), gece 01:00 GitHub sürüm denetimi ve AW1K Panel için 2 dakikada bir mobil veri kaydı
+touch /etc/crontabs/root
+sed -i '/kediray watchdog/d;/kediray update auto/d' /etc/crontabs/root
+echo '* * * * * /usr/bin/kediray watchdog >/dev/null 2>&1' >> /etc/crontabs/root
+echo '0 1 * * * /usr/bin/kediray update auto >/dev/null 2>&1' >> /etc/crontabs/root
+grep -q '/usr/bin/aw1k-usage' /etc/crontabs/root || echo '*/2 * * * * /usr/bin/aw1k-usage >/dev/null 2>&1' >> /etc/crontabs/root
+/etc/init.d/cron enable >/dev/null 2>&1
+
+/etc/init.d/kediray enable >/dev/null 2>&1
+rm -f /tmp/luci-indexcache* 2>/dev/null; rm -rf /tmp/luci-modulecache 2>/dev/null
+exit 0

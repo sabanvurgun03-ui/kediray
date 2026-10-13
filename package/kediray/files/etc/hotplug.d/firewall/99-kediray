@@ -1,0 +1,8 @@
+#!/bin/sh
+# Güvenlik duvarı yeniden yüklenince KediRay kurallarını geri koy (bazı fw4 sürümleri tüm tabloları siler)
+[ "$(uci -q get kediray.main.enabled)" = 1 ] || exit 0
+[ -f /var/etc/kediray/fw ] || exit 0
+nft list table inet kediray >/dev/null 2>&1 && exit 0
+logger -t kediray "güvenlik duvarı yeniden yüklendi, kurallar geri uygulanıyor"
+/usr/bin/kediray fw-up >/dev/null 2>&1 &
+exit 0
