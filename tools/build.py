@@ -320,6 +320,10 @@ def verify(root, out, ver, installer, rows, tf):
                 if body.startswith(b'#!/bin/sh') and sh:
                     r = subprocess.run([sh, '-n', str(f)], capture_output=True, text=True)
                     check(r.returncode == 0, 'sh -n: ' + short)
+                    # aynı ada iki işlev tanımı: sonraki öncekini sessizce ezer (1.19.65'te cmd_stats çakışması böyle kaçtı)
+                    import re as _re, collections as _c
+                    dup = sorted(k for k, v in _c.Counter(_re.findall(r'^([A-Za-z_][A-Za-z_0-9]*)\(\) *\{', body.decode('utf-8', 'replace'), _re.M)).items() if v > 1)
+                    check(not dup, 'işlev adları benzersiz: ' + short + (' — çift: ' + ', '.join(dup) if dup else ''))
                 elif name.endswith('.js') and node:
                     c = f.with_suffix('.cjs')
                     f.rename(c)

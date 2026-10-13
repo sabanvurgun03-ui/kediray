@@ -28,7 +28,7 @@ function run(args) {
 }
 /* İzinli anonim sayaç: ilk açılışta bir kez sorar. Cevap verilmezse (pencere kapatılırsa) hiçbir şey gönderilmez ve sonraki girişte yine sorulur. */
 function askStats() {
-	const done = (v, msg) => run(['stats', v]).then(() => { ui.hideModal(); ui.addNotification(null, h('p', {}, msg), 'info'); });
+	const done = (v, msg) => run(['count', v]).then(() => { ui.hideModal(); ui.addNotification(null, h('p', {}, msg), 'info'); });
 	ui.showModal('KediRay\'i geliştirmeye yardımcı olur musun?', [
 		h('p', {}, 'Kaç kişinin KediRay kullandığını görmek istiyorum. Onay verirsen günde bir kez şunlar gönderilir:'),
 		h('ul', {}, [h('li', {}, 'rastgele bir kurulum kimliği (seni tanıtmaz)'), h('li', {}, 'KediRay sürümü'), h('li', {}, 'uygulama adı')]),
@@ -1502,7 +1502,7 @@ return view.extend({
 			this.renderDevices(d);
 		}), 30);
 
-		setTimeout(() => run(['stats', 'status']).then(r => { if ((r.stdout || '').trim() === 'unset') askStats(); }), 1200);
+		setTimeout(() => run(['count', 'status']).then(r => { if ((r.stdout || '').trim() === 'unset') askStats(); }), 1200);
 
 		return h('div', {}, [
 			h('style', {}, CSS),

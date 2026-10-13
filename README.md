@@ -58,7 +58,7 @@ Güncelleme, o sürümün GitHub Release'inden indirilir ve release'teki `sha256
 
 ## Gizlilik (anonim kullanım sayısı)
 
-KediRay hiçbir şeyi kendiliğinden göndermez. Panele ilk girişte "Geliştirmeye yardımcı olur musun?" diye bir kez sorar; **Evet** dersen günde bir kez rastgele bir kurulum kimliği, KediRay sürümü ve uygulama adı gönderilir. Sunucu bilgilerin, trafiğin, adın ve IP adresin kaydedilmez. Cevap vermezsen ya da **Hayır** dersen hiçbir şey gönderilmez. Ayarlar'dan ya da `kediray stats off` ile istediğin an kapatabilirsin (kimlik silinir); ne gönderileceğini `kediray stats show` gösterir. Toplayan sunucunun kodu [`server/stats-worker`](server/stats-worker) içinde açık durur.
+KediRay hiçbir şeyi kendiliğinden göndermez. Panele ilk girişte "Geliştirmeye yardımcı olur musun?" diye bir kez sorar; **Evet** dersen günde bir kez rastgele bir kurulum kimliği, KediRay sürümü ve uygulama adı gönderilir. Sunucu bilgilerin, trafiğin, adın ve IP adresin kaydedilmez. Cevap vermezsen ya da **Hayır** dersen hiçbir şey gönderilmez. Ayarlar'dan ya da `kediray count off` ile istediğin an kapatabilirsin (kimlik silinir); ne gönderileceğini `kediray count show` gösterir. Toplayan sunucunun kodu [`server/stats-worker`](server/stats-worker) içinde açık durur.
 
 ## Yedekleme
 
@@ -123,7 +123,7 @@ The update is downloaded from that version's GitHub Release and checked against 
 
 ### Privacy (anonymous usage count)
 
-KediRay sends nothing on its own. The first time you open the panel it asks once whether you want to help; if you say **Yes**, it sends a random install ID, the KediRay version and the app name once a day. Your servers, traffic, name and IP address are not recorded. If you don't answer or say **No**, nothing is sent. Turn it off any time in Settings or with `kediray stats off` (the ID is deleted); `kediray stats show` prints exactly what would be sent. The collecting server's code is open in [`server/stats-worker`](server/stats-worker).
+KediRay sends nothing on its own. The first time you open the panel it asks once whether you want to help; if you say **Yes**, it sends a random install ID, the KediRay version and the app name once a day. Your servers, traffic, name and IP address are not recorded. If you don't answer or say **No**, nothing is sent. Turn it off any time in Settings or with `kediray count off` (the ID is deleted); `kediray count show` prints exactly what would be sent. The collecting server's code is open in [`server/stats-worker`](server/stats-worker).
 
 ### Backup
 

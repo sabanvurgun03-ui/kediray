@@ -365,7 +365,7 @@ cmd_selfupdate() { # <dosya> | log  — panelden yüklenen kurulum dosyasıyla k
 	return 0
 }
 
-# ---- Anonim kullanım sayısı (İZİNLİ): kediray stats [status|on|off|show|ping] --------------------------------
+# ---- Anonim kullanım sayısı (İZİNLİ): kediray count [status|on|off|show|ping] --------------------------------
 # Varsayılan: sorulmamış ("unset") = HİÇBİR ŞEY GÖNDERİLMEZ. Yalnızca kullanıcı panelde "Evet" derse (uci kediray.main.stats=1)
 # günde bir kez şunlar gönderilir: rastgele kurulum kimliği, KediRay sürümü, uygulama adı. IP, sunucu bilgisi, trafik, ad: YOK.
 # Kimlik /etc/kediray.sid dosyasında durur (yedeğe girmez); kapatınca silinir.
@@ -377,7 +377,7 @@ stats_payload() {
 	local id; id=$(cat "$STATS_SID" 2>/dev/null)
 	printf '{"app":"kediray","id":"%s","v":"%s"}' "$id" "$(kr_version)"
 }
-cmd_stats() { # status|on|off|show|ping
+cmd_count() { # status|on|off|show|ping
 	local url
 	case "${1:-status}" in
 		status) stats_state ;;
@@ -398,7 +398,7 @@ cmd_stats() { # status|on|off|show|ping
 			url=$(stats_url); [ -n "$url" ] || return 0
 			[ -s "$STATS_SID" ] || head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$STATS_SID"
 			curl -fsS --noproxy '' -m 8 -X POST -H 'Content-Type: application/json' -d "$(stats_payload)" "${url%/}/ping" >/dev/null 2>&1 ;;
-		*) echo "kullanım: kediray stats status|on|off|show|ping" >&2; return 1 ;;
+		*) echo "kullanım: kediray count status|on|off|show|ping" >&2; return 1 ;;
 	esac
 }
 
@@ -439,7 +439,7 @@ UPD_LAST=/tmp/kediray.upd.last    # son başarılı denetim: "epoch|kaynak|en_so
 cmd_update() { # check [--json] | install | auto | cached
 	case "$1" in
 		auto) # cron: günde bir kez sessizce denetle (update_check=0 ise yapmaz); sonuç önbelleğe yazılır
-			cmd_stats ping   # yalnızca kullanıcı izin verdiyse bir şey gönderir
+			cmd_count ping   # yalnızca kullanıcı izin verdiyse bir şey gönderir
 			[ "$(uget main.update_check)" = 0 ] && { rm -f "$UPD_CACHE"; return 0; }
 			KR_UPD_SRC=auto cmd_update check --json > "$UPD_CACHE.$$" 2>/dev/null && mv "$UPD_CACHE.$$" "$UPD_CACHE" || { rm -f "$UPD_CACHE.$$"; return 0; }
 			# "Otomatik kur" işaretliyse ve yeni sürüm varsa kur (indirme SHA256 ile doğrulanır; hata olursa mevcut sürüm kalır)
@@ -3128,7 +3128,7 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray selfupdate <dosya>         Kurulum dosyasıyla güncelle (panel: Hakkında > Güncelle)
   kediray update check [--json]      GitHub'da yeni sürüm var mı
   kediray update install             GitHub Release'ten indir (sha256sums doğrulamalı) ve kur
-  kediray stats [status|on|off|show] Anonim kullanım sayısı (izne bağlı; show = ne gönderileceğini gösterir)
+  kediray count [status|on|off|show] Anonim kullanım sayısı (izne bağlı; show = ne gönderileceğini gösterir)
   kediray license status|id|activate <anahtar>|remove   Lisans (modem IMEI'si: kediray license id)
   kediray backup [dosya]             Sunucu ve ayarları yedekle (UUID içerir, paylaşma)
   kediray restore <dosya>            Yedeği geri yükle (önce denenir, bozuksa dokunmaz)
@@ -3204,7 +3204,7 @@ case "$cmd" in
 	fixboot) cmd_fixboot "$@" ;;
 	selfupdate) cmd_selfupdate "$@" ;;
 	update) cmd_update "$@" ;;
-	stats) cmd_stats "$@" ;;
+	count) cmd_count "$@" ;;
 	backup) cmd_backup "$@" ;;
 	restore) cmd_restore "$@" ;;
 	hunt) cmd_hunt "$@" ;;

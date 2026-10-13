@@ -397,7 +397,7 @@ return view.extend({
 		o.value('0', 'Hayır');
 		o.default = '';
 		o.rmempty = true;
-		o.description = 'Açıksa günde bir kez şunlar gönderilir: rastgele bir kurulum kimliği, KediRay sürümü ve uygulama adı. Sunucu bilgilerin, trafiğin, adın ya da IP adresin kaydedilmez. İstediğin an kapatabilirsin; kapatınca kimlik silinir. Ne gönderileceğini görmek için: kediray stats show';
+		o.description = 'Açıksa günde bir kez şunlar gönderilir: rastgele bir kurulum kimliği, KediRay sürümü ve uygulama adı. Sunucu bilgilerin, trafiğin, adın ya da IP adresin kaydedilmez. İstediğin an kapatabilirsin; kapatınca kimlik silinir. Ne gönderileceğini görmek için: kediray count show';
 
 		o = s.taboption('general', form.Value, 'update_repo', 'Güncelleme kaynağı');
 		o.placeholder = 'sabanvurgun03-ui/kediray';
