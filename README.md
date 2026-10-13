@@ -35,19 +35,6 @@ Modemde SSH ile:
 
 Kurulumdan sonra LuCI'de **VPN → KediRay VPN** menüsünü aç. Sayfa eski görünürse Ctrl+Shift+R yap.
 
-## İndirmeler
-
-Her sürümün dosyaları [Releases](https://github.com/sabanvurgun03-ui/kediray/releases) sayfasında:
-
-| Dosya | Ne |
-|---|---|
-| `kediray-install.sh` | Tek dosya kurulum (yukarıdaki komutla aynı betik) |
-| `kediray-all.tar.gz` | Firmware'e gömme paketi: dosya ağacı, ilk açılış betiği, paket listesi. Mimariden bağımsız (aarch64, armv7, mips, mipsel, riscv64, x86_64 ...), çünkü KediRay derlenmiş dosya içermez |
-| `kediray-src.tar.gz` | Kaynak ağacı (derleme araçlarıyla birlikte) |
-| `sha256sums` | Dosyaların SHA256 toplamları: `sha256sum -c sha256sums` |
-
-AW1K Panel Android uygulamasının APK'sı aynı sayfada ayrı bir sürüm olarak durur.
-
 ## Depo düzeni
 
     package/kediray/files/        modemde çalışan dosyalar (kediray komutu, init, hotplug, *.uc)
@@ -119,20 +106,6 @@ Over SSH on the router:
     sh /tmp/kediray.sh
 
 Then open **VPN → KediRay VPN** in LuCI. If the page looks stale, press Ctrl+Shift+R.
-
-### Downloads
-
-Each release's files are on the [Releases](https://github.com/sabanvurgun03-ui/kediray/releases) page:
-
-| File | What |
-|---|---|
-| `kediray-install.sh` | Single-file installer (the same script as the command above) |
-| `kediray-all.tar.gz` | Firmware package: file tree, first-boot script, package list. Architecture-independent (aarch64, armv7, mips, mipsel, riscv64, x86_64 ...) because KediRay ships no compiled binaries |
-| `kediray-src.tar.gz` | Source tree (with the build tools) |
-| `sha256sums` | SHA256 sums of the files: `sha256sum -c sha256sums` |
-
-The AW1K Panel Android APK sits on the same page as its own, separate release.
-To build the files yourself: `./build.sh` (output goes to `dist/`; the same input always gives byte-identical files).
 
 ### Update
 
