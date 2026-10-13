@@ -369,7 +369,7 @@ cmd_selfupdate() { # <dosya> | log  — panelden yüklenen kurulum dosyasıyla k
 # Varsayılan: sorulmamış ("unset") = HİÇBİR ŞEY GÖNDERİLMEZ. Yalnızca kullanıcı panelde "Evet" derse (uci kediray.main.stats=1)
 # günde bir kez şunlar gönderilir: rastgele kurulum kimliği, KediRay sürümü, uygulama adı. IP, sunucu bilgisi, trafik, ad: YOK.
 # Kimlik /etc/kediray.sid dosyasında durur (yedeğe girmez); kapatınca silinir.
-STATS_URL_DEF=""   # sayaç sunucusu (server/stats-worker); boşsa hiçbir şey gönderilmez
+STATS_URL_DEF="https://kediray-stats.kediray.workers.dev"   # sayaç sunucusu (server/stats-worker); boşsa hiçbir şey gönderilmez
 STATS_SID=/etc/kediray.sid
 stats_state() { case "$(uget main.stats)" in 1) echo on;; 0) echo off;; *) echo unset;; esac; }
 stats_url() { local u; u=$(uget main.stats_url); echo "${u:-$STATS_URL_DEF}"; }

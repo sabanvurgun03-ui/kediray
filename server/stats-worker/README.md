@@ -9,7 +9,7 @@ IP adresi saklanmaz. 35 gün ping gelmeyen kayıt kendiliğinden silinir.
 2. **Storage & Databases → KV → Create** ile `STATS` adlı bir namespace aç.
 3. Worker → **Settings → Bindings → Add → KV namespace**: değişken adı `STATS`, az önceki namespace.
 4. Worker → **Settings → Variables and Secrets → Add**: tür *Secret*, ad `ADMIN_TOKEN`, değer = kendi yönetici şifren (uzun ve rastgele).
-5. Worker adresi `https://kediray-stats.<hesabın>.workers.dev` olur. Yönetici sayfası: `<adres>/admin`.
+5. Worker adresi `https://kediray-stats.kediray.workers.dev` olur. Yönetici sayfası: `<adres>/admin`.
 
 Komut satırı sevenler için: `wrangler.toml` hazır; `npx wrangler deploy`.
 
