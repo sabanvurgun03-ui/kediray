@@ -263,7 +263,7 @@ return view.extend({
 		dom.content(this.elApps, [
 			h('h3', {}, 'Uygulamalar (' + apps.length + ')'),
 			...rows,
-			chips.length ? h('div', { 'class': 'ka-sub', 'style': 'margin-top:10px' }, 'Hazır uygulamalar (Metin2 ve Teams direkt, diğerleri VPN gelir):') : '',
+			chips.length ? h('div', { 'class': 'ka-sub', 'style': 'margin-top:10px' }, 'Hazır uygulamalar:') : '',
 			chips.length ? h('div', { 'class': 'ka-chips' }, chips) : '',
 			h('div', { 'class': 'ka-sub', 'style': 'margin-top:8px' }, 'Direkt: çekirdekte bypass, VPN yeniden başlasa bile bağlantı kopmaz.')
 		]);

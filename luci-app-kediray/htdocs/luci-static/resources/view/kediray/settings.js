@@ -366,7 +366,7 @@ return view.extend({
 		o.value('tproxy', 'TPROXY — TCP ve UDP çekirdekte TPROXY ile');
 		o.value('redirect', 'Redirect — sadece TCP (UDP/oyun/arama direkt çıkar)');
 		o.default = 'mixed';
-		o.description = 'Mixed: TCP en kısa yoldan (çekirdek NAT), UDP TUN\'dan. TUN: her şey tek bir TUN aygıtından geçer — bazı hatlarda sayfalar daha hızlı açılır, denemeye değer; karşılığında UDP oturumları biraz gecikir. TPROXY: ikisi de çekirdekte. Redirect: yalnız TCP. Gerekli paketler yoksa KediRay otomatik TPROXY\'ye düşer (apk add hev-socks5-tunnel kmod-tun). Değiştirdikten sonra bir sayfa açıp Kontrol Paneli → "🐢 Sayfa gecikmesi" ile karşılaştır.';
+		o.description = 'Mixed: TCP çekirdekten, UDP TUN\'dan. TUN: her şey TUN\'dan geçer; bazı hatlarda sayfalar hızlanır, UDP biraz gecikir. TPROXY: TCP ve UDP çekirdekte. Redirect: yalnız TCP. Paketler yoksa otomatik TPROXY\'ye düşer (apk add hev-socks5-tunnel kmod-tun). Karşılaştırmak için Kontrol Paneli → "🐢 Sayfa gecikmesi".';
 
 		o = s.taboption('general', form.ListValue, 'default_device', 'Listede olmayan cihazlar');
 		o.value('vpn', 'VPN kurallarını kullansın');
@@ -410,7 +410,7 @@ return view.extend({
 		o.value('fast', 'Direkt — sorgular çekirdekten ama tünele girmeden çıkar');
 		o.value('off', 'DNS\'e dokunma — modemin kendi DNS\'i aynen kalır (sorun giderme için)');
 		o.default = 'private';
-		o.description = '"Tünelden": dnsmasq sorguları çekirdeğin DNS portuna (varsayılan 15353), çekirdek de "Uzak DNS" sunucusuna tünel içinden verir — hiçbir sorgu operatöre sızmaz. Sorgu tünelin veri yoluna (TUN/TPROXY) hiç girmediği için hızlıdır; TUN yakalama modunda tek çalışan seçenek budur. "Direkt": sorgular tünele girmez, tünel kopsa da ad çözümlenir; karşılığında hangi siteye girdiğin operatörün DNS\'ine ya da DoH sunucusuna görünür. "DNS\'e dokunma": KediRay ad çözümlemeye hiç karışmaz; alan adı kuralları (WhatsApp VPN\'den, oyun direkt) yine bağlantıdaki alan adından (SNI) okunduğu için çalışır, ama TUN yakalamasında hiçbir ad çözülemez (o birleşimde KediRay kendiliğinden "Tünelden"e döner) — yalnız DNS kaynaklı bir sorunu denemek için kullan.';
+		o.description = '"Tünelden": sorgular tünel içinden gider, operatöre sızmaz; hızlıdır, TUN modunda tek çalışan seçenektir. "Direkt": tünele girmez, tünel kopsa da çalışır; ziyaret ettiğin siteler operatörün DNS\'ine görünür. "DNS\'e dokunma": KediRay ad çözümlemeye karışmaz; TUN modunda ad çözülemediği için otomatik "Tünelden"e döner. Yalnız sorun gidermek için.';
 
 		o = s.taboption('dns', form.Value, 'dns_remote', 'Uzak DNS (VPN üzerinden)');
 		o.value('tcp://8.8.8.8', 'Google, TCP  [önerilen]');

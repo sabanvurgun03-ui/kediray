@@ -1261,7 +1261,7 @@ return view.extend({
 					]),
 					this.elChart
 				])),
-				h('div', { 'class': 'kr-sub', 'style': 'margin-top:8px' }, 'VPN = sunucuya giden/gelen gerçek tünel baytları. Direkt = modemin İnternet (WAN) toplamı − VPN; yani VPN\'siz çıkan her şey (seçtiğin direkt uygulamalar, oyun, Teams, yerel indirmeler) burada. Sayaçlar modem yeniden başlasa da saklanır.')
+				h('div', { 'class': 'kr-sub', 'style': 'margin-top:8px' }, 'VPN = tünel trafiği. Direkt = modem toplamı − VPN (VPN\'siz çıkan her şey). Sayaçlar yeniden başlatmada saklanır.')
 			]);
 			this.trafficBuilt = true;
 		}
