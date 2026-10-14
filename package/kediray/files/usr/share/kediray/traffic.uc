@@ -142,9 +142,15 @@ if (CMD == 'report') {
 	// bıraktığı presence.json (cli.uc) 150 sn içinde doğrulandıysa. İkisi de yoksa canlı trafik kanıt sayılır.
 	let rd = (cmd) => { let p = fs.popen(cmd + ' 2>/dev/null'); if (!p) return ''; let o = p.read('all') ?? ''; p.close(); return o; };
 	let assoc = {}, haveAssoc = false, pres = {}, arpmac = {};
-	for (let l in split(rd('for i in $(iw dev | awk \'$1=="Interface"{print $2}\'); do echo "IF $i"; iw dev "$i" station dump | awk \'/^Station/{print $2}\'; done'), '\n')) {
-		if (match(l, /^IF /)) { haveAssoc = true; continue; }
-		if (match(l, /^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$/)) assoc[lc(l)] = true;
+	// Wi-Fi bağlı listesi 10 sn önbelleğe alınır (panel 2 sn'de bir sorsa da iw her seferinde çalışmasın)
+	let ac = readj(RUN + '/assoc.json');
+	if (ac && c.t >= n(ac.t) && c.t - n(ac.t) < 10) { assoc = ac.assoc ?? {}; haveAssoc = !!ac.have; }
+	else {
+		for (let l in split(rd('for i in $(iw dev | awk \'$1=="Interface"{print $2}\'); do echo "IF $i"; iw dev "$i" station dump | awk \'/^Station/{print $2}\'; done'), '\n')) {
+			if (match(l, /^IF /)) { haveAssoc = true; continue; }
+			if (match(l, /^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$/)) assoc[lc(l)] = true;
+		}
+		try { fs.mkdir(RUN); writej(RUN + '/assoc.json', { t: c.t, have: haveAssoc, assoc: assoc }); } catch (e) {}
 	}
 	pres = readj(RUN + '/presence.json') ?? {};
 	let leaseip = {};
