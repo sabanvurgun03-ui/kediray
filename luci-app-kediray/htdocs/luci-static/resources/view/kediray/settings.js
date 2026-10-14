@@ -391,13 +391,10 @@ return view.extend({
 		o.depends('update_check', '1');
 		o.description = 'Gece denetiminde yeni sürüm çıkmışsa kendiliğinden indirilir (SHA256 ile doğrulanır) ve kurulur; kurulum sırasında VPN kısa süre yeniden başlar. Ayarların ve sunucuların korunur. Kapalıysa yalnızca haber verilir.';
 
-		o = s.taboption('general', form.ListValue, 'stats', 'Geliştirmeye yardımcı ol');
-		o.value('', 'Henüz sorulmadı (hiçbir şey gönderilmez)');
-		o.value('1', 'Evet — anonim kullanım sayısı gönderilsin');
-		o.value('0', 'Hayır');
-		o.default = '';
-		o.rmempty = true;
-		o.description = 'Açıksa günde bir kez şunlar gönderilir: rastgele bir kurulum kimliği, KediRay sürümü ve uygulama adı. Sunucu bilgilerin, trafiğin, adın ya da IP adresin kaydedilmez. İstediğin an kapatabilirsin; kapatınca kimlik silinir. Ne gönderileceğini görmek için: kediray count show';
+		o = s.taboption('general', form.Flag, 'stats', 'Geliştirmeye yardımcı ol');
+		o.default = '0';
+		o.rmempty = false;
+		o.description = 'İşaretliyse anonim kullanım sayısı gönderilir; işaretsizken hiçbir şey gönderilmez. Açıksa günde bir kez şunlar gönderilir: rastgele bir kurulum kimliği, KediRay sürümü ve uygulama adı. Sunucu bilgilerin, trafiğin, adın ya da IP adresin kaydedilmez. İstediğin an kapatabilirsin; kapatınca kimlik silinir. Ne gönderileceğini görmek için: kediray count show';
 
 		o = s.taboption('general', form.Value, 'update_repo', 'Güncelleme kaynağı');
 		o.placeholder = 'sabanvurgun03-ui/kediray';
