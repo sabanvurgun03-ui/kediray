@@ -71,6 +71,7 @@ function devsample(s, c) {
 		e.days[day].rx = n(e.days[day].rx) + x.rx;
 		e.days[day].tx = n(e.days[day].tx) + x.tx;
 		e.last = { rx: n(v.rx), tx: n(v.tx) };
+		if (x.rx + x.tx > 0) e.act = c.t;   // son trafik anı (listede gösterme için)
 		if (ls[ip]) { e.mac = ls[ip].mac; if (ls[ip].name) e.name = ls[ip].name; }
 		e.seen = c.t;
 	}
@@ -138,6 +139,8 @@ if (CMD == 'report') {
 
 	// cihazlar: bugün / hafta / ay / toplam (rx = indirme, tx = yükleme) + canlı hız için ham sayaç
 	let cd = readdev(), devs = [];
+	let others = { n: 0, today: { rx: 0, tx: 0 }, month: { rx: 0, tx: 0 }, total: { rx: 0, tx: 0 } };
+	let add2 = (t, v) => { t.rx += v.rx; t.tx += v.tx; };
 	for (let ip, e in s.dev) {
 		let lv = devlive(e, cd[ip]);
 		let dsum = (from) => {
@@ -148,6 +151,14 @@ if (CMD == 'report') {
 		};
 		let tot = dsum('0000-00-00');
 		if (tot.rx + tot.tx <= 0) continue;
+		// 24 saatten uzun süredir trafiği olmayan cihaz listeden kalkar; verisi saklanır, trafik yapınca geri gelir
+		let act = n(e.act), dy = k => n((e.days ?? {})[k]?.rx) + n((e.days ?? {})[k]?.tx);
+		let recent = lv.rx + lv.tx > 0 || (act ? c.t - act <= 86400 : dy(today) + dy(yest) > 0);
+		if (!recent) {
+			others.n += 1;
+			add2(others.today, dsum(today)); add2(others.month, dsum(month)); add2(others.total, tot);
+			continue;
+		}
 		push(devs, { ip: ip, name: e.name ?? '', mac: e.mac ?? '', counter: cd[ip] ?? null,
 			today: dsum(today), week: dsum(week), month: dsum(month), total: tot });
 	}
@@ -156,7 +167,7 @@ if (CMD == 'report') {
 
 	print(sprintf('%J\n', {
 		t: c.t, counters: c, today: t_today, yesterday: day(yest), week: sum(week), month: sum(month),
-		total: sum('0000-00-00'), since: first, days: hist, devices: devs
+		total: sum('0000-00-00'), since: first, days: hist, devices: devs, others: others
 	}));
 	exit(0);
 }

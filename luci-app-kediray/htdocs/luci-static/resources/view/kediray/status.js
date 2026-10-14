@@ -1296,7 +1296,7 @@ return view.extend({
 			]))
 		]));
 
-		this.renderDevTraffic(s.devices || [], s.t);
+		this.renderDevTraffic(s.devices || [], s.t, s.others);
 
 		// grafik yalnızca veri ya da genişlik değişince yeniden çizilir (gezinme/ipucu titremesin)
 		const sig = JSON.stringify(s.days) + '|' + (this.elChart.clientWidth || 0);
@@ -1309,7 +1309,7 @@ return view.extend({
 
 	/* Cihaz bazında trafik: indirme = cihaza gelen, yükleme = cihazdan giden (nft sayaçları, LAN IP'si başına).
 	   Canlı hız, iki yoklama arasındaki sayaç farkından hesaplanır. */
-	renderDevTraffic(devs, t) {
+	renderDevTraffic(devs, t, others) {
 		const prev = this.devPrev || {}, next = {};
 		if (!devs.length) {
 			dom.content(this.elDevTr, h('div', { 'class': 'kr-sub' }, 'Henüz cihaz verisi yok; sayaçlar başladıktan 1-2 dakika sonra dolar.'));
@@ -1317,6 +1317,9 @@ return view.extend({
 			return;
 		}
 		let sdd = 0, sdu = 0, srx = 0, stx = 0, mrx = 0, mtx = 0, trx = 0, ttx = 0;
+		if (others && others.n) {   // 24 saatten uzun süredir görünmeyen cihazlar listede yok, ama toplamlara dahil
+			srx += others.today.rx; stx += others.today.tx; mrx += others.month.rx; mtx += others.month.tx; trx += others.total.rx; ttx += others.total.tx;
+		}
 		const rows = devs.map(dv => {
 			let dd = 0, du = 0;
 			const c = dv.counter, p = prev[dv.ip];
@@ -1345,7 +1348,7 @@ return view.extend({
 				]),
 				...rows,
 				h('tr', { 'class': 'tr kr-active' }, [
-					h('td', { 'class': 'td' }, [h('b', {}, 'Tüm cihazlar (' + devs.length + ')'),
+					h('td', { 'class': 'td' }, [h('b', {}, 'Tüm cihazlar (' + devs.length + (others && others.n ? ' + ' + others.n + ' eski' : '') + ')'),
 						h('div', { 'class': 'kr-sub' }, 'Bu ay ↓ ' + fmtBytes(mrx) + ' ↑ ' + fmtBytes(mtx) + ' · Toplam ↓ ' + fmtBytes(trx) + ' ↑ ' + fmtBytes(ttx))]),
 					h('td', { 'class': 'td krt-n' }, h('b', {}, '↓ ' + fmtRate(sdd) + '  ↑ ' + fmtRate(sdu))),
 					h('td', { 'class': 'td krt-n' }, h('b', {}, '↓ ' + fmtBytes(srx) + '  ↑ ' + fmtBytes(stx)))
