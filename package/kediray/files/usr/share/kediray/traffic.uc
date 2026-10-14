@@ -71,7 +71,6 @@ function devsample(s, c) {
 		e.days[day].rx = n(e.days[day].rx) + x.rx;
 		e.days[day].tx = n(e.days[day].tx) + x.tx;
 		e.last = { rx: n(v.rx), tx: n(v.tx) };
-		if (x.rx + x.tx > 0) e.act = c.t;   // son trafik anı (listede gösterme için)
 		if (ls[ip]) { e.mac = ls[ip].mac; if (ls[ip].name) e.name = ls[ip].name; }
 		e.seen = c.t;
 	}
@@ -139,6 +138,32 @@ if (CMD == 'report') {
 
 	// cihazlar: bugün / hafta / ay / toplam (rx = indirme, tx = yükleme) + canlı hız için ham sayaç
 	let cd = readdev(), devs = [];
+	// Bağlı mı? Wi-Fi: "iw station dump" listesi (anında). Kablolu/bilinmeyen: `kediray devices` yoklamasının
+	// bıraktığı presence.json (cli.uc) 150 sn içinde doğrulandıysa. İkisi de yoksa canlı trafik kanıt sayılır.
+	let rd = (cmd) => { let p = fs.popen(cmd + ' 2>/dev/null'); if (!p) return ''; let o = p.read('all') ?? ''; p.close(); return o; };
+	let assoc = {}, haveAssoc = false, pres = {}, arpmac = {};
+	for (let l in split(rd('for i in $(iw dev | awk \'$1=="Interface"{print $2}\'); do echo "IF $i"; iw dev "$i" station dump | awk \'/^Station/{print $2}\'; done'), '\n')) {
+		if (match(l, /^IF /)) { haveAssoc = true; continue; }
+		if (match(l, /^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$/)) assoc[lc(l)] = true;
+	}
+	pres = readj(RUN + '/presence.json') ?? {};
+	let leaseip = {};
+	for (let lip, lv in leases()) leaseip[lv.mac] = lip;
+	for (let l in split(fs.readfile('/proc/net/arp') ?? '', '\n')) {
+		let f = filter(split(l, ' '), x => length(x));
+		if (length(f) >= 6 && match(f[0], /^[0-9.]+$/) && f[3] != '00:00:00:00:00:00') arpmac[f[0]] = lc(f[3]);
+	}
+	let online = (ip, e, lv) => {
+		let mac = lc(e.mac || arpmac[ip] || '');
+		if (!length(mac)) return lv.rx + lv.tx > 0;
+		// aynı cihazın eski IP'si (yeni kira aldıysa) bağlı sayılmaz: yalnız şu anki IP'si listede kalır
+		if (leaseip[mac] != null ? leaseip[mac] != ip : (arpmac[ip] != null && arpmac[ip] != mac)) return false;
+		if (assoc[mac]) return true;
+		let p = pres[mac];
+		if (p?.wifi && haveAssoc) return false;        // Wi-Fi'daydı, şimdi bağlı listesinde yok: ayrıldı
+		if (p) return c.t - n(p.last) < 150;
+		return lv.rx + lv.tx > 0;
+	};
 	let others = { n: 0, today: { rx: 0, tx: 0 }, month: { rx: 0, tx: 0 }, total: { rx: 0, tx: 0 } };
 	let add2 = (t, v) => { t.rx += v.rx; t.tx += v.tx; };
 	for (let ip, e in s.dev) {
@@ -151,10 +176,8 @@ if (CMD == 'report') {
 		};
 		let tot = dsum('0000-00-00');
 		if (tot.rx + tot.tx <= 0) continue;
-		// 24 saatten uzun süredir trafiği olmayan cihaz listeden kalkar; verisi saklanır, trafik yapınca geri gelir
-		let act = n(e.act), dy = k => n((e.days ?? {})[k]?.rx) + n((e.days ?? {})[k]?.tx);
-		let recent = lv.rx + lv.tx > 0 || (act ? c.t - act <= 86400 : dy(today) + dy(yest) > 0);
-		if (!recent) {
+		// Ağdan ayrılan cihaz listeden kalkar; verisi saklanır, geri bağlanınca geri gelir (toplamlar eksilmez)
+		if (!online(ip, e, lv)) {
 			others.n += 1;
 			add2(others.today, dsum(today)); add2(others.month, dsum(month)); add2(others.total, tot);
 			continue;

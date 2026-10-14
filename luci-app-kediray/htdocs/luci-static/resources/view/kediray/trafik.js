@@ -1305,7 +1305,7 @@ return view.extend({
 			])
 		]);
 
-		const allRows = [['today', 'Bugün', s.today], ['yesterday', 'Dün', s.yesterday], ['week', 'Bu hafta', s.week], ['month', 'Bu ay', s.month], ['total', 'Toplam' + (s.since ? ' (' + s.since.split('-').reverse().join('.') + '\'den beri)' : ''), s.total]];
+		const allRows = [['today', 'Bugün', s.today], ['yesterday', 'Dün', s.yesterday], ['week', 'Bu hafta', s.week], ['month', 'Bu ay', s.month], ['total', 'Toplam', s.total]];
 		const rows = allRows.filter(x => !this.layoutCfg.hideRows[x[0]]).map(x => [x[1], x[2]]);
 		const cell = b => [h('td', { 'class': 'td krt-n' }, fmtBytes(b.vr + b.vt)), h('td', { 'class': 'td krt-n kr-hide-sm kr-sub' }, '↓' + fmtBytes(b.vr) + ' ↑' + fmtBytes(b.vt))];
 		dom.content(this.elPeriods, h('table', { 'class': 'table kr-table krt-table' }, [
@@ -1342,7 +1342,7 @@ return view.extend({
 			return;
 		}
 		let sdd = 0, sdu = 0, srx = 0, stx = 0, mrx = 0, mtx = 0, trx = 0, ttx = 0;
-		if (others && others.n) {   // 24 saatten uzun süredir görünmeyen cihazlar listede yok, ama toplamlara dahil
+		if (others && others.n) {   // ağdan ayrılmış cihazlar listede yok, ama toplamlara dahil
 			srx += others.today.rx; stx += others.today.tx; mrx += others.month.rx; mtx += others.month.tx; trx += others.total.rx; ttx += others.total.tx;
 		}
 		const rows = devs.map(dv => {
@@ -1373,7 +1373,7 @@ return view.extend({
 				]),
 				...rows,
 				h('tr', { 'class': 'tr kr-active' }, [
-					h('td', { 'class': 'td' }, [h('b', {}, 'Tüm cihazlar (' + devs.length + (others && others.n ? ' + ' + others.n + ' eski' : '') + ')'),
+					h('td', { 'class': 'td' }, [h('b', {}, 'Tüm cihazlar (' + devs.length + ')'),
 						h('div', { 'class': 'kr-sub' }, 'Bu ay ↓ ' + fmtBytes(mrx) + ' ↑ ' + fmtBytes(mtx) + ' · Toplam ↓ ' + fmtBytes(trx) + ' ↑ ' + fmtBytes(ttx))]),
 					h('td', { 'class': 'td krt-n' }, h('b', {}, '↓ ' + fmtRate(sdd) + '  ↑ ' + fmtRate(sdu))),
 					h('td', { 'class': 'td krt-n' }, h('b', {}, '↓ ' + fmtBytes(srx) + '  ↑ ' + fmtBytes(stx)))
