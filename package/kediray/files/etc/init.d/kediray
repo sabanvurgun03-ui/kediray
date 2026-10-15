@@ -101,6 +101,14 @@ _start_service() {
 }
 
 stop_service() {
+	# Yumuşak yeniden başlatma (sunucu ekle/sil/kaydet): yalnızca Xray yenilenir; güvenlik duvarı kuralları ve DNS parçası
+	# yerinde kalır (dnsmasq iki kez yeniden başlamaz). Bayrağı apply_changes bırakır, 30 sn geçerlidir ve bir kez kullanılır.
+	local sf="$RUN/soft_restart" st
+	if [ -f "$sf" ]; then
+		st=$(cat "$sf" 2>/dev/null); rm -f "$sf"
+		case "$st" in ''|*[!0-9]*) st=0 ;; esac
+		[ $(( $(cut -d. -f1 /proc/uptime) - st )) -le 30 ] && return 0
+	fi
 	# Önce kuralları kaldır, sonra süreçler dursun: trafik boşa düşmez
 	$PROG fw-down >/dev/null 2>&1
 }

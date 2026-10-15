@@ -1214,6 +1214,7 @@ apply_changes() {
 	else
 		# Başlatma betiği yapılandırmayı bir kez daha üretmesin: az önce üretildi (gen.fresh, 60 sn geçerli)
 		date +%s > "$RUN/gen.fresh"
+		cut -d. -f1 /proc/uptime > "$RUN/soft_restart"   # yumuşak yeniden başlatma: kurallar/DNS yerinde kalır (init.d stop_service)
 		/etc/init.d/kediray restart >/dev/null 2>&1
 		ok=0; i=0
 		while [ $i -lt 30 ]; do
@@ -1226,6 +1227,7 @@ apply_changes() {
 			sayerr "Yeni yapılandırma Xray'i başlatamadı, önceki yapılandırmaya dönülüyor: $(sed -n '2p' "$RUN/last_error")"
 			for f in config.json rules.nft hev.yaml dnsmasq.conf; do [ -s "$RUN/$f.old" ] && mv "$RUN/$f.old" "$RUN/$f"; done
 			date +%s > "$RUN/gen.fresh"
+			cut -d. -f1 /proc/uptime > "$RUN/soft_restart"
 			/etc/init.d/kediray restart >/dev/null 2>&1
 			rm -f "$RUN"/*.old "$RUN/config.failed.json"
 			return 1
