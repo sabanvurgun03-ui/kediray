@@ -86,6 +86,9 @@ function devsample(s, c) {
 if (CMD == 'sample') {
 	let s = load(), c = cur(), x = delta(s, c);
 	if (x) { s.days[dkey(c.t)] ??= {}; add(s.days[dkey(c.t)], x); }
+	// oturum toplamı: modem açılışından beri (restore açılışta sıfırlar; flash'ta kalıcı değildir)
+	s.sess ??= { vr: 0, vt: 0, dr: 0, dt: 0 };
+	if (x) add(s.sess, x);
 	s.last = c;
 	devsample(s, c);
 	// 100 günden eskiyi at
@@ -103,6 +106,7 @@ if (CMD == 'restore') {
 		fs.mkdir(RUN);
 		let s = readj(FLASHF);
 		delete s.last;
+		delete s.sess;   // modem açıldı: yeni oturum
 		for (let ip, e in (s.dev ?? {})) delete e.last;   // modem açıldı: nft sayaçları sıfırdan başlar
 		writej(RAMF, s);
 	}
@@ -194,9 +198,15 @@ if (CMD == 'report') {
 	devs = sort(devs, (a, b) => ((b.today.rx + b.today.tx) - (a.today.rx + a.today.tx)) || ((b.total.rx + b.total.tx) - (a.total.rx + a.total.tx)));
 	if (length(devs) > 40) devs = slice(devs, 0, 40);
 
+	// oturum (modem açılışından beri) + modem açık kalma süresi
+	let sess = { vr: n(s.sess?.vr), vt: n(s.sess?.vt), dr: n(s.sess?.dr), dt: n(s.sess?.dt) };
+	add(sess, live);
+	let upt = int(split(fs.readfile('/proc/uptime') ?? '0', '.')[0]);
+
 	print(sprintf('%J\n', {
 		t: c.t, counters: c, today: t_today, yesterday: day(yest), week: sum(week), month: sum(month),
-		total: sum('0000-00-00'), since: first, days: hist, devices: devs, others: others
+		total: sum('0000-00-00'), since: first, days: hist, devices: devs, others: others,
+		session: sess, uptime: upt
 	}));
 	exit(0);
 }
