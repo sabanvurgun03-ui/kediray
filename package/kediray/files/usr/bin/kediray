@@ -3068,9 +3068,27 @@ cmd_uninstall() {
 	echo "KediRay kaldırıldı${1:+ (ayarlar dahil)}"
 }
 
+# Bağlı olunan sunucunun "adres:port" listesi (ad + çözülmüş IP). Günlük, bağlı olmayan sunucuların hatalarını gizler.
+active_eps() {
+	local act tag sec tp addr port rest ip eps=""
+	running && [ -s "$RUN/nodes.tsv" ] || return 0
+	act=$(active_tag); [ -n "$act" ] || return 0
+	while IFS="$T" read -r tag sec tp addr port rest; do
+		[ "$tag" = "$act" ] || continue
+		eps="$eps $addr:$port"
+		case "$addr" in
+			*[!0-9.]*) ip=$(tr ' ' '\n' < "$RUN/resolve" 2>/dev/null | awk -F= -v d="$addr" '$1 == d { print $2; exit }') ;;
+			*) ip="" ;;
+		esac
+		[ -n "$ip" ] && eps="$eps $ip:$port"
+	done < "$RUN/nodes.tsv"
+	echo "$eps"
+}
+
 cmd_logs() { # [clear-errors|clear-stream]  panel için sınıflandırılmış günlük (JSON)
 	case "$1" in clear-errors|clear-stream) ucode "$SHARE/logs.uc" "$1"; return ;; esac
 	mkdir -p "$RUN"
+	export KR_ACTIVE_EPS="$(active_eps)"
 	if ubus call log read '{"lines":1000,"stream":false}' > "$RUN/log.raw" 2>/dev/null && grep -q '"log"' "$RUN/log.raw"; then
 		ucode "$SHARE/logs.uc" read "$RUN/log.raw"
 	else

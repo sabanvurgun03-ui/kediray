@@ -68,6 +68,12 @@ function hint(text) {
 	return null;
 }
 
+// Bağlı olunan sunucunun adres:port listesi (kediray betiği KR_ACTIVE_EPS ile verir; boşsa süzme yapılmaz).
+// Bağlı OLMAYAN bir sunucuya ulaşılamaması (ping/sağlık ölçümü, eski sunucu) hata kartı ve uyarı olarak gösterilmez.
+const ACTIVE = {};
+for (let ep in split(trim(getenv('KR_ACTIVE_EPS') ?? ''), ' ')) if (length(ep)) ACTIVE[ep] = 1;
+const HAS_ACTIVE = length(keys(ACTIVE)) > 0;
+
 // ---------- satır ayrıştırma ----------
 const LV = { Error: 'error', Warning: 'warn', Info: 'info', Debug: 'debug', E: 'error', W: 'warn', I: 'info', D: 'debug' };
 
@@ -110,6 +116,11 @@ function parse(msg, prio, t, id, ts) {
 	} else {
 		let sev = prio != null ? (prio & 7) : 6;
 		level = sev <= 3 ? 'error' : (sev == 4 ? 'warn' : (sev == 7 ? 'debug' : 'info'));
+	}
+	// Bağlı olmayan sunucuya yapılan bağlantı hatası: gürültü olmasın, yalnızca ayrıntı (debug) düzeyinde kalsın
+	if (HAS_ACTIVE && tag == 'xray' && (level == 'error' || level == 'warn')) {
+		let dm = match(text, /(failed to dial to|dial tcp) (\[[0-9a-fA-F:]+\]|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):([0-9]+)/);
+		if (dm && !ACTIVE[dm[2] + ':' + dm[3]]) level = 'debug';
 	}
 	let h = (level == 'error' || level == 'warn') ? hint(text) : null;
 	return { id: id, t: t, ts: ts, level: level, comp: comp_of(tag, text), text: tag == 'xray' ? summarize(text) : text,

@@ -121,7 +121,7 @@ return view.extend({
 					h('div', { 'class': 'ka-dev' }, [h('span', { 'class': 'ka-k' }, 'Geliştirici: '), h('b', {}, 'Şaban Vurgun'), ' · 2026'])
 				])
 			]),
-			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
+			h('div', { 'class': 'ka-card', 'id': 'ka-lic-card', 'style': 'margin-top:14px;display:none' }, [   // lisans kapalıyken hiç görünmesin (açılıp kapanma titremesi olmasın)
 				title('license', 'Lisans'),
 				h('div', { 'id': 'ka-lic-state', 'style': 'margin-bottom:8px;font-weight:600' }, 'Denetleniyor…'),
 				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, [ 'Modem IMEI: ', h('b', { 'id': 'ka-lic-id', 'style': 'font-family:monospace' }, '—'), ' (lisans anahtarı bu IMEI numarasına göre üretilir; tek hanesi değişirse geçersiz olur)' ]),
@@ -170,8 +170,10 @@ return view.extend({
 			let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
 			const st = document.getElementById('ka-lic-state'), id = document.getElementById('ka-lic-id'), rm = document.getElementById('ka-lic-rm');
 			if (!st) return;
+			const card = document.getElementById('ka-lic-card');
+			if (j && j.state === 'off') return;   // lisans gerekmiyor: kart gizli kalır
+			if (card) card.style.display = '';
 			if (!j) { st.textContent = 'Lisans durumu okunamadı.'; return; }
-			if (j.state === 'off') { const c = st.closest('.ka-card'); if (c) c.style.display = 'none'; return; }
 			st.textContent = j.msg || (j.licensed ? 'Lisans geçerli' : 'Lisans gerekli');
 			st.style.color = j.licensed ? '#22a355' : '#e0a020';
 			if (id) id.textContent = j.imei || '—';
