@@ -2,11 +2,11 @@
 // KediRay sunucu düzenleme ve yapılandırma denetimi
 //   ucode node.uc check-json '<metin>'                 -> JSON yazım denetimi (satır/sütun, Türkçe)
 //   ucode node.uc get <bölüm>                           -> düzenleme ekranı için alanlar
-//   ucode node.uc save <bölüm|new> form '<alanlar>'     -> denetle + Xray testi + kaydet
+//   ucode node.uc save <bölüm|new> form '<alanlar>'     -> denetlemeden kaydet (alan/Xray testi yok; elle denetle: validate)
 //   ucode node.uc save <bölüm|new> json '<outbound>' [ad]
 //   ucode node.uc del <bölüm>
 //   ucode node.uc validate                              -> tüm yapılandırmayı denetle
-// Ortam: KR_SHARE, KR_XRAY, KR_ASSET, KR_RUN (kediray betiği verir); KR_DRYRUN=1 -> kaydetmeden denetle
+// Ortam: KR_SHARE, KR_XRAY, KR_ASSET, KR_RUN (kediray betiği verir)
 
 const fs = require('fs');
 const CMD = ARGV[0];
@@ -188,9 +188,10 @@ if (CMD == 'save') {
 	let sec = ARGV[1], kind = ARGV[2], text = ARGV[3] ?? '', rname = ARGV[4] ?? '';
 	let res = { ok: false, stage: null, errors: [] };
 	let fail = (stage, errs) => { res.stage = stage; res.errors = errs; out(res); exit(3); };
-	let cand, payload;
+	let payload;
 
-	// 1) yazım denetimi
+	// Alan denetimi ve Xray testi yapılmaz: sunucu olduğu gibi kaydedilir; denetimi kullanıcı elle yapar
+	// (Kontrol Paneli → "✓ Ayarları denetle" / kediray validate). Yalnızca metnin okunabilmesi için JSON ayrıştırılır.
 	let e = json_check(text);
 	if (e) fail('syntax', [e]);
 	let data = json(text);
@@ -203,36 +204,15 @@ if (CMD == 'save') {
 			if (!rname && data.remarks) rname = data.remarks;
 		}
 		if (type(ob) != 'object') fail('fields', [{ msg: 'JSON bir Xray outbound nesnesi olmalı ({ "protocol": ..., "settings": ... })' }]);
-		if (!ob.protocol) fail('fields', [{ msg: '"protocol" alanı yok' }]);
-		if (!PROTOS[ob.protocol]) fail('fields', [{ msg: '"' + ob.protocol + '" desteklenmiyor (vless, vmess, trojan, shadowsocks)' }]);
 		ob = { ...ob };
 		delete ob.tag;
-		cand = { raw: sprintf('%J', ob), remarks: rname };
 		payload = { outbound: ob, remarks: rname };
 	} else {
 		if (type(data) != 'object') fail('fields', [{ msg: 'form verisi okunamadı' }]);
-		cand = {};
-		for (let k, v in data) if (index(FORM_FIELDS, k) >= 0 && v != null && v !== '') cand[k] = '' + v;
-		payload = cand;
+		payload = {};
+		for (let k, v in data) if (index(FORM_FIELDS, k) >= 0 && v != null && v !== '') payload[k] = '' + v;
 	}
 
-	// 2) alan denetimi + outbound üretimi
-	let tf = RUN + '/cand.in.' + time() + '.json';
-	fs.mkdir(RUN);
-	fs.writefile(tf, sprintf('%J', cand));
-	let g = sh('ucode ' + q(SHARE + '/gen.uc') + ' outbound-json ' + q('@' + tf) + ' 2>/dev/null');
-	fs.unlink(tf);
-	let gen = null;
-	try { gen = json(g.out); } catch (x) { gen = null; }
-	if (!gen) fail('fields', [{ msg: 'sunucu işlenemedi' }]);
-	if (length(gen.errors)) fail('fields', gen.errors);
-
-	// 3) gerçek Xray testi
-	let xe = xray_test(gen.test);
-	if (xe && length(xe)) fail('xray', xe);
-
-	// 4) kaydet
-	if (getenv('KR_DRYRUN') == '1') { res.ok = true; res.stage = 'dry'; res.outbound = gen.outbound; out(res); exit(0); }
 	let saved = write_node(sec, kind, payload);
 	if (!saved) fail('save', [{ msg: 'böyle bir sunucu yok' }]);
 	res.ok = true; res.sec = saved;

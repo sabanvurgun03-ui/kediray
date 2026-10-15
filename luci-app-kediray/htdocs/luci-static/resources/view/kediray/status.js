@@ -835,7 +835,7 @@ return view.extend({
 			try { res = JSON.parse(r.stdout); } catch (e) { res = { ok: false, raw: (r.stdout || '') + (r.stderr || '') }; }
 			if (res && res.ok) {
 				ui.hideModal();
-				this.note('Kaydedildi' + (sec ? '' : ' (yeni sunucu eklendi)') + '. Ayar denetimden ve Xray testinden geçti.');
+				this.note('Kaydedildi' + (sec ? '' : ' (yeni sunucu eklendi)') + '. Denetlenmedi; kontrol etmek için "✓ Ayarları denetle"ye bas.');
 				return this.refreshAll();
 			}
 			dom.content(errBox, this.errList(res));
@@ -851,7 +851,7 @@ return view.extend({
 			formPane, jsonPane, errBox,
 			h('div', { 'class': 'right', 'style': 'margin-top:10px' }, [
 				h('button', { 'class': 'btn', 'click': ui.hideModal }, 'İptal'), ' ',
-				h('button', { 'class': 'btn cbi-button-positive', 'click': ui.createHandlerFn(this, save) }, 'Denetle ve kaydet')
+				h('button', { 'class': 'btn cbi-button-positive', 'click': ui.createHandlerFn(this, save) }, 'Kaydet')
 			])
 		], 'kr-wide');
 		refreshVis();

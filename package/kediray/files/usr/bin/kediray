@@ -3126,7 +3126,7 @@ KediRay - OpenWrt Xray VPN yöneticisi
                             Akıllı band seçimi: bantları tek tek kilitle, hız+sinyal ölç, en iyisini seç (iptal: kediray band cancel)
   kediray validate          Yapılandırmayı denetle (yazım/alan hataları + Xray testi)
   kediray node get <id>     Sunucuyu düzenleme için göster
-  kediray node save <id|new> form|json '<veri>' [ad]   Denetleyip kaydet (hatalıysa kaydetmez)
+  kediray node save <id|new> form|json '<veri>' [ad]   Denetlemeden kaydet (denetim: kediray validate)
   kediray node del <id>     Sunucuyu sil
   kediray node-enable <id> 0|1       Sunucuyu aç/kapat
   kediray pin [id]          Sunucu sertifikasını şimdi elle sabitle (değiştiyse tüneli yeniden başlatır)
