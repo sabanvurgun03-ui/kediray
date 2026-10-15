@@ -154,6 +154,13 @@ return view.extend({
 				h('div', { 'id': 'ka-upd-last', 'class': 'ka-k', 'style': 'margin-top:10px' }, '')
 			]),
 			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
+				title('update', 'Sıfırdan kur / Kaldır'),
+				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, 'Sıfırdan kur: ayarların yedeklenip silinir, GitHub deposundaki son kod baştan kurulur. Kaldır: KediRay modemden kaldırılır. İkisi de iki kez onay ister.'),
+				h('button', { 'class': 'btn cbi-button cbi-button-negative', 'click': ui.createHandlerFn(this, 'doFresh') }, 'Sıfırdan kur'),
+				' ',
+				h('button', { 'class': 'btn cbi-button cbi-button-negative', 'click': ui.createHandlerFn(this, 'doRemove') }, 'KediRay\'i kaldır')
+			]),
+			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
 				title('backup', 'Yedekle / geri yükle'),
 				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, 'Sunucuların, uygulama kuralların ve ayarların tek dosyada. Modemi sıfırlarsan bu dosyayla geri getirirsin. Dosya sunucu kimliklerini (UUID) içerir: kimseyle paylaşma, GitHub\'a yükleme.'),
 				h('div', { 'id': 'ka-bk-msg', 'style': 'margin-bottom:10px;font-weight:600' }, ''),
@@ -267,6 +274,44 @@ return view.extend({
 				if (msg) msg.textContent = out || (r.code === 0 ? 'Geri yüklendi.' : 'Geri yüklenemedi.');
 				if (r.code === 0) setTimeout(() => location.reload(), 2500);
 			}).catch(() => { if (msg) msg.textContent = 'Panel yanıt vermedi; birkaç saniye sonra sayfayı yenile.'; });
+		});
+	},
+
+	// İki aşamalı onay: ikisine de "evet" denmezse hiçbir şey yapılmaz
+	confirm2(head, text1, text2, yes) {
+		const ask = (t, txt, label) => new Promise(resolve => {
+			ui.showModal(t, [
+				h('p', {}, txt),
+				h('div', { 'class': 'right' }, [
+					h('button', { 'class': 'btn cbi-button', 'click': () => { ui.hideModal(); resolve(false); } }, 'Vazgeç'),
+					' ',
+					h('button', { 'class': 'btn cbi-button cbi-button-negative', 'click': () => { ui.hideModal(); resolve(true); } }, label)
+				])
+			]);
+		});
+		return ask(head + ' (1/2)', text1, 'Devam').then(ok => ok ? ask(head + ' (2/2) — son onay', text2, yes) : false);
+	},
+
+	doFresh() {
+		return this.confirm2('Sıfırdan kur',
+			'Sunucuların, uygulama kuralların ve ayarların SİLİNİR; GitHub deposundaki son kod baştan kurulur. Silmeden önce modemin /root klasörüne yedek alınır (kediray-backup-….uci). Devam edilsin mi?',
+			'Emin misin? Ayarların sıfırlanacak ve kurulum sırasında VPN bir süre kesilecek. Hatta VPN dışında internet yoksa bağlantı kurulum bitene kadar gidebilir. Yedek dosyası modemde kalır; geri yüklemek için: kediray restore <dosya>.',
+			'Evet, sıfırdan kur'
+		).then(ok => {
+			if (!ok) return;
+			return fs.exec(CLI, ['reinstall', '--purge']).catch(() => ({ code: 0, stdout: '' })).then(r => this.runUpdate(r, 30));
+		});
+	},
+
+	doRemove() {
+		return this.confirm2('KediRay\'i kaldır',
+			'KediRay modemden kaldırılır: VPN durur, güvenlik duvarı kuralları ve panel sayfaları silinir. Ayar dosyan (/etc/config/kediray) modemde kalır. Devam edilsin mi?',
+			'Emin misin? Hattında VPN dışında internet yoksa kaldırınca internet bağlantın kesilir. Tekrar kurmak için kurulum dosyası ya da modemde elle kurulum gerekir.',
+			'Evet, kaldır'
+		).then(ok => {
+			if (!ok) return;
+			ui.showModal('KediRay kaldırılıyor', [h('p', {}, 'Kaldırılıyor… sayfa birazdan yenilenecek.')]);
+			return fs.exec(CLI, ['uninstall']).catch(() => null).then(() => setTimeout(() => location.assign('/cgi-bin/luci/'), 5000));
 		});
 	},
 
