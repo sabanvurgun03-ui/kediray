@@ -1183,7 +1183,8 @@ sticky_check() {
 	if probe_tag "$cur" >/dev/null; then rm -f "$RUN/sticky.fail"; return 0; fi
 	n=$(( $(cat "$RUN/sticky.fail" 2>/dev/null || echo 0) + 1 ))
 	echo "$n" > "$RUN/sticky.fail"
-	[ "$n" -lt 2 ] && return 0
+	# Watchdog dakikada bir çalışır: 5 ardışık başarısız ölçüm (~5 dk) olmadan sunucu değiştirilmez, kısa hat dalgalanması çıkış IP'sini (ve oyunu) bozmasın
+	[ "$n" -lt 5 ] && return 0
 	new=$(auto_pick "$cur")
 	[ -n "$new" ] || { log "otomatik geçiş: $cur yanıt vermiyor ama çalışan başka sunucu da yok"; return 0; }
 	set_override "$new"
