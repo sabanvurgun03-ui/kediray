@@ -1071,11 +1071,12 @@ probe_socks() { # <socks-port> [zaman aşımı] -> ms (ilk yanıt veren adres); 
 }
 # Soğuk + sıcak ölçüm: aynı komutta iki istek. İlki TCP+TLS+WebSocket el sıkışmalarını içerir (yeni bağlantı),
 # ikincisi açık bağlantıdan gider = tünelin gerçek gidiş-dönüş gecikmesi (sayfalar/oyun bunu hisseder).
-probe_socks2() { # <socks-port> [zaman aşımı] -> "soğuk sıcak" (ms); başarısızsa 1
+probe_socks2() { # <socks-port> [zaman aşımı] [yedek adres zaman aşımı] -> "soğuk sıcak" (ms); başarısızsa 1
 	local u out m=${2:-8}
 	for u in $(probe_url_list); do
 		out=$(curl -s -o /dev/null -o /dev/null --noproxy '' -m "$m" -x "socks5h://127.0.0.1:$1" \
 			-w '%{http_code} %{time_starttransfer}\n' "$u" "$u" 2>/dev/null)
+		m=${3:-$m}   # yedek adres daha kısa beklesin: ölü sunucuda 2 x tam süre beklenmesin
 		echo "$out" | awk 'NR == 1 { if ($1 < 200 || $1 >= 400) exit 1; c = $2 } NR == 2 { w = $2 }
 			END { if (c == "") exit 1; printf "%d %d\n", c * 1000, (w == "" ? c : w) * 1000 }' && return 0
 	done
@@ -1354,13 +1355,17 @@ cmd_ping() { # [sec] [--json]  VPN kapalıyken geçici test çekirdeği kullanı
 			# Tünel testi: yeni bağlantı + tam web isteği (v2rayNG "gerçek gecikme" ile aynı) ve
 			# aynı bağlantıdaki ikinci istek (açık tünelin gerçek gecikmesi).
 			# Birincil adres yanıt vermezse yedek adres denenir (engellenen bir adres yüzünden "düştü" demesin).
-			cw=$(probe_socks2 "$tp" 8) && { ms=${cw%% *}; warm=${cw##* }; }
+			# İki ölçüm aynı anda çalışır (ölü sunucuda süreler toplanmaz). Tünel: ilk adres 6 sn, yedek adres 4 sn.
 			# Gerçek ağ gecikmesi: sunucuya TCP bağlantı süresi (oyunlardaki ping'e karşılık gelir)
 			ipx="$addr"
 			case "$addr" in *[!0-9.]*) ipx=$(tr ' ' '\n' < "$RUN/resolve" 2>/dev/null | awk -F= -v d="$addr" '$1 == d { print $2; exit }') ;; esac
+			rpid=""
 			if [ -n "$ipx" ]; then
-				rt=$(curl -s -o /dev/null --noproxy '' -m 4 -w '%{time_connect}' "http://$ipx:$port/" 2>/dev/null | awk '{ v = $1 * 1000; if (v > 0) printf "%d", (v < 1 ? 1 : v); else print -1 }')
+				( curl -s -o /dev/null --noproxy '' -m 3 -w '%{time_connect}' "http://$ipx:$port/" 2>/dev/null | awk '{ v = $1 * 1000; if (v > 0) printf "%d", (v < 1 ? 1 : v); else print -1 }' > "$tmp.rt.$sec" ) &
+				rpid=$!
 			fi
+			cw=$(probe_socks2 "$tp" 6 4) && { ms=${cw%% *}; warm=${cw##* }; }
+			[ -n "$rpid" ] && { wait "$rpid"; rt=$(cat "$tmp.rt.$sec" 2>/dev/null); rm -f "$tmp.rt.$sec"; }
 			echo "$sec$T$ms$T$(date +%s)$T${rt:--1}$T${warm:--1}" > "$tmp/$sec"
 		) &
 		pids="$pids $!"
