@@ -3260,6 +3260,7 @@ cmd_logs() { # [clear-errors|clear-stream]  panel için sınıflandırılmış g
 	case "$1" in clear-errors|clear-stream) ucode "$SHARE/logs.uc" "$1"; return ;; esac
 	mkdir -p "$RUN"
 	export KR_ACTIVE_EPS="$(active_eps)"
+	if [ "$(direct_state)" = dead ]; then export KR_DIRECT_DEAD=1; else export KR_DIRECT_DEAD=0; fi
 	if ubus call log read '{"lines":1000,"stream":false}' > "$RUN/log.raw" 2>/dev/null && grep -q '"log"' "$RUN/log.raw"; then
 		ucode "$SHARE/logs.uc" read "$RUN/log.raw"
 	else

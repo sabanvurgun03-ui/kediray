@@ -73,6 +73,7 @@ function hint(text) {
 const ACTIVE = {};
 for (let ep in split(trim(getenv('KR_ACTIVE_EPS') ?? ''), ' ')) if (length(ep)) ACTIVE[ep] = 1;
 const HAS_ACTIVE = length(keys(ACTIVE)) > 0;
+const DIRECT_DEAD = getenv('KR_DIRECT_DEAD') == '1';
 
 // ---------- satır ayrıştırma ----------
 const LV = { Error: 'error', Warning: 'warn', Info: 'info', Debug: 'debug', E: 'error', W: 'warn', I: 'info', D: 'debug' };
@@ -129,6 +130,10 @@ function parse(msg, prio, t, id, ts) {
 		let dm = match(text, /(failed to dial to|dial tcp) (\[[0-9a-fA-F:]+\]|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):([0-9]+)/);
 		if (dm && !ACTIVE[dm[2] + ':' + dm[3]]) level = 'debug';
 	}
+	// Direkt çıkış yokken (paketsiz hat) direkt DNS (DoH) sorguları doğal olarak yanıtsız kalır: hata sayılmasın
+	if (DIRECT_DEAD && tag == 'xray' && (level == 'error' || level == 'warn')
+	    && match(text, /app\/dns.*Post "https:.*(context deadline exceeded|timeout)/))
+		level = 'debug';
 	let h = (level == 'error' || level == 'warn') ? hint(text) : null;
 	let shown = cut(tag == 'xray' ? summarize(text) : text, 400);
 	let ent = { id: id, t: t, level: level, comp: comp_of(tag, text), text: shown };
