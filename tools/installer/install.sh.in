@@ -268,7 +268,8 @@ chmod 755 /www/luci-static/resources/view/kediray 2>/dev/null
 chmod 644 /www/luci-static/resources/view/kediray/*.js /www/luci-static/kedi-logo.svg /usr/share/luci/menu.d/luci-app-kediray.json /usr/share/rpcd/acl.d/luci-app-kediray.json /usr/share/rpcd/acl.d/aw1k-panel.json 2>/dev/null
 # Tarayıcı önbelleği: LuCI görünüm dosyalarını sürüm etiketli adla da yayınla ve menüyü ona yönlendir.
 # (Aynı adlı .js dosyasını tarayıcı bir saat saklar; güncellemeden sonra eski sayfa görünüyordu. Yeni ad = yeni adres.)
-KR_TAG=$(echo "$KR_VERSION" | tr . _)
+# KR_DEV=1 (kediray update main / reinstall): sürüm aynı kalsa da tarayıcı önbelleği yeni adla aşılır
+KR_TAG=$(echo "$KR_VERSION${KR_DEV:+_d$(date +%s)}" | tr . _)
 KR_VD=/www/luci-static/resources/view/kediray
 rm -f "$KR_VD"/*-r[0-9]*.js 2>/dev/null
 for v in status trafik ayir settings log about; do
@@ -279,6 +280,16 @@ done
 chmod 644 "$KR_VD"/*.js 2>/dev/null
 chmod 755 /usr/share/kediray 2>/dev/null; chmod 644 /usr/share/kediray/*.uc 2>/dev/null
 printf '%s\n' "$KR_VERSION" > /usr/share/kediray/version
+# KR_PURGE=1 (kediray reinstall --purge): ayarlar silinip baştan kurulur; önce yedek alınır (kediray restore <dosya>)
+if [ "$KR_PURGE" = 1 ] && [ -f /etc/config/kediray ]; then
+	KR_BK=/root/kediray-backup-$(date +%Y%m%d-%H%M%S).uci
+	if /usr/bin/kediray backup "$KR_BK" >/dev/null 2>&1; then
+		chmod 600 "$KR_BK"; rm -f /etc/config/kediray
+		ok "Ayarlar sıfırlandı; yedek: $KR_BK (geri yüklemek: kediray restore $KR_BK)"
+	else
+		die "Ayar yedeği alınamadı; ayarlar silinmedi, kurulum durduruldu"
+	fi
+fi
 if [ -f /etc/config/kediray ]; then
 	ok "Mevcut ayarlar korundu (/etc/config/kediray)"
 	rm -f /tmp/kediray.default

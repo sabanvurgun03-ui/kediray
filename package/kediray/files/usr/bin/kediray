@@ -491,6 +491,11 @@ cmd_update() { # check [--json] | install | auto | cached
 				cmd_update install 2>&1 | logger -t kediray
 			fi
 			return 0 ;;
+		main) # sürümü artırmadan, Release beklemeden depodaki son kodu kur (kediray update main)
+			upd_main_build /tmp/kediray-main.sh || return 1
+			export KR_DEV=1
+			cmd_selfupdate /tmp/kediray-main.sh
+			return $? ;;
 		cached) # panel: son denetimin sonucu — elle ya da otomatik, hangisi daha yeniyse (yoksa boş)
 			local latest cur ts src
 			[ "$(uget main.update_check)" = 0 ] && return 0
@@ -550,8 +555,60 @@ cmd_update() { # check [--json] | install | auto | cached
 			[ "$ver" = "$latest" ] || { echo "Release dosyasının sürümü ($ver) duyurulan sürümle ($latest) uyuşmuyor; kurulmadı."; rm -f /tmp/kediray-update.sh; return 1; }
 			cmd_selfupdate /tmp/kediray-update.sh
 			return $? ;;
-		*) echo "kullanım: kediray update check [--json] | install [force] | auto | cached" >&2; return 1 ;;
+		*) echo "kullanım: kediray update check [--json] | install [force] | main | auto | cached" >&2; return 1 ;;
 	esac
+}
+
+# ---- Sürüm artırmadan kurulum: kediray update main | reinstall [--purge] [--release] ------------------------
+# Depodaki son kodu (VERSION ve Release beklemeden) tek dosya kurulum betiğine çevirir; tools/build.py ile aynı birleştirme.
+# DİKKAT: Release yolundaki gibi sha256sums doğrulaması yoktur; dosyalar yalnızca ayarlı depodan (update_repo/update_branch) HTTPS ile iner.
+upd_main_build() { # <çıktı dosyası>
+	local base w n src p d ver out="$1" q="'" t
+	base=$(upd_base); w="/tmp/kediray-main.$$"; t=$(date +%s)
+	rm -rf "$w"; mkdir -p "$w" || return 1
+	if ! { ufetch "$base/VERSION?t=$t" "$w/VERSION" 15 && ufetch "$base/tools/installer/install.sh.in?t=$t" "$w/skel" 25 \
+		&& ufetch "$base/tools/installer/files.map?t=$t" "$w/files.map" 15; }; then
+		echo "Depodan temel dosyalar indirilemedi: $base"; rm -rf "$w"; return 1
+	fi
+	ver=$(tr -cd '0-9.' < "$w/VERSION" | head -c 20)
+	[ -n "$ver" ] || { echo "VERSION okunamadı"; rm -rf "$w"; return 1; }
+	n=0; : > "$w/idx"
+	while IFS="$T" read -r src p d; do
+		case "$src" in '#'*|"") continue ;; esac
+		n=$((n + 1))
+		if ! { ufetch "$base/$src?t=$t" "$w/f.$n" 25 && [ -s "$w/f.$n" ]; }; then
+			echo "İndirilemedi: $src"; rm -rf "$w"; return 1
+		fi
+		printf '%s\t%s\t%s\t%s\n' "$src" "$p" "$d" "$n" >> "$w/idx"
+	done < "$w/files.map"
+	awk -v ver="$ver" -v W="$w" -v q="$q" '
+		BEGIN { while ((getline l < (W "/idx")) > 0) { split(l, a, "\t"); p[a[1]] = a[2]; d[a[1]] = a[3]; f[a[1]] = W "/f." a[4] } }
+		/^@@KR_FIL[E] .*@@$/ {
+			s = substr($0, 11, length($0) - 12)
+			if (!(s in f)) { print "iskelette bilinmeyen dosya: " s > "/dev/stderr"; bad = 1; next }
+			print "cat > " q p[s] q " <<" q d[s] q
+			while ((getline x < f[s]) > 0) print x
+			close(f[s]); print d[s]; next
+		}
+		{ gsub(/@VERSION[@]/, ver); print }
+		END { exit bad }' "$w/skel" > "$out" || { echo "Kurulum dosyası birleştirilemedi"; rm -rf "$w" "$out"; return 1; }
+	rm -rf "$w"
+	grep -q '^@@KR_FIL[E] ' "$out" && { echo "Birleştirmede çözülmemiş işaret kaldı"; rm -f "$out"; return 1; }
+	sh -n "$out" 2>/dev/null || { echo "Üretilen kurulum dosyasında sözdizimi hatası"; rm -f "$out"; return 1; }
+	return 0
+}
+cmd_reinstall() { # [--purge] [--release]  Sürümü artırmadan baştan kur. Varsayılan: depodaki son kod; --release: bu sürümün Release dosyası (SHA256 doğrulamalı)
+	local purge=0 rel=0 a
+	for a in "$@"; do
+		case "$a" in
+			--purge) purge=1 ;;
+			--release) rel=1 ;;
+			*) echo "kullanım: kediray reinstall [--purge] [--release]" >&2; return 1 ;;
+		esac
+	done
+	[ $purge = 1 ] && export KR_PURGE=1   # kurulum betiği ayarları yedekleyip siler (VPN çekirdeği yerinde kalır, yeniden indirilmez)
+	export KR_DEV=1
+	if [ $rel = 1 ]; then cmd_update install force; else cmd_update main; fi
 }
 
 # ---- Yedek: kediray backup [dosya] | restore <dosya> ---------------------------------------------------
@@ -3269,6 +3326,8 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray selfupdate <dosya>         Kurulum dosyasıyla güncelle (panel: Hakkında > Güncelle)
   kediray update check [--json]      GitHub'da yeni sürüm var mı
   kediray update install             GitHub Release'ten indir (sha256sums doğrulamalı) ve kur
+  kediray update main                Sürümü artırmadan depodaki son kodu kur (Release gerekmez, SHA256 doğrulaması yok)
+  kediray reinstall [--purge] [--release]  Aynı sürümü baştan kur (--purge: ayarlar yedeklenip silinir; --release: Release dosyasından)
   kediray count [status|on|off|show] Anonim kullanım sayısı (izne bağlı; show = ne gönderileceğini gösterir)
   kediray license status|id|activate <anahtar>|remove   Lisans (modem IMEI'si: kediray license id)
   kediray backup [dosya]             Sunucu ve ayarları yedekle (UUID içerir, paylaşma)
@@ -3369,6 +3428,7 @@ case "$cmd" in
 	assetdir) assetdir ;;
 	log) logread -e kediray 2>/dev/null | tail -n "${1:-80}"; logread -e xray 2>/dev/null | tail -n 20 ;;
 	uninstall) cmd_uninstall "$@" ;;
+	reinstall) cmd_reinstall "$@" ;;
 	""|help|-h|--help) usage ;;
 	*) echo "Bilinmeyen komut: $cmd" >&2; usage; exit 1 ;;
 esac
