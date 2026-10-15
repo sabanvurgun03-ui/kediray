@@ -10,7 +10,7 @@ const SINCEF = RUN + '/log.since';
 const CMD = ARGV[0];
 const now_ms = () => time() * 1000;
 
-function out(x) { print(sprintf('%J\n', x)); }
+function out(x) { print(sprintf('%j\n', x)); }
 function readj(p, d) { try { let t = fs.readfile(p); return t ? json(t) : d; } catch (e) { return d; } }
 function writej(p, v) { fs.mkdir(RUN); fs.writefile(p + '.tmp', sprintf('%J', v)); fs.rename(p + '.tmp', p); }
 
@@ -97,6 +97,13 @@ function summarize(text) {
 	return segs[0] + ' → ' + last;
 }
 
+// Çok uzun satırlar rpcd/file.exec yanıtını şişirir (uygulama `kediray logs` çıktısını file.exec ile okur); UTF-8 sınırında kes.
+function cut(s, n) {
+	if (type(s) != 'string' || length(s) <= n) return s;
+	while (n > 0 && (ord(s, n) & 0xC0) == 0x80) n--;
+	return substr(s, 0, n) + '…';
+}
+
 function parse(msg, prio, t, id, ts) {
 	let m = match(msg, /^([A-Za-z0-9_.-]+)(\[[0-9]+\])?: ?(.*)$/s);
 	if (!m) return null;
@@ -123,8 +130,12 @@ function parse(msg, prio, t, id, ts) {
 		if (dm && !ACTIVE[dm[2] + ':' + dm[3]]) level = 'debug';
 	}
 	let h = (level == 'error' || level == 'warn') ? hint(text) : null;
-	return { id: id, t: t, ts: ts, level: level, comp: comp_of(tag, text), text: tag == 'xray' ? summarize(text) : text,
-		raw: text, title: h?.title, fix: h?.fix };
+	let shown = cut(tag == 'xray' ? summarize(text) : text, 500);
+	let ent = { id: id, t: t, ts: ts, level: level, comp: comp_of(tag, text), text: shown,
+		title: h?.title, fix: h?.fix };
+	// raw yalnızca özetten farklıysa gönderilir (panel yoksa text'e düşer)
+	if (text != shown) ent.raw = cut(text, 800);
+	return ent;
 }
 
 // ---------- oku ----------
@@ -168,7 +179,7 @@ for (let e in ents) {
 	it.last = e.t;
 	it.ts = e.ts;
 	it.text = e.text;
-	it.raw = e.raw;
+	if (e.raw != null) it.raw = e.raw; else delete it.raw;
 }
 for (let e in ents) if (e.id != null && e.id > maxid) maxid = e.id;
 st.last_id = maxid;
@@ -177,5 +188,10 @@ writej(ERRF, st);
 
 const since = int(fs.readfile(SINCEF) ?? '0') || 0;
 let stream = filter(ents, e => e.t == null || e.t > since);
-if (length(stream) > 500) stream = slice(stream, length(stream) - 500);
+if (length(stream) > 300) stream = slice(stream, length(stream) - 300);
+// Eski (diskte kalmış) hata kayıtları da aynı sınırlara girsin
+for (let it in st.items) {
+	if (it.text != null) it.text = cut(it.text, 500);
+	if (it.raw != null) { if (it.raw == it.text) delete it.raw; else it.raw = cut(it.raw, 800); }
+}
 out({ now: now_ms(), since: since, entries: stream, errors: st.items });
