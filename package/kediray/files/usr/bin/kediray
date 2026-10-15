@@ -65,7 +65,7 @@ resolve4() {
 		*[!0-9.]*) ;;
 		*) echo "$1"; return 0 ;;
 	esac
-	nslookup "$1" "$(uget main.dns_bootstrap || echo 1.1.1.1)" 2>/dev/null | awk '
+	run_to 4 nslookup "$1" "$(uget main.dns_bootstrap || echo 1.1.1.1)" 2>/dev/null | awk '
 		/^Name:/ { f = 1 }
 		f && /^Address/ { for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { print $i; exit } }'
 }
@@ -766,15 +766,33 @@ cmd_gen() {
 }
 
 # Sunucu alan adlarını bir kez IP'ye çevir (IP ile bağlanma + güvenlik duvarı istisnası)
-resolve_all() { # [düğüm listesi]
-	local tag sec tp addr port proto net insecure sni pin name ip ips="" map="" f="${1:-$RUN/nodes.tsv}"
+resolve_all() { # [düğüm listesi]  — adresler paralel çözülür (aynı adres bir kez, aynı anda en çok 8; her biri en çok 4 sn)
+	local tag sec tp addr port proto net insecure sni pin name ip ips="" map="" f="${1:-$RUN/nodes.tsv}" d n=0 pids="" seen=" "
 	[ -s "$f" ] || { : > "$RUN/server_ips"; : > "$RUN/resolve"; return 0; }
+	d="$RUN/resolve.$$"; mkdir -p "$d"
 	while IFS="$T" read -r tag sec tp addr port proto net insecure sni pin name; do
-		ip=$(resolve4 "$addr")
+		case "$seen" in *" $addr "*) continue ;; esac
+		seen="$seen$addr "
+		n=$((n + 1))
+		echo "$addr" > "$d/$n.addr"
+		( resolve4 "$addr" > "$d/$n.ip" 2>/dev/null ) &
+		pids="$pids $!"
+		if [ $((n % 8)) = 0 ]; then
+			# shellcheck disable=SC2086
+			wait $pids; pids=""
+		fi
+	done < "$f"
+	# shellcheck disable=SC2086
+	[ -n "$pids" ] && wait $pids
+	n=0
+	while [ -f "$d/$((n + 1)).addr" ]; do
+		n=$((n + 1))
+		addr=$(cat "$d/$n.addr"); ip=$(cat "$d/$n.ip" 2>/dev/null)
 		[ -n "$ip" ] || continue
 		ips="$ips $ip"
 		[ "$ip" != "$addr" ] && map="$map $addr=$ip"
-	done < "$f"
+	done
+	rm -rf "$d"
 	echo "$ips" > "$RUN/server_ips"
 	echo "$map" > "$RUN/resolve"
 }
@@ -1313,7 +1331,12 @@ cmd_ping() { # [sec] [--json]  VPN kapalıyken geçici test çekirdeği kullanı
 		export KR_TEST_BASE=$(( $(uget main.test_base || echo 21000) + 500 ))
 		ucode "$SHARE/gen.uc" nodes > "$list" 2>/dev/null
 		[ -s "$list" ] || { echo "Ölçülecek geçerli sunucu yok" >&2; [ $json = 1 ] && ucode "$SHARE/cli.uc" nodes; return 1; }
-		resolve_all "$list"
+		if [ -n "$only" ] && [ "$only" != all ]; then
+			awk -F"$T" -v s="$only" '$2 == s' "$list" > "$list.one"; [ -s "$list.one" ] || cp "$list" "$list.one"
+			resolve_all "$list.one"; rm -f "$list.one"
+		else
+			resolve_all "$list"
+		fi
 		KR_RESOLVE="$(cat "$RUN/resolve" 2>/dev/null)" ucode "$SHARE/gen.uc" test > "$RUN/ping.json" 2>/dev/null || { echo "Test yapılandırması üretilemedi" >&2; return 1; }
 		XRAY_LOCATION_ASSET="$(assetdir)" "$(corebin)" run -c "$RUN/ping.json" >/dev/null 2>&1 &
 		tpid=$!
