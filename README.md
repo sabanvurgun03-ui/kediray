@@ -26,6 +26,19 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 
 *AW1K Panel Android uygulaması: ana sayfa, VPN, Wi-Fi, ağ ve cihazlar.*
 
+## Sistem gereksinimleri
+
+- **OpenWrt 22.03 veya üstü** (firewall4 / nftables şart; eski iptables'lı sürümlerde çalışmaz)
+- Paket yöneticisi: `opkg` veya `apk`
+- Kurulum sırasında internet (paketler için) ve LuCI (`luci-base`)
+- Gerekli paketler (kurulum betiği eksikleri kendisi kurar): `ucode`, `ucode-mod-uci`, `ucode-mod-fs`, `ip-full`, `curl`, `ca-bundle`, `unzip`, `openssl-util`, `conntrack`, `xray-core`, `hev-socks5-tunnel`, `kmod-tun`, `kmod-nft-tproxy`, `kmod-nft-socket`, `v2ray-geoip`, `v2ray-geosite`
+- Modemin paket deposunda bu paketler (özellikle `xray-core` ve `hev-socks5-tunnel`) bulunmalı
+- Güncelleme için modemin `github.com` ve `raw.githubusercontent.com` adreslerine erişmesi gerekir
+- Donanım: Xray ve geo dosyaları için yeterli boş flash ve RAM gerekir. Resmi bir alt sınır ölçülmedi; tahminen en az 128 MB RAM ve birkaç on MB boş flash önerilir
+- Bant sekmesi yalnızca QModem'li hücresel modemlerde çalışır
+- Test edilen cihaz: Arcadyan AW1000 (DivineWRT 25.12-NSS). Diğer cihazlarda denenmedi; sorun olursa kurulum betiği nedenini yazıp durur
+- Donanım akış hızlandırması (hardware flow offloading) açıksa trafik VPN kurallarını atlayabilir; böyle bir durumda kapat
+
 ## Kurulum
 
 Modemde SSH ile:
@@ -102,6 +115,19 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 <p align="center"><img src="docs/ekranlar.jpg" alt="AW1K Panel screens"></p>
 
 *AW1K Panel Android app: home, VPN, Wi-Fi, network and devices.*
+
+### System requirements
+
+- **OpenWrt 22.03 or newer** (firewall4 / nftables is required; older iptables-based releases do not work)
+- Package manager: `opkg` or `apk`
+- Internet access during install (for packages) and LuCI (`luci-base`)
+- Required packages (the installer installs missing ones): `ucode`, `ucode-mod-uci`, `ucode-mod-fs`, `ip-full`, `curl`, `ca-bundle`, `unzip`, `openssl-util`, `conntrack`, `xray-core`, `hev-socks5-tunnel`, `kmod-tun`, `kmod-nft-tproxy`, `kmod-nft-socket`, `v2ray-geoip`, `v2ray-geosite`
+- These packages (especially `xray-core` and `hev-socks5-tunnel`) must be available in your router's package feed
+- Updates need the router to reach `github.com` and `raw.githubusercontent.com`
+- Hardware: enough free flash and RAM for Xray and the geo files. No official minimum has been measured; roughly 128 MB RAM and a few tens of MB of free flash are recommended (estimate)
+- The Band tab only works on cellular modems with QModem
+- Tested device: Arcadyan AW1000 (DivineWRT 25.12-NSS). Not tested on other devices; if something is missing the installer stops and says why
+- If hardware flow offloading is enabled, traffic may bypass the VPN rules; turn it off in that case
 
 ### Install
 
