@@ -42,6 +42,16 @@ assetdir() {
 }
 
 xr() { XRAY_LOCATION_ASSET="$(assetdir)" "$(corebin)" "$@"; }
+# Xray sürümü: çekirdeği her seferinde çalıştırmadan önbellekten okunur (çekirdek dosyasının boyutu değişince yenilenir)
+core_ver() {
+	local b sz ver
+	b=$(corebin) || return 1
+	sz=$(wc -c < "$b" 2>/dev/null)
+	if [ -s "$RUN/core.ver" ] && [ "$(cat "$RUN/core.ver.sz" 2>/dev/null)" = "$sz" ]; then cat "$RUN/core.ver"; return 0; fi
+	ver=$(xr version 2>/dev/null | awk 'NR==1{print $2}')
+	mkdir -p "$RUN"; echo "$ver" > "$RUN/core.ver"; echo "$sz" > "$RUN/core.ver.sz"
+	echo "$ver"
+}
 
 running() {
 	ubus call service list '{"name":"kediray"}' 2>/dev/null | jsonfilter -e '@.kediray.instances.xray.running' 2>/dev/null | grep -q true
@@ -103,13 +113,13 @@ run_to() { # <saniye> komut...  (busybox'ta timeout olmasa da çalışır)
 }
 cert_pem() { # ip port sni
 	command -v openssl >/dev/null 2>&1 || return 1
-	echo | run_to 8 openssl s_client -connect "$1:$2" -servername "$3" 2>/dev/null | openssl x509 2>/dev/null
+	echo | run_to "${KR_CERT_T:-8}" openssl s_client -connect "$1:$2" -servername "$3" 2>/dev/null | openssl x509 2>/dev/null
 }
 
 # Çekirdek allowInsecure'ü hâlâ tanıyor mu? (Xray 26'da kaldırıldı.) xDivine gibi gerçek bir testle öğrenilir.
 cap_insecure() {
 	local ver f
-	ver=$(xr version 2>/dev/null | awk 'NR==1{print $2}')
+	ver=$(core_ver)
 	f="/etc/kediray.cap.$ver"   # kalıcı (flash): açılışta her seferinde Xray testi yapılmasın
 	if [ ! -f "$f" ]; then
 		mkdir -p "$RUN"
@@ -148,18 +158,36 @@ cert_hash() { # ip port sni -> yaprak sertifikanın SHA-256'sı (Xray'in pinnedP
 # allowInsecure (doğrulanmayan sertifika) kullanan sunucular: her başlangıçta sunucunun sertifikasını
 # yeniden oku; değiştiyse yenisini sabitle (sunucu zaten doğrulanmıyor, amaç tüneli ayakta tutmak).
 pin_nodes() { # [force|<bölüm>]
-	local tag sec tp addr port proto net insecure sni pin name ip h changed=0
+	local tag sec tp addr port proto net insecure sni pin name ip h changed=0 d pids="" n=0
 	[ -s "$RUN/nodes.tsv" ] || return 0
 	[ "$(uget main.pin_refresh)" = 0 ] && [ -z "$1" ] && return 0
 	# xDivine gibi: çekirdek allowInsecure'ü hâlâ destekliyorsa sabitlemeye gerek yok
 	[ -z "$1" ] && cap_insecure && return 0
+	# Ağ işi (adres çözme + sertifika okuma) sunucular için aynı anda yapılır (eskiden sırayla: ölü sunucu başına ~12 sn);
+	# otomatik yolda (her başlatma/kaydetme) sertifika okuma en çok 4 sn bekler. Sonuçlar aşağıda sırayla işlenir.
+	d="$RUN/pin.$$"; mkdir -p "$d"
+	[ -z "$1" ] && export KR_CERT_T=4
+	while IFS="$T" read -r tag sec tp addr port proto net insecure sni pin name; do
+		[ "$insecure" = 1 ] || continue
+		case "$1" in ""|force) ;; *) [ "$1" = "$sec" ] || continue ;; esac
+		( ip=$(resolve4 "$addr"); echo "$ip" > "$d/$sec.ip"; [ -n "$ip" ] && cert_hash "$ip" "$port" "$sni" > "$d/$sec.h" ) &
+		pids="$pids $!"
+		n=$((n + 1))
+		if [ $((n % 6)) = 0 ]; then
+			# shellcheck disable=SC2086
+			wait $pids; pids=""
+		fi
+	done < "$RUN/nodes.tsv"
+	# shellcheck disable=SC2086
+	[ -n "$pids" ] && wait $pids
+	unset KR_CERT_T
 	while IFS="$T" read -r tag sec tp addr port proto net insecure sni pin name; do
 		[ "$insecure" = 1 ] || continue
 		case "$1" in ""|force) ;; *) [ "$1" = "$sec" ] || continue ;; esac
 		: > "$RUN/pin.seen"
-		ip=$(resolve4 "$addr")
+		ip=$(cat "$d/$sec.ip" 2>/dev/null)
 		[ -n "$ip" ] || { say "$name: adres çözülemedi, sertifika okunamadı"; echo "$name: adres çözülemedi, sertifika okunamadı" >> "$RUN/pin.out"; : > "$RUN/pin.fail"; continue; }
-		h=$(cert_hash "$ip" "$port" "$sni")
+		h=$(cat "$d/$sec.h" 2>/dev/null)
 		if [ -z "$h" ]; then
 			if [ "$pin" = "-" ]; then
 				sayerr "$name: sertifika alınamadı ve daha önce sabitlenmemiş; bu sunucu bağlanamaz (openssl-util kurulu mu? sunucu açık mı?)"
@@ -172,11 +200,12 @@ pin_nodes() { # [force|<bölüm>]
 		fi
 		if [ "$h" = "$pin" ]; then echo "$name: sertifika zaten sabit" >> "$RUN/pin.out"; continue; fi
 		uci -q set "$CONF.$sec.pin=$h"
-		changed=1
+		changed=1; PIN_CHANGED=1
 		: > "$RUN/pin.chg"
 		if [ "$pin" = "-" ]; then log "$name: sertifika sabitlendi ($(echo "$h" | cut -c1-12)…)"; echo "$name: sertifika sabitlendi" >> "$RUN/pin.out"
 		else log "$name: sunucunun sertifikası değişmiş, yenisi sabitlendi ($(echo "$pin" | cut -c1-12)… -> $(echo "$h" | cut -c1-12)…)"; echo "$name: sunucunun sertifikası değişmişti, yenisi sabitlendi" >> "$RUN/pin.out"; fi
 	done < "$RUN/nodes.tsv"
+	rm -rf "$d"
 	[ "$changed" = 1 ] && uci -q commit "$CONF"
 	return 0
 }
@@ -722,8 +751,9 @@ cmd_gen() {
 	if cap_insecure; then export KR_CAP_INSECURE=1; else export KR_CAP_INSECURE=0; fi
 	if [ "$(direct_state)" = dead ]; then export KR_DIRECT_DEAD=1; else export KR_DIRECT_DEAD=0; fi
 	ucode "$SHARE/gen.uc" nodes > "$RUN/nodes.tsv" 2>/dev/null
+	PIN_CHANGED=0
 	pin_nodes
-	ucode "$SHARE/gen.uc" nodes > "$RUN/nodes.tsv" 2>/dev/null
+	[ "$PIN_CHANGED" = 1 ] && ucode "$SHARE/gen.uc" nodes > "$RUN/nodes.tsv" 2>/dev/null   # sunucu listesi yalnızca sabitleme değiştiyse yeniden üretilir
 	resolve_all
 	ips=$(cat "$RUN/server_ips")
 
@@ -737,9 +767,9 @@ cmd_gen() {
 	corebin >/dev/null || { sayerr "Xray çekirdeği bulunamadı: kediray update-core"; echo "Xray çekirdeği bulunamadı (kediray update-core)" > "$RUN/last_error"; return 1; }
 	# Aynı yapılandırma + aynı çekirdek + aynı geo dosyaları daha önce test edildiyse testi atla (açılışı birkaç sn kısaltır)
 	local tkey tfile
-	tkey="$(md5sum < "$RUN/config.new.json" | cut -d' ' -f1)-$(xr version 2>/dev/null | awk 'NR==1{print $2}')-$(wc -c < "$(assetdir)/geoip.dat" 2>/dev/null)-$(wc -c < "$(assetdir)/geosite.dat" 2>/dev/null)"
+	tkey="$(md5sum < "$RUN/config.new.json" | cut -d' ' -f1)-$(core_ver)-$(wc -c < "$(assetdir)/geoip.dat" 2>/dev/null)-$(wc -c < "$(assetdir)/geosite.dat" 2>/dev/null)"
 	tfile=/etc/kediray.tested
-	if [ "$(cat "$tfile" 2>/dev/null)" = "$tkey" ]; then
+	if [ "$(cat "$tfile" 2>/dev/null)" = "$tkey" ] || [ "${KR_SKIP_TEST:-0}" = 1 ]; then
 		: > "$RUN/test.log"
 	elif ! xr run -test -c "$RUN/config.new.json" > "$RUN/test.log" 2>&1; then
 		rm -f "$tfile"
@@ -763,6 +793,18 @@ cmd_gen() {
 	esac
 	rm -f "$RUN/last_error"
 	return 0
+}
+
+# Başlatma betiğinin çağırdığı 'gen': apply_changes yapılandırmayı az önce ürettiyse (60 sn içinde) aynısını yeniden üretmez
+cmd_gen_boot() {
+	local t
+	t=$(cat "$RUN/gen.fresh" 2>/dev/null)
+	rm -f "$RUN/gen.fresh"
+	case "$t" in ''|*[!0-9]*) t="" ;; esac
+	if [ -n "$t" ] && [ -s "$RUN/config.json" ] && [ $(( $(date +%s) - t )) -le 60 ]; then
+		return 0
+	fi
+	cmd_gen
 }
 
 # Sunucu alan adlarını bir kez IP'ye çevir (IP ile bağlanma + güvenlik duvarı istisnası)
@@ -1061,11 +1103,12 @@ probe_url_list() {
 		echo "$u" | sed 's#^https://#http://#'
 	done | awk '!seen[$0]++'
 }
-probe_socks() { # <socks-port> [zaman aşımı] -> ms (ilk yanıt veren adres); hiçbiri olmazsa 1
+probe_socks() { # <socks-port> [zaman aşımı] [yedek adres zaman aşımı] -> ms (ilk yanıt veren adres); hiçbiri olmazsa 1
 	local u t m=${2:-6}
 	for u in $(probe_url_list); do
 		t=$(curl -s -o /dev/null --noproxy '' -m "$m" -w '%{http_code} %{time_total}' -x "socks5h://127.0.0.1:$1" "$u" 2>/dev/null)
 		case "$t" in 2*|3*) echo "$t" | awk '{ printf "%d\n", $2 * 1000 }'; return 0 ;; esac
+		m=${3:-3}   # yedek adres daha kısa beklesin: ölü sunucuda 2 x tam süre beklenmesin
 	done
 	return 1
 }
@@ -1090,15 +1133,26 @@ probe_tag() { # <etiket> -> ms (başarısızsa dönüş kodu 1)
 	probe_socks "$tp"
 }
 
-auto_pick() { # [hariç etiket] -> en hızlı çalışan sunucunun etiketi (paralel ölçüm)
-	local tag sec tp rest d
+auto_pick() { # [hariç etiket] -> en hızlı çalışan sunucunun etiketi (paralel ölçüm; ilk yanıt veren en hızlıdır, ölü sunucular beklenmez)
+	local tag sec tp rest d pids="" p i=0 alive
 	d="$RUN/pick.$$"; mkdir -p "$d"
 	while IFS="$T" read -r tag sec tp rest; do
 		[ "$tag" = "$1" ] && continue
 		( ms=$(probe_tag "$tag") && echo "$ms $tag" > "$d/$tag" ) &
+		pids="$pids $!"
 	done < "$RUN/nodes.tsv"
-	wait
+	# İlk başarılı yanıt gelince beklemeyi bırak (eskiden hepsi bitene dek beklenirdi: ölü sunucu = +12 sn).
+	# Hiçbiri yanıt vermezse hepsi bitene kadar beklenir.
+	while [ $i -lt 120 ]; do
+		[ -n "$(ls "$d" 2>/dev/null)" ] && break
+		alive=0
+		for p in $pids; do kill -0 "$p" 2>/dev/null && { alive=1; break; }; done
+		[ $alive = 0 ] && break
+		i=$((i + 1)); sleep 0.2 2>/dev/null || sleep 1
+	done
 	cat "$d"/* 2>/dev/null | sort -n | awk 'NR == 1 { print $2 }'
+	# shellcheck disable=SC2086
+	[ -n "$pids" ] && kill $pids 2>/dev/null
 	rm -rf "$d"
 }
 
@@ -1139,11 +1193,16 @@ sticky_check() {
 # Ayar değişikliğini uygula; Xray'i sadece Xray yapılandırması gerçekten değiştiyse yeniden başlat.
 # (Abonelik yenilemesi, cihaz/uygulama değişikliği oyundaki bağlantıyı gereksiz yere koparmasın.)
 apply_changes() {
-	local f
+	local f rc i ok
 	[ "$(uget main.enabled)" = 1 ] || return 0
 	if ! running || [ ! -s "$RUN/config.json" ]; then /etc/init.d/kediray restart >/dev/null 2>&1; return 0; fi
 	for f in config.json rules.nft hev.yaml dnsmasq.conf; do cp "$RUN/$f" "$RUN/$f.old" 2>/dev/null || : > "$RUN/$f.old"; done
-	if ! cmd_gen; then
+	# Xray ön testi bu yolda atlanır (her kaydetmede birkaç sn sürüyordu); yeni yapılandırma Xray'i başlatamazsa aşağıda
+	# otomatik olarak eskisine dönülür.
+	KR_SKIP_TEST=1
+	cmd_gen; rc=$?
+	unset KR_SKIP_TEST
+	if [ $rc != 0 ]; then
 		for f in config.json rules.nft hev.yaml dnsmasq.conf; do [ -s "$RUN/$f.old" ] && mv "$RUN/$f.old" "$RUN/$f"; done
 		return 1
 	fi
@@ -1153,7 +1212,24 @@ apply_changes() {
 		fi
 		log "değişiklik bağlantıları koparmadan uygulandı"
 	else
+		# Başlatma betiği yapılandırmayı bir kez daha üretmesin: az önce üretildi (gen.fresh, 60 sn geçerli)
+		date +%s > "$RUN/gen.fresh"
 		/etc/init.d/kediray restart >/dev/null 2>&1
+		ok=0; i=0
+		while [ $i -lt 30 ]; do
+			if running && port_open "$(uget main.api_port || echo 10085)"; then ok=1; break; fi
+			i=$((i + 1)); sleep 0.5 2>/dev/null || sleep 1
+		done
+		if [ $ok = 0 ] && [ -s "$RUN/config.json.old" ]; then
+			cp "$RUN/config.json" "$RUN/config.failed.json"
+			{ echo "Yeni yapılandırma Xray'i başlatamadı, önceki yapılandırmaya dönüldü:"; xr run -test -c "$RUN/config.failed.json" 2>&1 | grep -iE 'fail|error|invalid' | tail -n 3; } > "$RUN/last_error"
+			sayerr "Yeni yapılandırma Xray'i başlatamadı, önceki yapılandırmaya dönülüyor: $(sed -n '2p' "$RUN/last_error")"
+			for f in config.json rules.nft hev.yaml dnsmasq.conf; do [ -s "$RUN/$f.old" ] && mv "$RUN/$f.old" "$RUN/$f"; done
+			date +%s > "$RUN/gen.fresh"
+			/etc/init.d/kediray restart >/dev/null 2>&1
+			rm -f "$RUN"/*.old "$RUN/config.failed.json"
+			return 1
+		fi
 	fi
 	rm -f "$RUN"/*.old
 }
@@ -1172,8 +1248,7 @@ cmd_status() {
 	running && r=1
 	[ -f "$RUN/fw" ] && fw=up
 	cf=$(conflicts)
-	if [ -s "$RUN/core.ver" ]; then core=$(cat "$RUN/core.ver"); else
-		core=$(xr version 2>/dev/null | awk 'NR==1{print $2}'); mkdir -p "$RUN"; echo "$core" > "$RUN/core.ver"; fi
+	core=$(core_ver)
 	if [ $r = 1 ]; then
 		act=$(active_tag)
 		pid=$(ubus call service list '{"name":"kediray"}' 2>/dev/null | jsonfilter -e '@.kediray.instances.xray.pid')
@@ -1772,7 +1847,8 @@ cmd_use() { # <sec|auto>
 	if [ "$1" != auto ] && [ "$1" != none ]; then
 		[ "$(uci -q get "$CONF.$1")" = node ] || { echo "böyle bir sunucu yok: $1" >&2; return 1; }
 	fi
-	local old
+	local old t0
+	t0=$(date +%s)
 	old=$(uci -q get "$CONF.main.node")
 	uci set "$CONF.main.node=$1"
 	uci commit "$CONF"   # uci commit ile servis yeniden başlamaz -> bağlantılar kopmaz
@@ -1784,6 +1860,7 @@ cmd_use() { # <sec|auto>
 	else
 		running && apply_node
 	fi
+	log "sunucu değiştirildi: $1 ($(( $(date +%s) - t0 )) sn)"
 	echo "Sunucu: $1"
 }
 
@@ -1813,8 +1890,9 @@ cmd_add() { # link/JSON ekle (argüman, dosya veya stdin)
 }
 
 fetch() { # url dosya
-	curl -fsSL --noproxy '' -m 30 -A "v2rayNG/1.10" -o "$2" "$1" 2>/dev/null && return 0
-	running && curl -fsSL --noproxy '' -m 30 -A "v2rayNG/1.10" -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" -o "$2" "$1" 2>/dev/null
+	# VPN açıkken önce tünelden dene: hatta direkt internet yoksa direkt deneme 30 sn boşuna beklerdi; olmazsa direkt denenir
+	running && curl -fsSL --noproxy '' -m 20 -A "v2rayNG/1.10" -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" -o "$2" "$1" 2>/dev/null && return 0
+	curl -fsSL --noproxy '' -m 20 -A "v2rayNG/1.10" -o "$2" "$1" 2>/dev/null
 }
 
 # Güncelleme denetimi için kısa zaman aşımlı indirme: panel (rpcd) ~20 sn içinde yanıt bekler; eski 30+30 sn "panel yanıt vermedi" diyordu.
@@ -3014,7 +3092,7 @@ cmd_update_core() { # [sürüm]
 	mv -f "$tmp/xray" "$SHARE/bin/xray"
 	[ -s "$tmp/geoip.dat" ] && mv -f "$tmp/geoip.dat" "$SHARE/geoip.dat"
 	[ -s "$tmp/geosite.dat" ] && mv -f "$tmp/geosite.dat" "$SHARE/geosite.dat"
-	rm -rf "$tmp" "$RUN/core.ver"
+	rm -rf "$tmp" "$RUN/core.ver" "$RUN/core.ver.sz"
 	"$SHARE/bin/xray" version | head -n1
 	[ "$(uget main.enabled)" = 1 ] && /etc/init.d/kediray restart >/dev/null 2>&1
 	return 0
@@ -3207,7 +3285,7 @@ case "$cmd" in
 esac
 case "$cmd" in
 	license) cmd_license "$@" ;;
-	gen) cmd_gen ;;
+	gen) cmd_gen_boot ;;
 	fw-up) with_lock fw_up_real ;;
 	fw-down) with_lock fw_down_real ;;
 	fw-zone) fw_zone ;;
