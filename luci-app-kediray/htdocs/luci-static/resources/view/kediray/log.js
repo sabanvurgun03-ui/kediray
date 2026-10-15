@@ -112,6 +112,42 @@ function krTheme() {
 }
 krTheme();
 
+/* Genel efektler: tüm KediRay sayfalarında (tek sefer eklenir). Mavi/yeşil düğmeler nefes alır gibi parlar, kartlar yumuşak belirir, giriş alanları odakta parlar. */
+(function () {
+	if (document.getElementById('kr-fx-css')) return;
+	const st = document.createElement('style');
+	st.id = 'kr-fx-css';
+	st.textContent = `
+@keyframes krIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes krFade{from{opacity:0}to{opacity:1}}
+@keyframes krBtnB{0%,100%{box-shadow:0 0 3px color-mix(in srgb,var(--kr-accent,#2a7de1) 25%,transparent)}50%{box-shadow:0 0 12px color-mix(in srgb,var(--kr-accent,#2a7de1) 70%,transparent)}}
+@keyframes krBtnG{0%,100%{box-shadow:0 0 3px rgba(34,163,85,.25)}50%{box-shadow:0 0 12px rgba(34,163,85,.7)}}
+@keyframes krChip{0%,100%{box-shadow:0 0 3px color-mix(in srgb,var(--kr-accent,#2a7de1) 30%,transparent)}50%{box-shadow:0 0 11px color-mix(in srgb,var(--kr-accent,#2a7de1) 70%,transparent)}}
+.kr-card,.ka-card,.kr-smart,.cbi-map{animation:krIn .38s ease backwards}
+.modal{animation:krFade .2s ease backwards}
+.btn,.cbi-button{transition:background .2s ease,box-shadow .25s ease,border-color .2s ease,transform .12s ease,color .2s ease}
+.cbi-button:not(:disabled):active{transform:scale(.97)}
+.cbi-button-action:not(:disabled){animation:krBtnB 2.8s ease-in-out infinite}
+.cbi-button-positive:not(:disabled){animation:krBtnG 2.8s ease-in-out infinite}
+.cbi-button-action:not(:disabled):hover,.cbi-button-positive:not(:disabled):hover{animation-play-state:paused;filter:brightness(1.12)}
+.cbi-button-negative:not(:disabled):hover{box-shadow:0 0 11px rgba(210,63,63,.6)}
+.cbi-button:not(.cbi-button-action):not(.cbi-button-positive):not(.cbi-button-negative):not(:disabled):hover{box-shadow:0 0 8px rgba(128,128,128,.4)}
+.cbi-input-text,.cbi-input-select,.cbi-dropdown,input[type=text],input[type=number],input[type=password],select,textarea{transition:box-shadow .2s ease,border-color .2s ease}
+.cbi-input-text:focus,.cbi-input-select:focus,input[type=text]:focus,input[type=number]:focus,input[type=password]:focus,select:focus,textarea:focus,.cbi-dropdown:focus-within{box-shadow:0 0 0 3px color-mix(in srgb,var(--kr-accent,#2a7de1) 35%,transparent)!important;border-color:var(--kr-accent,#2a7de1)!important;outline:0}
+.kr-switch input:checked + span.kr-knob{box-shadow:0 0 9px rgba(34,163,85,.65)}
+.kr-smart .ks-chip{transition:background .2s ease,border-color .2s ease,box-shadow .25s ease}
+.kr-smart .ks-chip:hover{box-shadow:0 0 8px rgba(128,128,128,.45)}
+.kr-smart .ks-chip.ks-on{animation:krChip 2.6s ease-in-out infinite}
+.kr-smart .ks-bar>div{box-shadow:0 0 8px color-mix(in srgb,var(--kr-accent,#2a7de1) 55%,transparent)}
+.cbi-tabmenu li.cbi-tab,.cbi-tabmenu li{transition:background .2s ease,box-shadow .2s ease,color .2s ease}
+.cbi-tabmenu li.cbi-tab:hover{box-shadow:0 2px 0 color-mix(in srgb,var(--kr-accent,#2a7de1) 60%,transparent)}
+.kr-table tr,.table .tr{transition:background .2s ease}
+.kr-table tr:hover td{background:rgba(128,128,128,.07)}
+@media (prefers-reduced-motion:reduce){.kr-card,.ka-card,.kr-smart,.cbi-map,.modal,.cbi-button-action,.cbi-button-positive,.kr-smart .ks-chip.ks-on{animation:none!important}}
+`;
+	document.head.appendChild(st);
+})();
+
 return view.extend({
 	level: 'info',
 	comp: '',
