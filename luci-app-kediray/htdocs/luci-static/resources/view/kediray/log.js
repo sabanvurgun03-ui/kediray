@@ -151,12 +151,30 @@ return view.extend({
 		const lim = RANK[this.level] ?? 2;
 		const rows = (ents || []).filter(e => (RANK[e.level] ?? 2) <= lim && (!this.comp || e.comp === this.comp) && !this.skipEof(e));
 		if (!rows.length) return h('div', { 'class': 'kl-empty' }, 'Bu filtrelere uyan kayıt yok.');
-		return rows.map(e => h('div', { 'class': 'kl-line kl-lv-' + e.level, 'title': e.fix ? 'Ne yapmalı: ' + e.fix : null }, [
-			h('span', { 'class': 'kl-time' }, fmtTime(e.t, e.ts)),
-			h('span', { 'class': 'kl-lvw' }, h('span', { 'class': 'kl-lvb ' + e.level }, LEVELS[e.level] || e.level)),
-			h('span', { 'class': 'kl-comp' }, e.comp),
-			h('span', { 'class': 'kl-msg' }, [e.title ? h('b', {}, e.title + ': ') : '', e.text])
-		]));
+		// Aynı hata/uyarı birden fazla geçtiyse tek satırda "×N" ile birleştir (bağlantı numarası [123456] yok sayılır);
+		// satır son tekrarın yerinde durur, saat aralığı yanında yazılır. Bilgi/ayıklama satırları olduğu gibi kalır.
+		const grouped = e => e.level === 'error' || e.level === 'warn';
+		const plain = e => String(e.text == null ? '' : e.text).replace(/\[[0-9]{5,}\]\s*/g, '');
+		const gkey = e => e.level + '|' + e.comp + '|' + (e.title || '') + '|' + plain(e);
+		const grp = {};
+		rows.forEach(e => {
+			if (!grouped(e)) return;
+			const k = gkey(e), g = grp[k] || (grp[k] = { n: 0, first: e });
+			g.n++; g.last = e;
+		});
+		return rows.filter(e => !grouped(e) || grp[gkey(e)].last === e).map(e => {
+			const g = grouped(e) ? grp[gkey(e)] : null, multi = !!g && g.n > 1;
+			return h('div', { 'class': 'kl-line kl-lv-' + e.level, 'title': e.fix ? 'Ne yapmalı: ' + e.fix : null }, [
+				h('span', { 'class': 'kl-time' }, fmtTime(e.t, e.ts)),
+				h('span', { 'class': 'kl-lvw' }, h('span', { 'class': 'kl-lvb ' + e.level }, LEVELS[e.level] || e.level)),
+				h('span', { 'class': 'kl-comp' }, e.comp),
+				h('span', { 'class': 'kl-msg' }, [
+					e.title ? h('b', {}, e.title + ': ') : '', multi ? plain(e) : e.text,
+					multi ? [' ', h('span', { 'class': 'kl-cnt' }, '×' + g.n), ' ',
+						h('span', { 'class': 'kl-time' }, fmtTime(g.first.t, g.first.ts) + ' – ' + fmtTime(e.t, e.ts))] : ''
+				])
+			]);
+		});
 	},
 
 	update(d) {
