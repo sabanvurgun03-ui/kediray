@@ -169,7 +169,7 @@ for (let n in NODES) if (n['.name'] == SEL_NAME) SEL = n;
 const HB = num(opt('ws_heartbeat'), 30);
 const KA = num(opt('tcp_keepalive'), 30);
 
-// Yakalama modu (xDivine ile aynı adlar):
+// Yakalama modu:
 //   mixed   TCP çekirdekte NAT redirect ile (hızlı yol), UDP hev-socks5-tunnel TUN ile   [varsayılan]
 //   tproxy  TCP+UDP TPROXY ile
 //   redirect sadece TCP (UDP tünellenmez, QUIC reddedilir)
@@ -186,7 +186,7 @@ const CAP_INSECURE = getenv('KR_CAP_INSECURE') == '1';
 const CONNECT_IP = on(opt('connect_ip'), true);
 // Modeme operatörden gelen DNS sunucuları (CLI, KR_WAN_DNS ile geçirir)
 const WAN_DNS = filter(L(getenv('KR_WAN_DNS')), is_v4);
-// Direkt sorguların gideceği DNS: 'auto' -> operatör DNS'i (xDivine-Ray de böyle yapıyor).
+// Direkt sorguların gideceği DNS: 'auto' -> operatör DNS'i.
 // Ölçüldü: bazı hatlarda DoH adreslerine hiç ulaşılamıyor, her sorgu saniyelerce bekliyor.
 function dns_direct_addr(o, i) {
 	let v = opt(o, 'auto');
@@ -246,7 +246,7 @@ function stream(n) {
 		let t = { serverName: n.sni || host || n.address };
 		if (n.fp && n.fp != 'none') t.fingerprint = n.fp;
 		if (n.alpn) t.alpn = L(n.alpn, /[ \t\r\n,]+/);
-		// xDivine gibi: sabitlenmiş sertifika varsa o; yoksa çekirdek destekliyorsa allowInsecure
+		// sabitlenmiş sertifika varsa o; yoksa çekirdek destekliyorsa allowInsecure
 		if (n.pin) t.pinnedPeerCertSha256 = n.pin;
 		else if (n.insecure == '1' && CAP_INSECURE) t.allowInsecure = true;
 		s.tlsSettings = t;
@@ -381,7 +381,7 @@ function rem_ip4() {
 	let m = match(opt('dns_remote', 'https://1.1.1.1/dns-query'), /([0-9]{1,3}(\.[0-9]{1,3}){3})/);
 	return m ? m[1] : '';
 }
-// DNS: varsayılan 'private' = dnsmasq -> çekirdeğin DNS portu -> tünel (xDivine-Ray'de seçili olan mod).
+// DNS: varsayılan 'private' = dnsmasq -> çekirdeğin DNS portu -> tünel.
 // Sorgu tünelin veri yoluna (TUN/TPROXY) girmez, çekirdek kendisi çözer -> hızlı ve sızıntısız.
 // 'off' (DNS'e dokunma) TUN yakalamasında hiçbir adı çözemez (cihazın 53 portu TUN'a girer, yanıt dönmez):
 // bu birleşimde sessizce 'private'a düşüyoruz.
@@ -420,7 +420,7 @@ function xray() {
 
 	let tp_port = num(opt('tproxy_port'), 12345), dns_port = num(opt('dns_port'), 15353);
 	let socks_port = num(opt('socks_port'), 10808), api_port = num(opt('api_port'), 10085);
-	// xDivine'ın ölçümü: hedefi alan adıyla değiştirmek (sunucuya tekrar çözdürmek) her yeni bağlantıya
+	// Ölçüm: hedefi alan adıyla değiştirmek (sunucuya tekrar çözdürmek) her yeni bağlantıya
 	// bir tur ekliyor (47 ms yerine 100 ms, ara ara 700 ms). routeOnly: alan adı sadece kurallar için okunur,
 	// hedef IP korunur; adres zaten tünelden çözüldüğü için doğru bölgeden gelir.
 	let sniff = {
@@ -569,14 +569,14 @@ function xray() {
 		push(servers, { address: direct, domains: uniq(ddom), skipFallback: true });
 		if (length(direct2)) push(servers, { address: direct2, domains: uniq(ddom), skipFallback: true });
 	}
-	// dns_mode=private (varsayılan, xDivine-Ray'de seçili olan): listede olmayan adlar tünelden çözülür
+	// dns_mode=private (varsayılan): listede olmayan adlar tünelden çözülür
 	//   (hiçbir sorgu operatöre sızmaz; çekirdek kendi çözdüğü için sorgu TUN/TPROXY yoluna girmez).
 	// dns_mode=fast: varsayılan sorgular direkt çıkar (tünel koparsa da ad çözülür, karşılığında gizlilik azalır).
 	if (MODE == 'list' || DNS_MODE == 'fast') { push(servers, direct); if (length(direct2)) push(servers, direct2); push(servers, remote); }
 	else { push(servers, remote); push(servers, direct); if (length(direct2)) push(servers, direct2); }
 
 	let fb = SEL ? SEL._tag : NODES[0]._tag;
-	// connIdle 4 saat (xDivine): telefonun bildirim bağlantısı saatlerce veri taşımadan açık durur
+	// connIdle 4 saat: telefonun bildirim bağlantısı saatlerce veri taşımadan açık durur
 	let pol = { connIdle: num(opt('conn_idle'), 14400) };
 	// Hız ayarı: bağlantı başına tampon (KB). Küçük tampon yüksek hızda akışı boğar ve hız testinin yükselmesini geciktirir.
 	if (on(opt('speed_tune'), true)) pol.bufferSize = num(opt('buffer_size'), 1024);
@@ -589,7 +589,7 @@ function xray() {
 			levels: { '0': pol, '8': pol },
 			system: { statsOutboundUplink: true, statsOutboundDownlink: true }
 		},
-		// DNS modu 'off': yönlendiricinin kendi DNS'ine hiç dokunulmaz (xDivine-Ray'in "DNS'e dokunma" seçeneği).
+		// DNS modu 'off': yönlendiricinin kendi DNS'ine hiç dokunulmaz.
 		// Alan adı kuralları yine çalışır: bağlantıdaki SNI okunur (sniffing/routeOnly).
 		...(!DNS_ON ? {} : { dns: {
 			tag: 'dns-internal',
@@ -715,7 +715,7 @@ function nft() {
 
 	if (CAPTURE == 'tun') {
 		// Her şey (TCP+UDP) işaretlenir; ip rule işaretli paketi TUN'a (hev-socks5-tunnel) yollar.
-		// xDivine-Ray'in "tun" modunun karşılığı: çekirdekte NAT yok, tüm oturum hev'in kendi TCP yığınında.
+		// "tun" modu: çekirdekte NAT yok, tüm oturum hev'in kendi TCP yığınında.
 		push(o, '\tchain tun_pre {');
 		push(o, '\t\ttype filter hook prerouting priority mangle; policy accept;');
 		guards('tun_act', '{ tcp, udp }');
@@ -739,7 +739,7 @@ function nft() {
 		push(o, '\t\tmeta l4proto udp meta mark set ' + MARK_TP + ' tproxy ip to :' + (tp_port + 1) + ' accept');
 		push(o, '\t}');
 	} else {
-		// TCP: çekirdekte NAT redirect (xDivine'ın hızlı yolu). fw4'ün dstnat'ından (-100) önce.
+		// TCP: çekirdekte NAT redirect. fw4'ün dstnat'ından (-100) önce.
 		push(o, '\tchain nat_pre {');
 		push(o, '\t\ttype nat hook prerouting priority dstnat - 5; policy accept;');
 		guards('nat_act', 'tcp');
@@ -875,7 +875,7 @@ function hev() {
 
 // ---------- dnsmasq ----------
 function dnsmasq() {
-	// 'off': yönlendiricinin DNS'ine dokunma (xDivine-Ray'deki gibi)
+	// 'off': yönlendiricinin DNS'ine dokunma
 	if (DNS_MODE == 'off' && !DNS_PART) { print(''); return; }
 	if (DNS_PART) {
 		// Kısmi mod: modemin kendi DNS'i aynen kalır (no-resolv YOK); yalnız listedeki alan adları çekirdeğe gider

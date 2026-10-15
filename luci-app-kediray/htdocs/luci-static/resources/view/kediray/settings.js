@@ -479,7 +479,7 @@ return view.extend({
 		};
 
 		o = s.taboption('stable', form.Flag, 'push_fix', 'Bildirimleri direkt gönder',
-			'Önerilen: KAPALI. Kapalıyken Google (FCM) / Apple (APNs) bildirim bağlantıları tünelden gider (xDivine-Ray gibi); tünel heartbeat ile canlı kaldığı için bağlantı kesilmez. Açıkken bu bağlantılar operatörden direkt gider ve operatör boştaki bağlantıyı sessizce kesebilir: bildirimler gecikir ya da gelmez.');
+			'Önerilen: KAPALI. Kapalıyken Google (FCM) / Apple (APNs) bildirim bağlantıları tünelden gider; tünel heartbeat ile canlı kaldığı için bağlantı kesilmez. Açıkken bu bağlantılar operatörden direkt gider ve operatör boştaki bağlantıyı sessizce kesebilir: bildirimler gecikir ya da gelmez.');
 		o.default = '0';
 		o = s.taboption('stable', form.Value, 'conn_idle', 'Boşta bağlantı süresi (sn)',
 			'Xray varsayılanı 300 sn; telefonun bildirim bağlantısını koparır. Önerilen 14400 (4 saat): bildirim bağlantısı gece boyunca yaşar.');

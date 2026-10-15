@@ -9,9 +9,9 @@ config main 'main'
 	option mode 'global'
 	# Listede olmayan cihazlar: vpn | direct
 	option default_device 'vpn'
-	# Trafik yakalama (xDivine-Ray ile aynı):
+	# Trafik yakalama:
 	#   mixed    TCP çekirdekte NAT redirect, UDP hev-socks5-tunnel TUN  [önerilen]
-	#   tun      TCP+UDP tamamen hev-socks5-tunnel TUN üzerinden (xDivine-Ray'in "tun" modu)
+	#   tun      TCP+UDP tamamen hev-socks5-tunnel TUN üzerinden
 	#   tproxy   TCP+UDP TPROXY
 	#   redirect sadece TCP (UDP tünellenmez)
 	option capture 'mixed'
@@ -21,7 +21,7 @@ config main 'main'
 	# DNS
 	# Varsayılan: Google TCP + DNS'e dokunma (Metin2 atılması DNS'ten kaynaklanmıyor, sebep sunucu tarafı WS bağlantı hatası)
 	option dns_remote 'tcp://8.8.8.8'
-	# auto = modeme operatörden gelen DNS (xDivine-Ray gibi): her zaman ayakta, tünele girmez.
+	# auto = modeme operatörden gelen DNS: her zaman ayakta, tünele girmez.
 	# Yerine DoH yazılabilir: https+local://1.1.1.1/dns-query
 	option dns_direct 'auto'
 	option dns_direct2 'auto'
@@ -34,8 +34,8 @@ config main 'main'
 	option dns_stale '1'
 	option ipv6 '0'
 	option v6_block '1'
-	# Bildirim ve kararlılık (xDivine-Ray'in ölçülmüş varsayılanları)
-	# push_fix=0: Google/Apple bildirim bağlantıları da TÜNELDEN gider (xDivine-Ray gibi). Tünelin kendisi heartbeat/keepalive ile canlı tutulur;
+	# Bildirim ve kararlılık
+	# push_fix=0: Google/Apple bildirim bağlantıları da TÜNELDEN gider. Tünelin kendisi heartbeat/keepalive ile canlı tutulur;
 	# direkt gönderirsen operatör NAT'ı boştaki bağlantıyı sessizce keser ve bildirimler gecikir ya da hiç gelmez.
 	option push_fix '0'
 	option conn_idle '14400'

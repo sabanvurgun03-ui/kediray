@@ -185,7 +185,7 @@ for p in $OPT; do
 	pkg_installed "$p" && continue
 	pkg_add "$p" && ok "$p (isteğe bağlı)" || warn "$p kurulamadı (isteğe bağlı, sorun değil)"
 done
-# Trafik yakalama: mixed (önerilen, xDivine-Ray ile aynı) = TCP NAT redirect + UDP hev-socks5-tunnel TUN.
+# Trafik yakalama: mixed (önerilen) = TCP NAT redirect + UDP hev-socks5-tunnel TUN.
 # Yedek: tproxy. İkisi de yoksa redirect (sadece TCP).
 for p in hev-socks5-tunnel kmod-tun; do
 	pkg_installed "$p" && { ok "$p (kurulu)"; continue; }
@@ -282,10 +282,10 @@ printf '%s\n' "$KR_VERSION" > /usr/share/kediray/version
 if [ -f /etc/config/kediray ]; then
 	ok "Mevcut ayarlar korundu (/etc/config/kediray)"
 	rm -f /tmp/kediray.default
-	# 1.4: bağlantı ayarları xDivine-Ray'in ölçülmüş varsayılanlarına döner (bir kez)
+	# 1.4: bağlantı ayarları ölçülmüş varsayılanlara döner (bir kez)
 	cv=$(uci -q get kediray.main.cfgver); cv=${cv:-0}
 	if [ "$cv" -lt 4 ] 2>/dev/null; then
-		# 1.4: xDivine-Ray ile aynı bağlantı yolu (mixed) ve bildirim ayarları
+		# 1.4: bağlantı yolu (mixed) ve bildirim ayarları
 		uci set kediray.main.capture="$CAPTURE"
 		uci set kediray.main.ws_heartbeat=0
 		uci set kediray.main.tcp_keepalive=0
@@ -346,7 +346,7 @@ if [ -f /etc/config/kediray ]; then
 		uci set kediray.main.cfgver=9; uci commit kediray
 		ok "DNS modu 'Direkt DoH' yapıldı: tünel bir an koparsa alan adları yine çözülür"
 	fi
-	# 1.10: direkt DNS artık operatörün kendi sunucusu (xDivine-Ray ile aynı).
+	# 1.10: direkt DNS artık operatörün kendi sunucusu.
 	# Ölçüldü: bazı hatlarda DoH adreslerine hiç ulaşılamıyor ve her sorgu saniyelerce bekliyor.
 	if [ "$cv" -lt 10 ] 2>/dev/null; then
 		case "$(uci -q get kediray.main.dns_direct)" in
@@ -358,8 +358,8 @@ if [ -f /etc/config/kediray ]; then
 		uci set kediray.main.cfgver=10; uci commit kediray
 		ok "Direkt DNS: operatörün kendi sunucusu (DoH erişilemeyen hatlarda sayfa takılmaz)"
 	fi
-	# 1.12: DNS xDivine-Ray ile birebir aynı: dnsmasq -> çekirdek (15353) -> tünel, üst sunucu tcp://1.1.1.1.
-	# 1.9.1'de 'fast'a (direkt DoH) geçmiştik; xDivine-Ray'de seçili olan mod bu değil, 'tünelden' olan.
+	# 1.12: DNS: dnsmasq -> çekirdek (15353) -> tünel, üst sunucu tcp://1.1.1.1.
+	# 1.9.1'de 'fast'a (direkt DoH) geçmiştik; varsayılan mod 'tünelden'.
 	if [ "$cv" -lt 12 ] 2>/dev/null; then
 		case "$(uci -q get kediray.main.dns_mode)" in fast|"") uci set kediray.main.dns_mode=private ;; esac
 		case "$(uci -q get kediray.main.dns_remote)" in ""|https*) uci set kediray.main.dns_remote='tcp://1.1.1.1' ;; esac
@@ -399,7 +399,7 @@ if [ -f /etc/config/kediray ]; then
 	if [ ! -f /etc/kediray.pushfix0 ]; then
 		uci set kediray.main.push_fix=0; uci commit kediray
 		touch /etc/kediray.pushfix0
-		ok "Bildirimler artık tünelden gidiyor (xDivine-Ray gibi): operatör NAT'ı direkt bağlantıyı sessizce kesip bildirimleri geciktiriyordu"
+		ok "Bildirimler artık tünelden gidiyor: operatör NAT'ı direkt bağlantıyı sessizce kesip bildirimleri geciktiriyordu"
 	fi
 	# 1.19.4: boşta kalan WebSocket tünelinin kesilip bildirimlerin gelmemesi: heartbeat + keepalive 30 sn (bir kez)
 	if [ ! -f /etc/kediray.keepalive30 ]; then
@@ -491,7 +491,7 @@ else
 fi
 
 # Coğrafi veri (geoip/geosite): kurallar geosite:whatsapp gibi kayıtları kullanır, dosya yoksa Xray hiç başlamaz.
-# Sırayla: GitHub'dan indir -> paket deposu -> sistemde zaten olan (xDivine-Ray vb.) dosyaları bağla.
+# Sırayla: GitHub'dan indir -> paket deposu -> sistemde zaten olan dosyaları bağla.
 geo_have() { local d; d=$(/usr/bin/kediray assetdir 2>/dev/null); [ -s "$d/geoip.dat" ] && [ -s "$d/geosite.dat" ]; }
 if ! geo_have; then
 	warn "geoip/geosite eksik, tamamlanıyor"

@@ -5,7 +5,7 @@
 CONF=kediray
 SHARE=/usr/share/kediray
 RUN=/var/etc/kediray
-# Soket işaretleri ve yönlendirme tabloları (xDivine'dan farklı değerler: ikisi aynı cihazda çakışmasın)
+# Soket işaretleri ve yönlendirme tabloları (başka transparan proxy'lerle çakışmasın diye özel değerler)
 MARK_CORE=0x2e0   # Xray'in kendi bağlantıları
 MARK_TP=0x2e1     # tproxy modu
 MARK_TUN=0x2e2    # mixed modda TUN'a gidecek UDP
@@ -98,7 +98,7 @@ with_lock() {
 }
 
 # ---------- sertifika sabitleme (Xray 26'da allowInsecure yerine) ----------
-# Sunucunun sunduğu sertifikayı al (doğrulama yapmadan) — xDivine-Ray'in fetch-cert yaklaşımı
+# Sunucunun sunduğu sertifikayı al (doğrulama yapmadan)
 run_to() { # <saniye> komut...  (busybox'ta timeout olmasa da çalışır)
 	local s="$1" p w rc
 	shift
@@ -116,7 +116,7 @@ cert_pem() { # ip port sni
 	echo | run_to "${KR_CERT_T:-8}" openssl s_client -connect "$1:$2" -servername "$3" 2>/dev/null | openssl x509 2>/dev/null
 }
 
-# Çekirdek allowInsecure'ü hâlâ tanıyor mu? (Xray 26'da kaldırıldı.) xDivine gibi gerçek bir testle öğrenilir.
+# Çekirdek allowInsecure'ü hâlâ tanıyor mu? (Xray 26'da kaldırıldı.) Gerçek bir testle öğrenilir.
 cap_insecure() {
 	local ver f
 	ver=$(core_ver)
@@ -161,7 +161,7 @@ pin_nodes() { # [force|<bölüm>]
 	local tag sec tp addr port proto net insecure sni pin name ip h changed=0 d pids="" n=0
 	[ -s "$RUN/nodes.tsv" ] || return 0
 	[ "$(uget main.pin_refresh)" = 0 ] && [ -z "$1" ] && return 0
-	# xDivine gibi: çekirdek allowInsecure'ü hâlâ destekliyorsa sabitlemeye gerek yok
+	# çekirdek allowInsecure'ü hâlâ destekliyorsa sabitlemeye gerek yok
 	[ -z "$1" ] && cap_insecure && return 0
 	# Ağ işi (adres çözme + sertifika okuma) sunucular için aynı anda yapılır (eskiden sırayla: ölü sunucu başına ~12 sn);
 	# otomatik yolda (her başlatma/kaydetme) sertifika okuma en çok 4 sn bekler. Sonuçlar aşağıda sırayla işlenir.
@@ -785,7 +785,7 @@ cmd_gen() {
 	KR_LAN_IFS="$(lan_ifs)" KR_SERVER_IPS="$ips" ucode "$SHARE/gen.uc" nft > "$RUN/rules.nft" || return 1
 	ucode "$SHARE/gen.uc" dnsmasq > "$RUN/dnsmasq.conf" || return 1
 	case "$cap" in mixed|tun)
-		# hev'in hangi anahtar adlarını tanıdığını ikili dosyadan oku (xDivine gibi)
+		# hev'in hangi anahtar adlarını tanıdığını ikili dosyadan oku
 		if grep -q 'tcp-read-write-timeout' "$(hevbin)" 2>/dev/null; then export KR_HEV_KEYS=split
 		elif grep -q 'read-write-timeout' "$(hevbin)" 2>/dev/null; then export KR_HEV_KEYS=single
 		else export KR_HEV_KEYS=split; fi
@@ -1045,7 +1045,7 @@ fw_down_real() {
 }
 
 # mixed mod: TUN aygıtı için güvenlik duvarı bölgesi. fw4 bölgesi olmayan aygıta iletilen paketi sessizce
-# düşürür; bölge yoksa bir kez oluşturulur ve çekirdekte gerçekten yüklendiği kontrol edilir (xDivine gibi).
+# düşürür; bölge yoksa bir kez oluşturulur ve çekirdekte gerçekten yüklendiği kontrol edilir.
 fw_zone() {
 	local lan_zone i name
 	nft list ruleset 2>/dev/null | grep -q "\"$TUN_DEV\"" && return 0
