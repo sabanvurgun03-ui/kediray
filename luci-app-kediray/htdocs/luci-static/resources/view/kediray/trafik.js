@@ -32,7 +32,7 @@ function fmtBytes(b) {
 	b = +b || 0;
 	const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
 	while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
-	return (i ? b.toFixed(1) : b) + ' ' + u[i];
+	return (i ? b.toFixed(1) : Math.round(b)) + ' ' + u[i];
 }
 function fmtRate(b) { return fmtBytes(b) + '/s'; }
 // süre: 3 gün 5 sa 22 dk · 5 sa 22 dk 10 sn · 14 dk 49 sn · 49 sn

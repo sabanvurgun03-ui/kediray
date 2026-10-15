@@ -49,7 +49,7 @@ function fmtBytes(b) {
 	b = +b || 0;
 	const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
 	while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
-	return (i ? b.toFixed(1) : b) + ' ' + u[i];
+	return (i ? b.toFixed(1) : Math.round(b)) + ' ' + u[i];
 }
 function fmtRate(b) { return fmtBytes(b) + '/s'; }
 // büyük sayı + küçük birim olarak ayrı verir: 12.81 · GB
@@ -372,33 +372,27 @@ const CSS = `
 .kr-card{transition:border-color .25s ease,box-shadow .25s ease}
 .kr-card:hover{box-shadow:0 2px 14px rgba(0,0,0,.14)}
 @media (prefers-reduced-motion:reduce){.kr-dot.kr-on,.kr-seg,.kr-seg button,.kr-tag{animation:none!important}.kr-cbody,.kr-cbody.kr-fold{transition:none}}
-.krl-band{--krl-g:#16a34a;--krl-b:#2f6fe0;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0 0 16px}
+.krl-band{--krl-g:#16a34a;--krl-b:#2f6fe0;display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px;margin:0 0 10px}
+@media (max-width:700px){.krl-info{grid-column:1/-1}}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-krt="light"]) .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}}
 :root[data-theme="dark"] .krl-band,:root[data-darkmode="true"] .krl-band,:root[data-krt="dark"] .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}
-.krl-tile{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;text-align:center;min-height:118px;padding:12px 14px 10px;border-radius:16px;border:1px solid rgba(128,128,128,.28);background:linear-gradient(160deg,rgba(128,128,128,.10),rgba(128,128,128,.02))}
-.krl-wide{grid-column:span 2}
+.krl-tile{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;text-align:center;min-height:88px;padding:7px 9px 6px;border-radius:12px;border:1px solid rgba(128,128,128,.28);background:linear-gradient(160deg,rgba(128,128,128,.10),rgba(128,128,128,.02))}
 .krl-down,.krl-sdown{--c:var(--krl-g)}.krl-up,.krl-sup{--c:var(--krl-b)}
 .krl-down,.krl-up,.krl-sdown,.krl-sup{border-color:color-mix(in srgb,var(--c) 55%,transparent)}
-.krl-spark{position:absolute;left:0;right:0;top:6px;height:38px;opacity:.95;pointer-events:none}
+.krl-spark{position:absolute;left:0;right:0;top:4px;height:26px;opacity:.95;pointer-events:none}
 .krl-svg{width:100%;height:100%;display:block}
 .krl-line{fill:none;stroke:var(--c);stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .krl-area{fill:var(--c);opacity:.14}
-.krl-val{margin-top:44px;font-variant-numeric:tabular-nums;color:var(--c);line-height:1.1;white-space:nowrap}
+.krl-val{margin-top:30px;font-variant-numeric:tabular-nums;color:var(--c);line-height:1.1;white-space:nowrap}
 .krl-sdown .krl-val,.krl-sup .krl-val,.krl-info .krl-val{margin-top:4px}
-.krl-num{font-size:1.9em;font-weight:700}
+.krl-num{font-size:1.45em;font-weight:700}
 .krl-unit{font-size:.95em;font-weight:600;margin-left:4px;opacity:.9}
-.krl-peak{margin-top:3px;font-size:.78em;opacity:.65;font-variant-numeric:tabular-nums}
-.krl-lbl{margin-top:8px;padding-top:6px;width:100%;border-top:1px solid rgba(128,128,128,.25);font-size:.74em;font-weight:600;letter-spacing:.09em;text-transform:uppercase;opacity:.75}
-.krl-sub{margin-top:5px;font-size:.8em;opacity:.8;font-variant-numeric:tabular-nums;line-height:1.5}
+.krl-peak{margin-top:1px;font-size:.72em;opacity:.65;font-variant-numeric:tabular-nums}
+.krl-lbl{margin-top:5px;padding-top:4px;width:100%;border-top:1px solid rgba(128,128,128,.25);font-size:.68em;font-weight:600;letter-spacing:.09em;text-transform:uppercase;opacity:.75}
+.krl-sub{margin-top:2px;font-size:.74em;opacity:.8;font-variant-numeric:tabular-nums;line-height:1.5}
 .krl-sub i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
-.krl-now{align-items:stretch;text-align:left;justify-content:center;gap:9px}
-.krl-nrow{display:flex;align-items:center;gap:10px;font-variant-numeric:tabular-nums;flex-wrap:wrap}
-.krl-nrow .krl-nn{font-weight:700;min-width:62px}
-.krl-nrow span.krl-nv{white-space:nowrap}
-.krl-nrow i{display:inline-block;width:10px;height:10px;border-radius:3px}
-.krl-nrow em{font-style:normal;opacity:.6;font-size:.88em;margin-right:3px}
-.krl-info .krl-val{font-size:1.15em;font-weight:700;color:inherit;margin-top:4px}
-.krl-bar{display:flex;width:100%;height:7px;margin-top:9px;border-radius:5px;overflow:hidden;background:rgba(128,128,128,.22)}
+.krl-info .krl-val{font-size:1.02em;font-weight:700;color:inherit;margin-top:4px}
+.krl-bar{display:flex;width:100%;height:6px;margin-top:6px;border-radius:5px;overflow:hidden;background:rgba(128,128,128,.22)}
 .krl-bar span{display:block;height:100%;transition:width .4s}
 `;
 
@@ -1604,21 +1598,12 @@ return view.extend({
 			lb[k + 'P'] = h('div', { 'class': 'krl-peak' }, 'Tepe: —');
 			return h('div', { 'class': 'krl-tile ' + cls }, [lb[k + 'S'], big(k), lb[k + 'P'], h('div', { 'class': 'krl-lbl' }, label)]);
 		};
-		const pair = (dot, name, k) => {
-			lb[k + 'D'] = h('span', {}, '0 B/s');
-			lb[k + 'U'] = h('span', {}, '0 B/s');
-			return h('div', { 'class': 'krl-nrow' }, [
-				h('i', { 'class': dot }), h('span', { 'class': 'krl-nn' }, name),
-				h('span', { 'class': 'krl-nv' }, [h('em', {}, '↓'), lb[k + 'D']]),
-				h('span', { 'class': 'krl-nv' }, [h('em', {}, '↑'), lb[k + 'U']])
-			]);
-		};
 		const sess = (k, cls, label) => {
 			lb[k + 'V'] = h('span', {}, '—');
 			lb[k + 'D'] = h('span', {}, '—');
 			return h('div', { 'class': 'krl-tile ' + cls }, [
 				big(k),
-				h('div', { 'class': 'krl-sub', 'style': 'margin-top:6px' }, [h('i', { 'class': 'krc-vpn' }), 'VPN ', lb[k + 'V']]),
+				h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, [h('i', { 'class': 'krc-vpn' }), 'VPN ', lb[k + 'V']]),
 				h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': 'krc-dir' }), 'Direkt ', lb[k + 'D']]),
 				h('div', { 'class': 'krl-lbl' }, label)
 			]);
@@ -1630,11 +1615,6 @@ return view.extend({
 		return h('div', { 'class': 'krl-band kr-traffic' }, [
 			speed('d', 'krl-down', 'İndirme'),
 			speed('u', 'krl-up', 'Yükleme'),
-			h('div', { 'class': 'krl-tile krl-now krl-wide' }, [
-				pair('krc-vpn', 'VPN', 'nv'),
-				pair('krc-dir', 'Direkt', 'nd'),
-				h('div', { 'class': 'krl-lbl' }, 'Şu an')
-			]),
 			sess('sd', 'krl-sdown', 'Oturum indirilen'),
 			sess('su', 'krl-sup', 'Oturum yüklenen'),
 			h('div', { 'class': 'krl-tile krl-info' }, [
@@ -1661,8 +1641,6 @@ return view.extend({
 		lb.uS.innerHTML = sparkSvg(lb.hu, N);
 		lb.dP.textContent = 'Tepe: ' + fmtRate(lb.pd);
 		lb.uP.textContent = 'Tepe: ' + fmtRate(lb.pu);
-		lb.nvD.textContent = fmtRate(r.vd); lb.nvU.textContent = fmtRate(r.vu);
-		lb.ndD.textContent = fmtRate(r.dd); lb.ndU.textContent = fmtRate(r.du);
 
 		// oturum toplamı (eski traffic.uc'de yoksa WAN sayaçlarından)
 		const c = s.counters;
