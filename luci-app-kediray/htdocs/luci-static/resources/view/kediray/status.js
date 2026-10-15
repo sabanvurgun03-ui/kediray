@@ -255,7 +255,6 @@ const CSS = `
 .kr-ch:hover{opacity:1}
 .kr-caret{font-size:.85em;opacity:.7;width:12px}
 .kr-ct{flex:1}
-.kr-cbody.kr-fold{display:none}
 .kr-blocked td{opacity:.75}
 .kr-big{font-size:1.35em;font-weight:600;margin:2px 0 6px;word-break:break-all}
 .kr-sub{opacity:.7;font-size:.9em}
@@ -343,6 +342,36 @@ const CSS = `
 .krt-table th.krt-n{text-align:right}
 .kr-warn{margin-top:10px;padding:8px 10px;border-radius:8px;background:rgba(230,160,20,.15);border:1px solid rgba(230,160,20,.45);font-size:.9em}
 @media(max-width:600px){.kr-hide-sm{display:none}}
+/* Efektler: yeşil nokta yanıp söner, mavi/yeşil/kırmızı seçili düğmeler parlar, kartlar yumuşakça açılıp kapanır */
+.kr-cbody{display:grid;grid-template-rows:1fr;opacity:1;transition:grid-template-rows .32s ease,opacity .26s ease}
+.kr-cbody.kr-fold{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .32s ease,opacity .2s ease,visibility 0s .32s}
+.kr-cin{min-height:0;overflow:hidden;padding:8px 14px;margin:-8px -14px}
+.kr-caret{display:inline-block;transition:transform .25s ease}
+.kr-dot{transition:background .3s}
+.kr-dot.kr-on{animation:krBlink 1.8s ease-in-out infinite}
+@keyframes krBlink{0%{opacity:1;box-shadow:0 0 0 0 rgba(34,163,85,.65)}50%{opacity:.45}70%{box-shadow:0 0 0 7px rgba(34,163,85,0)}100%{opacity:1;box-shadow:0 0 0 0 rgba(34,163,85,0)}}
+.kr-seg button{transition:background .22s ease,color .22s ease,box-shadow .22s ease}
+.kr-seg button:not(.kr-act):hover{background:rgba(128,128,128,.16)}
+.kr-seg button.kr-act:not(.kr-direct):not(.kr-block){animation:krGlowB 2.6s ease-in-out infinite}
+.kr-seg button.kr-act.kr-direct{animation:krGlowG 2.6s ease-in-out infinite}
+.kr-seg button.kr-act.kr-block{animation:krGlowR 2.6s ease-in-out infinite}
+.kr-seg:has(button.kr-act:not(.kr-direct):not(.kr-block):not(.kr-blockbtn)){animation:krRingB 2.6s ease-in-out infinite}
+.kr-seg:has(button.kr-act.kr-direct){animation:krRingG 2.6s ease-in-out infinite}
+.kr-seg:has(button.kr-act.kr-block){animation:krRingR 2.6s ease-in-out infinite}
+.kr-seg.kr-dim{animation:none!important}.kr-seg.kr-dim button{animation:none!important}
+@keyframes krGlowB{0%,100%{box-shadow:inset 0 0 6px rgba(255,255,255,.12)}50%{box-shadow:inset 0 0 14px rgba(255,255,255,.34)}}
+@keyframes krGlowG{0%,100%{box-shadow:inset 0 0 6px rgba(255,255,255,.12)}50%{box-shadow:inset 0 0 14px rgba(255,255,255,.34)}}
+@keyframes krGlowR{0%,100%{box-shadow:inset 0 0 6px rgba(255,255,255,.12)}50%{box-shadow:inset 0 0 14px rgba(255,255,255,.3)}}
+@keyframes krRingB{0%,100%{box-shadow:0 0 3px color-mix(in srgb,var(--kr-accent,#2a7de1) 30%,transparent)}50%{box-shadow:0 0 12px color-mix(in srgb,var(--kr-accent,#2a7de1) 70%,transparent)}}
+@keyframes krRingG{0%,100%{box-shadow:0 0 3px rgba(34,163,85,.3)}50%{box-shadow:0 0 12px rgba(34,163,85,.7)}}
+@keyframes krRingR{0%,100%{box-shadow:0 0 3px rgba(210,63,63,.3)}50%{box-shadow:0 0 12px rgba(210,63,63,.7)}}
+.kr-tag:not(.kr-tag-red){animation:krTag 2.4s ease-in-out infinite}
+@keyframes krTag{0%,100%{box-shadow:0 0 0 rgba(42,125,225,0)}50%{box-shadow:0 0 9px color-mix(in srgb,var(--kr-accent,#2a7de1) 65%,transparent)}}
+.kr-tabs button{transition:background .22s ease,color .22s ease}
+.kr-tabs button.kr-act{box-shadow:0 0 10px color-mix(in srgb,var(--kr-accent,#2a7de1) 55%,transparent)}
+.kr-card{transition:border-color .25s ease,box-shadow .25s ease}
+.kr-card:hover{box-shadow:0 2px 14px rgba(0,0,0,.14)}
+@media (prefers-reduced-motion:reduce){.kr-dot.kr-on,.kr-seg,.kr-seg button,.kr-tag{animation:none!important}.kr-cbody,.kr-cbody.kr-fold{transition:none}}
 .krl-band{--krl-g:#16a34a;--krl-b:#2f6fe0;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0 0 16px}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-krt="light"]) .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}}
 :root[data-theme="dark"] .krl-band,:root[data-darkmode="true"] .krl-band,:root[data-krt="dark"] .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}
@@ -560,7 +589,7 @@ return view.extend({
 	/* Kart: başlığa tıklayınca içerik katlanır (tercih tarayıcıda saklanır) */
 	card(el, key, title, children, right) {
 		const open = !collapsed(key);
-		const body = h('div', { 'class': 'kr-cbody' + (open ? '' : ' kr-fold') }, children);
+		const body = h('div', { 'class': 'kr-cbody' + (open ? '' : ' kr-fold') }, h('div', { 'class': 'kr-cin' }, children));
 		const cap = h('span', { 'class': 'kr-caret' }, open ? '▾' : '▸');
 		const head = h('h3', { 'class': 'kr-ch', 'title': 'Küçült / aç' }, [cap, h('span', { 'class': 'kr-ct' }, title), right || '']);
 		head.addEventListener('click', ev => {
@@ -575,7 +604,7 @@ return view.extend({
 	/* Kart içindeki bölüm: başlığa tıklayınca katlanır (tercih tarayıcıda saklanır) */
 	fold(key, title, content) {
 		const open = !collapsed(key);
-		const body = h('div', { 'class': 'kr-cbody' + (open ? '' : ' kr-fold') }, content);
+		const body = h('div', { 'class': 'kr-cbody' + (open ? '' : ' kr-fold') }, h('div', { 'class': 'kr-cin' }, content));
 		const cap = h('span', { 'class': 'kr-caret' }, open ? '▾' : '▸');
 		const head = h('div', { 'class': 'krc-title kr-ch', 'title': 'Küçült / aç' }, [cap, h('span', { 'class': 'kr-ct' }, title)]);
 		head.addEventListener('click', () => {
