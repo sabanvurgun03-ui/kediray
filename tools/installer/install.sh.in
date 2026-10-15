@@ -282,33 +282,34 @@ printf '%s\n' "$KR_VERSION" > /usr/share/kediray/version
 if [ -f /etc/config/kediray ]; then
 	ok "Mevcut ayarlar korundu (/etc/config/kediray)"
 	rm -f /tmp/kediray.default
-	# 1.4: bağlantı ayarları ölçülmüş varsayılanlara döner (bir kez)
+	# Eski sürümlerden (cfgver < 14) gelen ayarlar, güncel varsayılanlara bir kerede çekilir.
+	# Kullanıcının kendi seçtiği değerlere (özel DNS sunucusu, DNS modu vb.) dokunulmaz.
 	cv=$(uci -q get kediray.main.cfgver); cv=${cv:-0}
-	if [ "$cv" -lt 4 ] 2>/dev/null; then
-		# 1.4: bağlantı yolu (mixed) ve bildirim ayarları
+	if [ "$cv" -lt 14 ] 2>/dev/null; then
 		uci set kediray.main.capture="$CAPTURE"
 		uci set kediray.main.ws_heartbeat=0
 		uci set kediray.main.tcp_keepalive=0
 		uci set kediray.main.block_quic=1
-		[ "$(uci -q get kediray.main.dns_remote)" = "https://1.1.1.1/dns-query" ] && uci set kediray.main.dns_remote=tcp://1.1.1.1
-		[ "$(uci -q get kediray.main.dns_port)" = 5353 ] && uci set kediray.main.dns_port=15353
-		[ "$(uci -q get kediray.main.socks_port)" = 1080 ] && uci set kediray.main.socks_port=10808
-	fi
-	if [ "$cv" -lt 3 ] 2>/dev/null; then
 		uci set kediray.main.mux=0
 		uci set kediray.main.ws_early=0
-		uci set kediray.main.dns_mode=private
 		uci set kediray.main.sniff_override=0
 		ci=$(uci -q get kediray.main.conn_idle)
 		[ -z "$ci" ] || [ "$ci" -lt 14400 ] 2>/dev/null && uci set kediray.main.conn_idle=14400
-		uci commit kediray
-		ok "Bağlantı ayarları güncellendi (TCP mux kapalı, UDP/QUIC XUDP ile, DNS tünelden, hedef IP korunur)"
+		[ "$(uci -q get kediray.main.dns_port)" = 5353 ] && uci set kediray.main.dns_port=15353
+		[ "$(uci -q get kediray.main.socks_port)" = 1080 ] && uci set kediray.main.socks_port=10808
+		# DNS: dnsmasq -> çekirdek -> tünel (DoH); direkt DNS operatörün kendi sunucusu
+		case "$(uci -q get kediray.main.dns_mode)" in fast|private|"") uci set kediray.main.dns_mode=private ;; esac
+		case "$(uci -q get kediray.main.dns_remote)" in ""|tcp://*|1.1.1.1|8.8.8.8) uci set kediray.main.dns_remote='https://1.1.1.1/dns-query' ;; esac
+		case "$(uci -q get kediray.main.dns_direct)" in https*|"") uci set kediray.main.dns_direct=auto ;; esac
+		case "$(uci -q get kediray.main.dns_direct2)" in https*|"") uci set kediray.main.dns_direct2=auto ;; esac
+		[ -n "$(uci -q get kediray.main.dns_hijack)" ] || uci set kediray.main.dns_hijack=1
+		[ -n "$(uci -q get kediray.main.block_doh)" ] || uci set kediray.main.block_doh=1
+		[ -n "$(uci -q get kediray.main.mobile_tune)" ] || uci set kediray.main.mobile_tune=1
+		[ -n "$(uci -q get kediray.main.probe_url2)" ] || uci set kediray.main.probe_url2='https://cp.cloudflare.com/generate_204'
+		uci set kediray.main.cfgver=14; uci commit kediray
+		ok "Bağlantı ve DNS ayarları güncel varsayılanlara getirildi (yakalama: $CAPTURE)"
 	fi
-	if [ "$cv" -lt 4 ] 2>/dev/null; then
-		uci set kediray.main.cfgver=4; uci commit kediray
-		ok "Bağlantı yolu ayarlandı: $CAPTURE"
-	fi
-	# 1.5: Metin2 ışınlanma kopması - kanal portları tek aralık, Gameforge ağı ve komşu /24'ler direkt
+	# Metin2 ışınlanma kopması - kanal portları tek aralık, Gameforge ağı ve komşu /24'ler direkt
 	if [ "$cv" -lt 5 ] 2>/dev/null; then
 		if [ "$(uci -q get kediray.metin2)" = app ]; then
 			case "$(uci -q get kediray.metin2.ports)" in
@@ -318,76 +319,8 @@ if [ -f /etc/config/kediray ]; then
 			for d in domain:gameforge.io domain:gameforge.net; do
 				uci -q get kediray.metin2.domain | tr ' ' '\n' | grep -qx "$d" || uci add_list kediray.metin2.domain="$d"
 			done
+			uci commit kediray
 		fi
-		uci set kediray.main.cfgver=5; uci commit kediray
-		ok "Metin2: kanal portları 11000-13999, Gameforge ağı ve komşu sunucular direkt (ışınlanma kopması düzeltmesi)"
-	fi
-	# 1.6.2: direkt DNS için yedek (ilk DoH takılınca sorgu beklemesin)
-	if [ "$cv" -lt 6 ] 2>/dev/null; then
-		[ -n "$(uci -q get kediray.main.dns_direct2)" ] || uci set kediray.main.dns_direct2='https+local://8.8.8.8/dns-query'
-		uci set kediray.main.cfgver=6; uci commit kediray
-		ok "Direkt DNS için yedek sunucu eklendi (DoH takılınca sorgu 10 sn beklemiyor)"
-	fi
-	# 1.7: ping/sağlık ölçümü için yedek adres (biri engellenirse sunucu boşuna "düştü" sayılmasın)
-	if [ "$cv" -lt 7 ] 2>/dev/null; then
-		[ -n "$(uci -q get kediray.main.probe_url2)" ] || uci set kediray.main.probe_url2='https://cp.cloudflare.com/generate_204'
-		uci set kediray.main.cfgver=7; uci commit kediray
-		ok "Ölçüm adresine yedek eklendi (Cloudflare)"
-	fi
-	# 1.8: sayfa açılma gecikmesi düzeltmesi (ölçüldü: UDP girişinde sniffing oturum başına ~200 ms ekliyordu)
-	if [ "$cv" -lt 8 ] 2>/dev/null; then
-		[ -n "$(uci -q get kediray.main.dns_hijack)" ] || uci set kediray.main.dns_hijack=1
-		uci set kediray.main.cfgver=8; uci commit kediray
-		ok "DNS artık çekirdekte yönlendiriliyor; UDP girişinde içerik tanıma kapatıldı (sayfalar hızlanır)"
-	fi
-	# 1.9.1: DNS artık tünele bağımlı değil (tünel koparsa sayfa 50 sn dönüyordu)
-	if [ "$cv" -lt 9 ] 2>/dev/null; then
-		case "$(uci -q get kediray.main.dns_mode)" in private|"") uci set kediray.main.dns_mode=fast ;; esac
-		uci set kediray.main.cfgver=9; uci commit kediray
-		ok "DNS modu 'Direkt DoH' yapıldı: tünel bir an koparsa alan adları yine çözülür"
-	fi
-	# 1.10: direkt DNS artık operatörün kendi sunucusu.
-	# Ölçüldü: bazı hatlarda DoH adreslerine hiç ulaşılamıyor ve her sorgu saniyelerce bekliyor.
-	if [ "$cv" -lt 10 ] 2>/dev/null; then
-		case "$(uci -q get kediray.main.dns_direct)" in
-			https*|"") uci set kediray.main.dns_direct=auto ;;
-		esac
-		case "$(uci -q get kediray.main.dns_direct2)" in
-			https*|"") uci set kediray.main.dns_direct2=auto ;;
-		esac
-		uci set kediray.main.cfgver=10; uci commit kediray
-		ok "Direkt DNS: operatörün kendi sunucusu (DoH erişilemeyen hatlarda sayfa takılmaz)"
-	fi
-	# 1.12: DNS: dnsmasq -> çekirdek (15353) -> tünel, üst sunucu tcp://1.1.1.1.
-	# 1.9.1'de 'fast'a (direkt DoH) geçmiştik; varsayılan mod 'tünelden'.
-	if [ "$cv" -lt 12 ] 2>/dev/null; then
-		case "$(uci -q get kediray.main.dns_mode)" in fast|"") uci set kediray.main.dns_mode=private ;; esac
-		case "$(uci -q get kediray.main.dns_remote)" in ""|https*) uci set kediray.main.dns_remote='tcp://1.1.1.1' ;; esac
-		[ -n "$(uci -q get kediray.main.dns_hijack)" ] || uci set kediray.main.dns_hijack=1
-		uci set kediray.main.cfgver=12; uci commit kediray
-		ok "DNS modu: 'Tünelden' (dnsmasq -> çekirdek -> tünel)"
-	fi
-	# 1.13: tarayıcının kendi "Güvenli DNS"i (DoH) sistem DNS'ini atlıyor; bu hatta o adreslere
-	# ulaşılamadığı için sayfa başına 1-3 istek ~50 sn askıda kalıyordu. Reddedilince tarayıcı anında geri döner.
-	if [ "$cv" -lt 13 ] 2>/dev/null; then
-		[ -n "$(uci -q get kediray.main.block_doh)" ] || uci set kediray.main.block_doh=1
-		uci set kediray.main.cfgver=13; uci commit kediray
-		ok "Tarayıcıların kendi DoH'u engellendi (askıda kalan istekler biter)"
-	fi
-	# 1.14: uzak DNS artık DoH. Gerçek hatta doğrulandı: DNS-over-TCP kullanılırken tünelde tek bir
-	# bağlantı düşünce sorgu ölüyor ve sayfalar askıda kalıyordu; DoH'a geçince sorun bitti.
-	if [ "$cv" -lt 14 ] 2>/dev/null; then
-		case "$(uci -q get kediray.main.dns_remote)" in
-			tcp://*|""|1.1.1.1|8.8.8.8) uci set kediray.main.dns_remote='https://1.1.1.1/dns-query' ;;
-		esac
-		uci set kediray.main.cfgver=14; uci commit kediray
-		ok "Uzak DNS: Cloudflare DoH (tünelde bağlantı düşse de sorgu ölmez)"
-	fi
-	# 1.11: mobil hatta düşen SYN yüzünden istekler 50 sn askıda kalıyordu
-	if [ "$cv" -lt 11 ] 2>/dev/null; then
-		[ -n "$(uci -q get kediray.main.mobile_tune)" ] || uci set kediray.main.mobile_tune=1
-		uci set kediray.main.cfgver=11; uci commit kediray
-		ok "Mobil hat ayarı açıldı: takılan bağlantı 50 sn yerine ~15 sn'de bırakılır"
 	fi
 	# 1.19.3: "Direkt" seçilen cihaz/uygulama her durumda direkt çıksın (otomatik VPN'e çevirme bir kez kapatılır; panelden açılabilir)
 	if [ ! -f /etc/kediray.autodirect-off ]; then
