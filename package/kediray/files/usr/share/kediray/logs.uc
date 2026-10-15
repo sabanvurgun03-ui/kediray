@@ -130,10 +130,10 @@ function parse(msg, prio, t, id, ts) {
 		let dm = match(text, /(failed to dial to|dial tcp) (\[[0-9a-fA-F:]+\]|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):([0-9]+)/);
 		if (dm && !ACTIVE[dm[2] + ':' + dm[3]]) level = 'debug';
 	}
-	// Direkt çıkış yokken (paketsiz hat) direkt DNS (DoH) sorguları doğal olarak yanıtsız kalır: hata sayılmasın
+	// Direkt çıkış yokken (paketsiz hat) direkt DNS (DoH) sorguları doğal olarak yanıtsız kalır: günlüğe hiç alınmasın
 	if (DIRECT_DEAD && tag == 'xray' && (level == 'error' || level == 'warn')
 	    && match(text, /app\/dns.*Post "https:.*(context deadline exceeded|timeout)/))
-		level = 'debug';
+		return null;
 	let h = (level == 'error' || level == 'warn') ? hint(text) : null;
 	let shown = cut(tag == 'xray' ? summarize(text) : text, 400);
 	let ent = { id: id, t: t, level: level, comp: comp_of(tag, text), text: shown };
