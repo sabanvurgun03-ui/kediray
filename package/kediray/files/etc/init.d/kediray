@@ -11,8 +11,10 @@ RUN=/var/etc/kediray
 start_service() {
 	: > /tmp/kediray.started
 	lock /var/lock/kediray.start 2>/dev/null
+	: > /tmp/kediray.starting   # watchdog başlatma sürerken araya girmesin
 	_start_service
 	local rc=$?
+	rm -f /tmp/kediray.starting
 	lock -u /var/lock/kediray.start 2>/dev/null
 	return $rc
 }

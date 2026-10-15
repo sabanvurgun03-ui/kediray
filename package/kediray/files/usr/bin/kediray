@@ -75,9 +75,15 @@ resolve4() {
 		*[!0-9.]*) ;;
 		*) echo "$1"; return 0 ;;
 	esac
-	run_to 4 nslookup "$1" "$(uget main.dns_bootstrap || echo 1.1.1.1)" 2>/dev/null | awk '
+	# Yapılandırma üretimi sırasında (KR_RCACHE=1) aynı adres iki kez sorulmaz: direkt DNS çalışmayan hatta her sorgu 4 sn
+	# bekliyordu ve sertifika sabitleme + adres çözme aynı adresi arka arkaya soruyordu. Başarısız sonuç da (boş) hatırlanır.
+	local c="$RUN/rc/$1" r
+	if [ "${KR_RCACHE:-0}" = 1 ] && [ -e "$c" ]; then cat "$c"; return 0; fi
+	r=$(run_to 4 nslookup "$1" "$(uget main.dns_bootstrap || echo 1.1.1.1)" 2>/dev/null | awk '
 		/^Name:/ { f = 1 }
-		f && /^Address/ { for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { print $i; exit } }'
+		f && /^Address/ { for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { print $i; exit } }')
+	[ "${KR_RCACHE:-0}" = 1 ] && { mkdir -p "$RUN/rc"; echo "$r" > "$c"; }
+	echo "$r"
 }
 
 # procd, servis kayıtlı değilken (ilk kurulum, kapalıyken restart) stderr'e
@@ -842,9 +848,11 @@ cmd_gen() {
 	if [ "$(direct_state)" = dead ]; then export KR_DIRECT_DEAD=1; else export KR_DIRECT_DEAD=0; fi
 	ucode "$SHARE/gen.uc" nodes > "$RUN/nodes.tsv" 2>/dev/null
 	PIN_CHANGED=0
+	rm -rf "$RUN/rc"; mkdir -p "$RUN/rc"; export KR_RCACHE=1
 	pin_nodes
 	[ "$PIN_CHANGED" = 1 ] && ucode "$SHARE/gen.uc" nodes > "$RUN/nodes.tsv" 2>/dev/null   # sunucu listesi yalnızca sabitleme değiştiyse yeniden üretilir
 	resolve_all
+	unset KR_RCACHE; rm -rf "$RUN/rc"
 	ips=$(cat "$RUN/server_ips")
 
 	KR_RESOLVE="$(cat "$RUN/resolve" 2>/dev/null)" ucode "$SHARE/gen.uc" xray > "$RUN/config.new.json" 2> "$RUN/gen.err"
@@ -3036,6 +3044,9 @@ cmd_watchdog() {
 	fi
 	[ "$(uget main.enabled)" = 1 ] || return 0
 	[ -f /tmp/kediray.waiting ] && return 0   # açılışta WAN bekleniyor: müdahale etme
+	# Başlatma sürerken (yapılandırma üretimi birkaç sn) Xray henüz yok: "çalışmıyor" deyip ikinci bir yeniden başlatma
+	# tetikleme (süreyi ikiye katlıyordu)
+	[ -n "$(find /tmp/kediray.starting -mmin -1 2>/dev/null)" ] && return 0
 	# Modem açılırken cron, KediRay'in kendi açılış başlatması gelmeden watchdog'u çalıştırıyordu: "Xray çalışmıyor"
 	# deyip erken başlatıyor, sonra açılış betiği de başlatınca iki başlatma çarpışıyor (TUN aygıtı açılmıyor) ve
 	# VPN dakikalarca gecikiyordu. Açılış betiği ilk başlatmayı yapana kadar (en çok 10 dk) bekle.
