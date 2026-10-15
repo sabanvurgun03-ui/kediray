@@ -10,7 +10,7 @@ const SINCEF = RUN + '/log.since';
 const CMD = ARGV[0];
 const now_ms = () => time() * 1000;
 
-function out(x) { print(sprintf('%j\n', x)); }
+function out(x) { print(sprintf('%J\n', x)); }
 function readj(p, d) { try { let t = fs.readfile(p); return t ? json(t) : d; } catch (e) { return d; } }
 function writej(p, v) { fs.mkdir(RUN); fs.writefile(p + '.tmp', sprintf('%J', v)); fs.rename(p + '.tmp', p); }
 
@@ -130,11 +130,13 @@ function parse(msg, prio, t, id, ts) {
 		if (dm && !ACTIVE[dm[2] + ':' + dm[3]]) level = 'debug';
 	}
 	let h = (level == 'error' || level == 'warn') ? hint(text) : null;
-	let shown = cut(tag == 'xray' ? summarize(text) : text, 500);
-	let ent = { id: id, t: t, ts: ts, level: level, comp: comp_of(tag, text), text: shown,
-		title: h?.title, fix: h?.fix };
-	// raw yalnızca özetten farklıysa gönderilir (panel yoksa text'e düşer)
-	if (text != shown) ent.raw = cut(text, 800);
+	let shown = cut(tag == 'xray' ? summarize(text) : text, 400);
+	let ent = { id: id, t: t, level: level, comp: comp_of(tag, text), text: shown };
+	// boş alanlar ve özetle aynı olan raw gönderilmez (panel yoksa text'e düşer)
+	if (ts != null) ent.ts = ts;
+	if (h?.title) ent.title = h.title;
+	if (h?.fix) ent.fix = h.fix;
+	if (text != shown) ent.raw = cut(text, 600);
 	return ent;
 }
 
@@ -191,7 +193,12 @@ let stream = filter(ents, e => e.t == null || e.t > since);
 if (length(stream) > 300) stream = slice(stream, length(stream) - 300);
 // Eski (diskte kalmış) hata kayıtları da aynı sınırlara girsin
 for (let it in st.items) {
-	if (it.text != null) it.text = cut(it.text, 500);
-	if (it.raw != null) { if (it.raw == it.text) delete it.raw; else it.raw = cut(it.raw, 800); }
+	if (it.text != null) it.text = cut(it.text, 400);
+	if (it.raw != null) { if (it.raw == it.text) delete it.raw; else it.raw = cut(it.raw, 600); }
 }
-out({ now: now_ms(), since: since, entries: stream, errors: st.items });
+// rpcd file.exec yanıtı ~256 KB'ı aşarsa hata verir: çıktı çok büyürse eski satırları at (en yeniler kalır)
+let result = { now: now_ms(), since: since, entries: stream, errors: st.items };
+while (length(sprintf('%J', result)) > 120000 && length(result.entries) > 20) {
+	result.entries = slice(result.entries, int(length(result.entries) / 4));
+}
+out(result);
