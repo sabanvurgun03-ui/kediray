@@ -280,6 +280,9 @@ done
 chmod 644 "$KR_VD"/*.js 2>/dev/null
 chmod 755 /usr/share/kediray 2>/dev/null; chmod 644 /usr/share/kediray/*.uc 2>/dev/null
 printf '%s\n' "$KR_VERSION" > /usr/share/kediray/version
+# Kurulu kodun commit'i (yalnızca kediray update main bilir). Bilinmiyorsa eski denetim kayıtları da bayatlar: sil.
+if [ -n "$KR_BUILD" ]; then printf '%s\n' "$KR_BUILD" > /usr/share/kediray/build
+else rm -f /usr/share/kediray/build /tmp/kediray.upd.last /etc/kediray.upd.json; fi
 # KR_PURGE=1 (kediray reinstall --purge): ayarlar silinip baştan kurulur; önce yedek alınır (kediray restore <dosya>)
 if [ "$KR_PURGE" = 1 ] && [ -f /etc/config/kediray ]; then
 	KR_BK=/root/kediray-backup-$(date +%Y%m%d-%H%M%S).uci

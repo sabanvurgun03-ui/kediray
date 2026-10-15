@@ -99,7 +99,7 @@ return view.extend({
 			let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
 			const msg = document.getElementById('ka-upd-msg'), go = document.getElementById('ka-upd-go');
 			this.setLast(j);
-			if (j && j.ok && j.newer && msg && !msg.textContent) { msg.textContent = 'Yeni sürüm var: ' + j.current + ' → ' + j.latest; if (go) go.style.display = ''; }
+			if (j && j.ok && j.newer && msg && !msg.textContent) { msg.textContent = j.rev ? 'Aynı sürümde (' + j.current + ') depoda yeni değişiklikler var.' : 'Yeni sürüm var: ' + j.current + ' → ' + j.latest; if (go) go.style.display = ''; }
 		}).catch(() => null);
 	},
 
@@ -220,7 +220,7 @@ return view.extend({
 			if (!msg) return;
 			this.setLast(j);
 			if (!j || !j.ok) msg.textContent = 'Denetlenemedi: ' + ((j && j.error) || 'GitHub\'a ulaşılamadı') + '.';
-			else if (j.newer) { msg.textContent = 'Yeni sürüm var: ' + j.current + ' → ' + j.latest; if (go) go.style.display = ''; }
+			else if (j.newer) { msg.textContent = j.rev ? 'Aynı sürümde (' + j.current + ') depoda yeni değişiklikler var.' : 'Yeni sürüm var: ' + j.current + ' → ' + j.latest; if (go) go.style.display = ''; }
 			else msg.textContent = 'Güncelsin (' + j.current + ').';
 		}).catch(() => { if (msg) msg.textContent = 'Denetlenemedi: panel yanıt vermedi.'; });
 	},
@@ -271,7 +271,7 @@ return view.extend({
 	},
 
 	doOnline() {
-		return fs.exec(CLI, ['update', 'install']).catch(() => ({ code: 0, stdout: '' })).then(r => this.runUpdate(r));
+		return fs.exec(CLI, ['update', 'install']).catch(() => ({ code: 0, stdout: '' })).then(r => this.runUpdate(r, 30));
 	},
 
 	doUpdate(ev) {
@@ -286,7 +286,7 @@ return view.extend({
 		}).then(r => this.runUpdate(r));
 	},
 
-	runUpdate(r) {
+	runUpdate(r, grace) {   // grace: kurulum günlüğü henüz yokken kaç yoklama (2 sn) beklenir; depodan indirme uzun sürebilir
 		const TOTAL = 7;   // kurulumun ana adımları (==> satırları)
 		return Promise.resolve(r).then(r => {
 			if (!r) return;
@@ -321,7 +321,7 @@ return view.extend({
 				out.scrollTop = out.scrollHeight;
 				if (/^DONE/.test(st)) {
 					if (st === 'DONE 0') restarting();
-					else if (!seen && polls < 6) setTimeout(poll, 2000);   // henüz başlamadı: birkaç saniye bekle
+					else if (!seen && polls < (grace || 6)) setTimeout(poll, 2000);   // henüz başlamadı: birkaç saniye bekle
 					else { bar(Math.round(seen / TOTAL * 92), seen ? 'Kurulum hata ile bitti (kod ' + st.slice(5) + '). Ayrıntılı çıktıya bak.' : 'Güncelleme başlatılamadı. Ayrıntılı çıktıya bak.'); done.disabled = false; }
 				} else setTimeout(poll, 2000);
 			}).catch(() => {
