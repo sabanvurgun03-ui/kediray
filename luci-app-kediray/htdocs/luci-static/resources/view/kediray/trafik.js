@@ -377,6 +377,17 @@ const CSS = `
 .krl-bar{display:flex;width:100%;height:6px;margin-top:6px;border-radius:5px;overflow:hidden;background:rgba(128,128,128,.22)}
 .krl-bar span{display:block;height:100%;transition:width .4s}
 .krl-pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.krl-dgrid{grid-template-columns:repeat(auto-fill,minmax(215px,1fr))}
+.krl-dev{--c:var(--krl-g);align-items:stretch;justify-content:flex-start;text-align:left;padding:9px 11px 8px}
+.krl-dev .krl-spark{position:static;height:26px;margin:5px 0 2px}
+.krl-dname{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.krl-dip{font-size:.72em;opacity:.6;font-variant-numeric:tabular-nums}
+.krl-drates{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.krl-dr{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:700}
+.krl-dr small{font-size:.62em;font-weight:600;opacity:.75;margin-left:2px}
+.krl-dr.d{color:var(--krl-g)}.krl-dr.u{color:var(--krl-b)}
+.krl-dtoday{margin-top:5px;font-size:.74em;opacity:.85;font-variant-numeric:tabular-nums;display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap}
+.krl-bar .krl-fill{background:var(--c)}
 `;
 
 // Tarayıcıda saklanan eski menüyü (Hizmetler altındaki kayıt) bir kez temizle
@@ -1475,17 +1486,19 @@ return view.extend({
 	/* Cihaz bazında trafik: indirme = cihaza gelen, yükleme = cihazdan giden (nft sayaçları, LAN IP'si başına).
 	   Canlı hız, iki yoklama arasındaki sayaç farkından hesaplanır. */
 	renderDevTraffic(devs, t, others) {
-		const prev = this.devPrev || {}, next = {};
+		const prev = this.devPrev || {}, next = {}, oldHist = this.devHist || {}, hist = {};
 		if (!devs.length) {
 			dom.content(this.elDevTr, h('div', { 'class': 'kr-sub' }, 'Henüz cihaz verisi yok; sayaçlar başladıktan 1-2 dakika sonra dolar.'));
-			this.devPrev = next;
+			this.devPrev = next; this.devHist = hist;
 			return;
 		}
 		let sdd = 0, sdu = 0, srx = 0, stx = 0, mrx = 0, mtx = 0, trx = 0, ttx = 0;
 		if (others && others.n) {   // ağdan ayrılmış cihazlar listede yok, ama toplamlara dahil
 			srx += others.today.rx; stx += others.today.tx; mrx += others.month.rx; mtx += others.month.tx; trx += others.total.rx; ttx += others.total.tx;
 		}
-		const rows = devs.map(dv => {
+		const hide = (() => { try { return localStorage.getItem('kr_hide_ids') === '1'; } catch (e) { return false; } })();
+		const maskIp = ip => (hide && /^\d+\.\d+\.\d+\.\d+$/.test(ip)) ? '•••.•••.•••.' + ip.split('.')[3] : ip;
+		const list = devs.map(dv => {
 			let dd = 0, du = 0;
 			const c = dv.counter, p = prev[dv.ip];
 			if (c) {
@@ -1495,31 +1508,62 @@ return view.extend({
 				}
 				next[dv.ip] = { t: t, rx: c.rx, tx: c.tx };
 			}
+			const hs = (oldHist[dv.ip] || []).concat([dd + du]);
+			if (hs.length > LIVE_N) hs.shift();
+			hist[dv.ip] = hs;
 			sdd += dd; sdu += du;
 			srx += dv.today.rx; stx += dv.today.tx; mrx += dv.month.rx; mtx += dv.month.tx; trx += dv.total.rx; ttx += dv.total.tx;
-			return h('tr', { 'class': 'tr' }, [
-				h('td', { 'class': 'td' }, [h('b', {}, dv.name || dv.ip), dv.name ? h('div', { 'class': 'kr-sub' }, dv.ip) : '']),
-				h('td', { 'class': 'td krt-n' }, '↓ ' + fmtRate(dd) + '  ↑ ' + fmtRate(du)),
-				h('td', { 'class': 'td krt-n', 'title': 'Toplam (kurulumdan beri): ' + fmtBytes(dv.total.rx + dv.total.tx) + ' · Bu ay: ' + fmtBytes(dv.month.rx + dv.month.tx) }, '↓ ' + fmtBytes(dv.today.rx) + '  ↑ ' + fmtBytes(dv.today.tx))
+			return { dv, dd, du, hs };
+		});
+		this.devPrev = next; this.devHist = hist;
+		const todayAll = Math.max(1, srx + stx);
+		list.sort((x, y) => (y.dv.today.rx + y.dv.today.tx) - (x.dv.today.rx + x.dv.today.tx));
+
+		const rate = v => { const q = fmtParts(v); return [q[0], q[1] + '/s']; };
+		const sumTile = (cls, label, v, subTxt) => {
+			const q = fmtParts(v);
+			return h('div', { 'class': 'krl-tile ' + cls }, [
+				h('div', { 'class': 'krl-val' }, [h('span', { 'class': 'krl-num' }, q[0]), h('span', { 'class': 'krl-unit' }, q[1])]),
+				subTxt ? h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, subTxt) : '',
+				h('div', { 'class': 'krl-lbl' }, label)
+			]);
+		};
+		const rateTile = (cls, label, v) => {
+			const q = rate(v);
+			return h('div', { 'class': 'krl-tile ' + cls }, [
+				h('div', { 'class': 'krl-val', 'style': 'margin-top:4px' }, [h('span', { 'class': 'krl-num' }, q[0]), h('span', { 'class': 'krl-unit' }, q[1])]),
+				h('div', { 'class': 'krl-lbl' }, label)
+			]);
+		};
+		const summary = h('div', { 'class': 'krl-band kr-traffic' }, [
+			rateTile('krl-down', 'Şu an indirme (' + devs.length + ' cihaz)', sdd),
+			rateTile('krl-up', 'Şu an yükleme', sdu),
+			sumTile('krl-per', 'Bugün', srx + stx, '↓ ' + fmtBytes(srx) + ' · ↑ ' + fmtBytes(stx)),
+			sumTile('krl-per', 'Bu ay', mrx + mtx, '↓ ' + fmtBytes(mrx) + ' · ↑ ' + fmtBytes(mtx)),
+			sumTile('krl-per', 'Toplam', trx + ttx, '↓ ' + fmtBytes(trx) + ' · ↑ ' + fmtBytes(ttx))
+		]);
+
+		const cards = list.map(({ dv, dd, du, hs }) => {
+			const dtot = dv.today.rx + dv.today.tx, pct = Math.min(100, Math.round(dtot / todayAll * 100));
+			const a = rate(dd), b = rate(du);
+			const sp = h('div', { 'class': 'krl-spark' });
+			sp.innerHTML = sparkSvg(hs, LIVE_N);   // yalnızca sayılardan üretilen SVG
+			return h('div', { 'class': 'krl-tile krl-dev', 'title': 'Bu ay: ' + fmtBytes(dv.month.rx + dv.month.tx) + ' · Toplam (kurulumdan beri): ' + fmtBytes(dv.total.rx + dv.total.tx) }, [
+				h('div', { 'class': 'krl-dname' }, dv.name || maskIp(dv.ip)),
+				dv.name ? h('div', { 'class': 'krl-dip' }, maskIp(dv.ip)) : '',
+				sp,
+				h('div', { 'class': 'krl-drates' }, [
+					h('div', { 'class': 'krl-dr d' }, ['↓ ' + a[0], h('small', {}, a[1])]),
+					h('div', { 'class': 'krl-dr u' }, ['↑ ' + b[0], h('small', {}, b[1])])
+				]),
+				h('div', { 'class': 'krl-bar' }, h('span', { 'class': 'krl-fill', 'style': 'width:' + pct + '%' })),
+				h('div', { 'class': 'krl-dtoday' }, [h('span', {}, 'Bugün ↓ ' + fmtBytes(dv.today.rx) + ' ↑ ' + fmtBytes(dv.today.tx)), h('span', {}, '%' + pct)])
 			]);
 		});
-		this.devPrev = next;
 		dom.content(this.elDevTr, [
-			h('table', { 'class': 'table kr-table krt-table' }, [
-				h('tr', { 'class': 'tr table-titles' }, [
-					h('th', { 'class': 'th' }, 'Cihaz'),
-					h('th', { 'class': 'th krt-n' }, 'Şu an'),
-					h('th', { 'class': 'th krt-n' }, 'Bugün')
-				]),
-				...rows,
-				h('tr', { 'class': 'tr kr-active' }, [
-					h('td', { 'class': 'td' }, [h('b', {}, 'Tüm cihazlar (' + devs.length + ')'),
-						h('div', { 'class': 'kr-sub' }, 'Bu ay ↓ ' + fmtBytes(mrx) + ' ↑ ' + fmtBytes(mtx) + ' · Toplam ↓ ' + fmtBytes(trx) + ' ↑ ' + fmtBytes(ttx))]),
-					h('td', { 'class': 'td krt-n' }, h('b', {}, '↓ ' + fmtRate(sdd) + '  ↑ ' + fmtRate(sdu))),
-					h('td', { 'class': 'td krt-n' }, h('b', {}, '↓ ' + fmtBytes(srx) + '  ↑ ' + fmtBytes(stx)))
-				])
-			]),
-			h('div', { 'class': 'kr-sub', 'style': 'margin-top:6px' }, '↓ cihaza gelen (indirme), ↑ cihazdan giden (yükleme). VPN ve direkt trafik birlikte sayılır. Sayaçlar modem yeniden başlasa da saklanır; donanım hızlandırma (NSS) açıksa direkt giden büyük akışlar eksik görünebilir.')
+			summary,
+			h('div', { 'class': 'krl-band krl-dgrid kr-traffic' }, cards),
+			h('div', { 'class': 'kr-sub', 'style': 'margin-top:6px' }, '↓ cihaza gelen (indirme), ↑ cihazdan giden (yükleme). Çubuk, cihazın bugünkü payı. VPN ve direkt trafik birlikte sayılır. Sayaçlar modem yeniden başlasa da saklanır; donanım hızlandırma (NSS) açıksa direkt giden büyük akışlar eksik görünebilir.')
 		]);
 	},
 
