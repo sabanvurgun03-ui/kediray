@@ -35,6 +35,12 @@ function fmtBytes(b) {
 	return (i ? b.toFixed(1) : Math.round(b)) + ' ' + u[i];
 }
 function fmtRate(b) { return fmtBytes(b) + '/s'; }
+const CH = {   // grafik görünümleri: a = alttaki, b = üstteki parça
+	vd: { a: 'VPN', b: 'Direkt', ca: 'krc-vpn', cb: 'krc-dir', fa: x => x.vr + x.vt, fb: x => x.dr + x.dt },
+	io: { a: 'İndirme', b: 'Yükleme', ca: 'krc-dl', cb: 'krc-ul', fa: x => x.vr + x.dr, fb: x => x.vt + x.dt }
+};
+const GUN = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
+function gunAd(day) { const d = new Date(day + 'T12:00:00'); return (isNaN(d) ? '' : GUN[d.getDay()] + ' ') + day.slice(8) + '.' + day.slice(5, 7); }
 const LIVE_N = 60;   // canlı hız çizgisinde tutulan örnek sayısı (2 sn aralıkla ≈ 2 dk)
 // büyük sayı + küçük birim olarak ayrı verir: 12.81 · GB
 function fmtParts(b) {
@@ -388,6 +394,22 @@ const CSS = `
 .krl-dr.d{color:var(--krl-g)}.krl-dr.u{color:var(--krl-b)}
 .krl-dtoday{margin-top:5px;font-size:.74em;opacity:.85;font-variant-numeric:tabular-nums;display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap}
 .krl-bar .krl-fill{background:var(--c)}
+.kr-traffic{--krl-g:#16a34a;--krl-b:#2f6fe0}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-krt="light"]) .kr-traffic{--krl-g:#4ade80;--krl-b:#60a5fa}}
+:root[data-theme="dark"] .kr-traffic,:root[data-darkmode="true"] .kr-traffic,:root[data-krt="dark"] .kr-traffic{--krl-g:#4ade80;--krl-b:#60a5fa}
+.krc-dl{fill:var(--krl-g);background:var(--krl-g)}
+.krc-ul{fill:var(--krl-b);background:var(--krl-b)}
+.krc-bar{opacity:.85;transition:opacity .2s}
+.krc-today{opacity:1}
+.krc-avg{stroke:currentColor;stroke-opacity:.55;stroke-width:1;stroke-dasharray:4 4;pointer-events:none}
+.krc-avgt{fill:currentColor;opacity:.7;font-size:10.5px;pointer-events:none}
+.krc-axb{font-weight:700;opacity:1}
+.krc-hit.krc-sel{fill:rgba(128,128,128,.18)}
+.krc-ctl{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 8px}
+.krc-info{margin-top:8px;padding:8px 12px;border-radius:12px;border:1px solid rgba(128,128,128,.28);background:linear-gradient(160deg,rgba(128,128,128,.10),rgba(128,128,128,.02));display:flex;gap:6px 16px;flex-wrap:wrap;align-items:center;font-variant-numeric:tabular-nums;font-size:.92em}
+@keyframes krGrow{from{transform:scaleY(0)}to{transform:none}}
+.krc-anim .krc-bar{transform-box:fill-box;transform-origin:50% 100%;animation:krGrow .55s cubic-bezier(.2,.8,.2,1) both}
+@media (prefers-reduced-motion:reduce){.krc-anim .krc-bar{animation:none}}
 `;
 
 // Tarayıcıda saklanan eski menüyü (Hizmetler altındaki kayıt) bir kez temizle
@@ -1262,7 +1284,7 @@ return view.extend({
 	   Kaynak: `kediray stats` = { t, counters:{vr,vt,wr,wt}, today, yesterday, week, month, total, since, days:[{day,vr,vt,dr,dt}] }
 	   vr/vt = VPN indirme/yükleme (tünelin dış baytları), dr/dt = Direkt = WAN toplamı − VPN. */
 	/* Düzen: hangi bölüm görünsün, hangi sırada, hangi dönem satırları. Tarayıcıda saklanır. */
-	secTitles: { live: 'Şu an + toplamlar', periods: 'Dönemler (Bugün / Dün / Hafta / Ay)', devs: 'Cihaz bazında trafik', chart: 'Son 30 gün grafiği' },
+	secTitles: { live: 'Şu an + toplamlar', periods: 'Dönemler (Bugün / Dün / Hafta / Ay)', devs: 'Cihaz bazında trafik', chart: 'Günlük trafik grafiği' },
 	rowTitles: { today: 'Bugün', yesterday: 'Dün', week: 'Bu hafta', month: 'Bu ay', total: 'Toplam' },
 	loadLayout() {
 		const def = { order: ['live', 'periods', 'devs', 'chart'], hide: {}, hideRows: {} };
@@ -1333,15 +1355,30 @@ return view.extend({
 		return r;
 	},
 
-	trafficChart(days) {
-		const W = Math.max(280, Math.min(1100, this.elChart.clientWidth || 700)), H = 170;
-		const L = 46, R = 8, T = 10, B = 24, pw = W - L - R, ph = H - T - B;
+	chartState() {
+		if (!this.cs) {
+			let c = null;
+			try { c = JSON.parse(localStorage.getItem('kediray-trafik-chart') || 'null'); } catch (e) {}
+			this.cs = { mode: c && c.mode === 'io' ? 'io' : 'vd', range: c && +c.range === 7 ? 7 : 30, sel: null, anim: true };
+		}
+		return this.cs;
+	},
+	chartSave() {
+		const cs = this.cs;
+		try { localStorage.setItem('kediray-trafik-chart', JSON.stringify({ mode: cs.mode, range: cs.range })); } catch (e) {}
+	},
+
+	trafficChart(days, sel) {
+		const cs = this.chartState(), M = CH[cs.mode];
+		const W = Math.max(280, Math.min(1100, this.elChart.clientWidth || 700)), H = 190;
+		const L = 46, R = 8, T = 12, B = 24, pw = W - L - R, ph = H - T - B;
 		const n = days.length, slot = pw / n, bw = Math.min(24, Math.max(4, slot - 4));
-		const tot = days.map(x => x.vr + x.vt + x.dr + x.dt);
+		const tot = days.map(x => M.fa(x) + M.fb(x));
 		const max = Math.max(1, ...tot);
 		// "güzel" üst sınır: 1/2/5 × 10^k
 		const pow = Math.pow(10, Math.floor(Math.log10(max))), top = [1, 2, 5, 10].map(m => m * pow).find(v => v >= max);
 		const y = v => T + ph - (v / top) * ph;
+		const avg = tot.reduce((p, v) => p + v, 0) / n;
 		let g = '';
 		for (let i = 0; i <= 4; i++) {
 			const v = top * i / 4, yy = y(v).toFixed(1);
@@ -1351,20 +1388,81 @@ return view.extend({
 		let bars = '';
 		days.forEach((x, i) => {
 			const cx = L + slot * i + slot / 2, x0 = (cx - bw / 2).toFixed(1);
-			const vpn = x.vr + x.vt, dir = x.dr + x.dt;
-			const hv = vpn > 0 ? Math.max(1, (vpn / top) * ph) : 0, hd = dir > 0 ? Math.max(1, (dir / top) * ph) : 0;
-			const base = T + ph;
-			// alt: VPN, üst: Direkt; en üstteki parçanın ucu 4px yuvarlak, taban düz; ikisi arasında 2px yüzey boşluğu
+			const va = M.fa(x), vb = M.fb(x);
+			const hv = va > 0 ? Math.max(1, (va / top) * ph) : 0, hd = vb > 0 ? Math.max(1, (vb / top) * ph) : 0;
+			const base = T + ph, today = i === n - 1 ? ' krc-today' : '';
+			const st = ' style="animation-delay:' + Math.round(i * 600 / n) + 'ms"';
+			// alt: a, üst: b; en üstteki parçanın ucu 4px yuvarlak, taban düz; ikisi arasında 2px yüzey boşluğu
 			const gap = hv > 0 && hd > 2 ? 2 : 0;
-			if (hv > 0) bars += hd > 0 ? '<rect x="' + x0 + '" y="' + (base - hv).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + hv.toFixed(1) + '" class="krc-vpn"/>'
-				: '<path d="' + roundTop(+x0, base - hv, bw, hv, 4) + '" class="krc-vpn"/>';
-			if (hd > 0) bars += '<path d="' + roundTop(+x0, base - hv - hd, bw, hd - gap, 4) + '" class="krc-dir"/>';
-			// gezinme hedefi: sütunun tamamı
-			bars += '<rect x="' + (L + slot * i).toFixed(1) + '" y="' + T + '" width="' + slot.toFixed(1) + '" height="' + ph + '" class="krc-hit" data-i="' + i + '"/>';
+			if (hv > 0) bars += hd > 0 ? '<rect x="' + x0 + '" y="' + (base - hv).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + hv.toFixed(1) + '" class="krc-bar ' + M.ca + today + '"' + st + '/>'
+				: '<path d="' + roundTop(+x0, base - hv, bw, hv, 4) + '" class="krc-bar ' + M.ca + today + '"' + st + '/>';
+			if (hd > 0) bars += '<path d="' + roundTop(+x0, base - hv - hd, bw, hd - gap, 4) + '" class="krc-bar ' + M.cb + today + '"' + st + '/>';
+			// gezinme/dokunma hedefi: sütunun tamamı (seçili gün vurgulu)
+			bars += '<rect x="' + (L + slot * i).toFixed(1) + '" y="' + T + '" width="' + slot.toFixed(1) + '" height="' + ph + '" class="krc-hit' + (i === sel ? ' krc-sel' : '') + '" data-i="' + i + '"/>';
 			if (i % Math.ceil(n / (W < 500 ? 5 : 10)) === 0 || i === n - 1)
-				bars += '<text x="' + cx.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" class="krc-ax">' + x.day.slice(8) + '.' + x.day.slice(5, 7) + '</text>';
+				bars += '<text x="' + cx.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" class="krc-ax' + (i === n - 1 ? ' krc-axb' : '') + '">' + x.day.slice(8) + '.' + x.day.slice(5, 7) + '</text>';
 		});
-		return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" class="krc-svg" role="img" aria-label="Son 30 gün trafik (VPN ve Direkt)">' + g + bars + '</svg>';
+		// günlük ortalama (kesikli çizgi)
+		const ya = y(avg).toFixed(1);
+		bars += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + ya + '" y2="' + ya + '" class="krc-avg"/>' +
+			'<text x="' + (W - R - 2) + '" y="' + (+ya - 4) + '" text-anchor="end" class="krc-avgt">ort. ' + fmtBytes(avg) + '</text>';
+		return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" class="krc-svg' + (cs.anim ? ' krc-anim' : '') + '" role="img" aria-label="Günlük trafik (' + M.a + ' ve ' + M.b + ')">' + g + bars + '</svg>';
+	},
+
+	chartDays() {
+		const cs = this.chartState(), all = this.days || [];
+		return all.slice(-cs.range);
+	},
+	chartSel(n) {
+		const cs = this.chartState();
+		return (cs.sel == null || cs.sel >= n) ? n - 1 : cs.sel;
+	},
+
+	/* Grafiğin üstündeki özet kutuları (seçili süre ve görünüm için) */
+	renderChartSummary() {
+		const cs = this.chartState(), M = CH[cs.mode], days = this.chartDays(), n = days.length;
+		if (!n) return;
+		const A = days.reduce((p, x) => p + M.fa(x), 0), Bv = days.reduce((p, x) => p + M.fb(x), 0), all = A + Bv, avg = all / n;
+		let mx = days[0], mxv = -1;
+		days.forEach(x => { const v = M.fa(x) + M.fb(x); if (v > mxv) { mxv = v; mx = x; } });
+		const last = days[n - 1], lv = M.fa(last) + M.fb(last);
+		const pv = all > 0 ? Math.round(A / all * 100) : 0;
+		const big = v => { const q = fmtParts(v); return h('div', { 'class': 'krl-val' }, [h('span', { 'class': 'krl-num' }, q[0]), h('span', { 'class': 'krl-unit' }, q[1])]); };
+		const dot = (cls, txt) => h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': cls }), txt]);
+		dom.content(this.elChartTiles, h('div', { 'class': 'krl-band' }, [
+			h('div', { 'class': 'krl-tile krl-per' }, [big(all), dot(M.ca, M.a + ' ' + fmtBytes(A)), dot(M.cb, M.b + ' ' + fmtBytes(Bv)),
+				h('div', { 'class': 'krl-bar' }, [h('span', { 'class': M.ca, 'style': 'width:' + (all > 0 ? pv : 0) + '%' }), h('span', { 'class': M.cb, 'style': 'width:' + (all > 0 ? 100 - pv : 0) + '%' })]),
+				h('div', { 'class': 'krl-lbl' }, 'Son ' + n + ' gün toplam')]),
+			h('div', { 'class': 'krl-tile krl-per' }, [big(avg), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'bugün ortalamanın %' + (avg > 0 ? Math.round(lv / avg * 100) : 0) + '\'i'), h('div', { 'class': 'krl-lbl' }, 'Günlük ortalama')]),
+			h('div', { 'class': 'krl-tile krl-per' }, [big(Math.max(0, mxv)), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, gunAd(mx.day)), h('div', { 'class': 'krl-lbl' }, 'En yoğun gün')]),
+			h('div', { 'class': 'krl-tile krl-per' }, [big(lv), dot(M.ca, M.a + ' ' + fmtBytes(M.fa(last))), dot(M.cb, M.b + ' ' + fmtBytes(M.fb(last))), h('div', { 'class': 'krl-lbl' }, 'Bugün')])
+		]));
+	},
+
+	/* Çubuk grafik + seçili günün bilgi satırı + düğmelerin durumu */
+	renderChartBody() {
+		const cs = this.chartState(), M = CH[cs.mode], days = this.chartDays(), n = days.length;
+		if (!n) return;
+		const sel = this.chartSel(n), x = days[sel];
+		this.elSvg.innerHTML = this.trafficChart(days, sel);   // yalnızca sayılardan üretilen SVG
+		cs.anim = false;
+		dom.content(this.elLegend, [h('span', {}, [h('i', { 'class': 'krc-sw ' + M.ca }), M.a]), h('span', {}, [h('i', { 'class': 'krc-sw ' + M.cb }), M.b])]);
+		dom.content(this.elChartInfo, [
+			h('b', {}, gunAd(x.day)),
+			h('span', {}, [h('i', { 'class': 'krc-sw ' + M.ca }), M.a + ' ' + fmtBytes(M.fa(x))]),
+			h('span', {}, [h('i', { 'class': 'krc-sw ' + M.cb }), M.b + ' ' + fmtBytes(M.fb(x))]),
+			h('span', { 'class': 'kr-sub' }, 'Toplam ' + fmtBytes(M.fa(x) + M.fb(x)))
+		]);
+		Object.keys(this.segB).forEach(k => this.segB[k].classList.toggle('kr-act', k === cs.mode || k === String(cs.range)));
+	},
+
+	chartPick(ev) {
+		const t = ev.target && ev.target.closest ? ev.target.closest('[data-i]') : null;
+		if (!t || !this.days) return;
+		const cs = this.chartState(), n = this.chartDays().length, i = +t.getAttribute('data-i');
+		if (i === this.chartSel(n)) return;
+		cs.sel = i;
+		this.renderChartBody();
 	},
 
 	/* Canlı şerit: anlık hız (çizgili) + VPN/Direkt ayrımı, toplam kutuları. Ana sayfadaki şeritle aynı tasarım. */
@@ -1423,23 +1521,33 @@ return view.extend({
 			this.elPeriods = h('div', {});
 			this.elDevTr = h('div', {});
 			this.elChart = h('div', { 'class': 'krc-wrap' });
-			this.elTip = h('div', { 'class': 'krc-tip', 'style': 'display:none' });
-			this.elChart.appendChild(this.elTip);
 			this.elSvg = h('div', {});
-			this.elChart.insertBefore(this.elSvg, this.elTip);
-			this.elChart.addEventListener('mousemove', ev => this.trafficHover(ev));
-			this.elChart.addEventListener('mouseleave', () => { this.elTip.style.display = 'none'; });
-			this.elChart.addEventListener('click', ev => this.trafficHover(ev));
+			this.elChart.appendChild(this.elSvg);
+			this.elChart.addEventListener('mousemove', ev => this.chartPick(ev));
+			this.elChart.addEventListener('click', ev => this.chartPick(ev));
+			this.elChartTiles = h('div', {});
+			this.elChartInfo = h('div', { 'class': 'krc-info' });
+			this.elLegend = h('div', { 'class': 'krc-legend' });
+			const cs = this.chartState();
+			this.segB = {};
+			const segment = (defs, set) => h('div', { 'class': 'kr-seg kr-seg-sm' }, defs.map(d => {
+				const bt = h('button', { 'class': 'btn', 'click': () => set(d[0]) }, d[1]);
+				this.segB[String(d[0])] = bt;
+				return bt;
+			}));
+			const again = () => { cs.anim = true; this.chartSave(); this.renderChartSummary(); this.renderChartBody(); };
+			const modeSeg = segment([['vd', 'VPN / Direkt'], ['io', 'İndirme / Yükleme']], k => { cs.mode = k; again(); });
+			const rangeSeg = segment([[7, '7 gün'], [30, '30 gün']], k => { cs.range = +k; cs.sel = null; again(); });
 			this.secs = {
 				live: this.elLive,
 				periods: this.fold('t-periods', 'Bugün / Dün / Bu hafta / Bu ay / Toplam', this.elPeriods),
 				devs: this.fold('t-devs', 'Cihaz bazında trafik', this.elDevTr),
-				chart: this.fold('t-chart', 'Son 30 gün (günlük)', h('div', {}, [
-					h('div', { 'class': 'krc-legend' }, [
-						h('span', {}, [h('i', { 'class': 'krc-sw krc-vpn' }), 'VPN']),
-						h('span', {}, [h('i', { 'class': 'krc-sw krc-dir' }), 'Direkt'])
-					]),
-					this.elChart
+				chart: this.fold('t-chart', 'Günlük trafik', h('div', {}, [
+					this.elChartTiles,
+					h('div', { 'class': 'krc-ctl' }, [modeSeg, rangeSeg]),
+					this.elLegend,
+					this.elChart,
+					this.elChartInfo
 				]))
 			};
 			this.elSecs = h('div', {});
@@ -1474,12 +1582,13 @@ return view.extend({
 
 		this.renderDevTraffic(s.devices || [], s.t, s.others);
 
-		// grafik yalnızca veri ya da genişlik değişince yeniden çizilir (gezinme/ipucu titremesin)
+		// grafik yalnızca veri ya da genişlik değişince yeniden çizilir (gezinme titremesin)
 		const sig = JSON.stringify(s.days) + '|' + (this.elChart.clientWidth || 0);
 		if (sig !== this.chartSig) {
 			this.chartSig = sig;
 			this.days = s.days;
-			this.elSvg.innerHTML = this.trafficChart(s.days);   // yalnızca sayılardan üretilen SVG
+			this.renderChartSummary();
+			this.renderChartBody();
 		}
 	},
 
@@ -1565,26 +1674,6 @@ return view.extend({
 			h('div', { 'class': 'krl-band krl-dgrid kr-traffic' }, cards),
 			h('div', { 'class': 'kr-sub', 'style': 'margin-top:6px' }, '↓ cihaza gelen (indirme), ↑ cihazdan giden (yükleme). Çubuk, cihazın bugünkü payı. VPN ve direkt trafik birlikte sayılır. Sayaçlar modem yeniden başlasa da saklanır; donanım hızlandırma (NSS) açıksa direkt giden büyük akışlar eksik görünebilir.')
 		]);
-	},
-
-	trafficHover(ev) {
-		const t = ev.target && ev.target.closest ? ev.target.closest('[data-i]') : null;
-		if (!t || !this.days) { this.elTip.style.display = 'none'; return; }
-		const x = this.days[+t.getAttribute('data-i')];
-		if (!x) return;
-		const dm = x.day.split('-').reverse().join('.');
-		dom.content(this.elTip, [
-			h('b', {}, dm),
-			h('div', {}, [h('i', { 'class': 'krc-sw krc-vpn' }), 'VPN: ' + fmtBytes(x.vr + x.vt)]),
-			h('div', {}, [h('i', { 'class': 'krc-sw krc-dir' }), 'Direkt: ' + fmtBytes(x.dr + x.dt)]),
-			h('div', { 'class': 'kr-sub' }, 'Toplam: ' + fmtBytes(x.vr + x.vt + x.dr + x.dt))
-		]);
-		const box = this.elChart.getBoundingClientRect();
-		let px = ev.clientX - box.left + 12;
-		this.elTip.style.display = 'block';
-		if (px + this.elTip.offsetWidth > box.width) px = ev.clientX - box.left - this.elTip.offsetWidth - 12;
-		this.elTip.style.left = Math.max(0, px) + 'px';
-		this.elTip.style.top = '4px';
 	},
 
 	renderApps(apps) {
