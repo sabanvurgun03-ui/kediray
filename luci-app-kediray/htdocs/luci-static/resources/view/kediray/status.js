@@ -407,6 +407,9 @@ const CSS = `
 @media (prefers-reduced-motion:reduce){.kr-dot.kr-on,.kr-seg,.kr-seg button,.kr-tag{animation:none!important}.kr-cbody,.kr-cbody.kr-fold{transition:none}}
 .krl-band{--krl-g:#16a34a;--krl-b:#2f6fe0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:0 0 8px}
 .krl-info{grid-column:1/-1}
+.krl-rrow{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:3px}
+.krl-ring svg{display:block}
+.krl-rd{stroke:#e8663a}.krl-rv{stroke:#3987e5}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-krt="light"]) .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}}
 :root[data-theme="dark"] .krl-band,:root[data-darkmode="true"] .krl-band,:root[data-krt="dark"] .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}
 .krl-tile{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;text-align:center;min-height:70px;padding:5px 8px 5px;border-radius:10px;border:1px solid rgba(128,128,128,.28);background:linear-gradient(160deg,rgba(128,128,128,.10),rgba(128,128,128,.02))}
@@ -1647,8 +1650,7 @@ return view.extend({
 			]);
 		};
 		lb.up = h('span', { 'class': 'kr-live', 'data-base': '0', 'data-at': String(Date.now()) }, '—');
-		lb.barV = h('span', { 'class': 'krc-vpn', 'style': 'width:0%' });
-		lb.barD = h('span', { 'class': 'krc-dir', 'style': 'width:0%' });
+		lb.ring = h('span', { 'class': 'krl-ring' });
 		lb.pct = h('div', { 'class': 'krl-sub' }, 'Henüz veri yok');
 		return h('div', { 'class': 'krl-band kr-traffic' }, [
 			speed('d', 'krl-down', 'İndirme'),
@@ -1657,8 +1659,7 @@ return view.extend({
 			sess('su', 'krl-sup', 'Oturum yüklenen'),
 			h('div', { 'class': 'krl-tile krl-info' }, [
 				h('div', { 'class': 'krl-val' }, lb.up),
-				h('div', { 'class': 'krl-bar' }, [lb.barV, lb.barD]),
-				lb.pct,
+				h('div', { 'class': 'krl-rrow' }, [lb.ring, lb.pct]),
 				h('div', { 'class': 'krl-lbl' }, 'Modem açık')
 			])
 		]);
@@ -1712,8 +1713,9 @@ return view.extend({
 		tot('su', ses.vt + ses.dt, ses.vt, ses.dt);
 		const vpn = ses.vr + ses.vt, dir = ses.dr + ses.dt, all = vpn + dir;
 		const pv = all > 0 ? Math.round(vpn / all * 100) : 0;
-		lb.barV.style.width = (all > 0 ? pv : 0) + '%';
-		lb.barD.style.width = (all > 0 ? 100 - pv : 0) + '%';
+		// VPN/Direkt halkası: yalnızca sayılardan üretilen SVG (r=15.9 → çevre ≈ 100)
+		lb.ring.innerHTML = '<svg viewBox="0 0 42 42" width="38" height="38"><circle cx="21" cy="21" r="15.9" fill="none" stroke-width="6" class="krl-rd"/>' +
+			(all > 0 ? '<circle cx="21" cy="21" r="15.9" fill="none" stroke-width="6" class="krl-rv" stroke-dasharray="' + pv + ' ' + (100 - pv) + '" transform="rotate(-90 21 21)"/>' : '') + '</svg>';
 		lb.pct.textContent = all > 0 ? 'VPN %' + pv + ' · Direkt %' + (100 - pv) : 'Henüz veri yok';
 		if (s.uptime > 0) {
 			lb.up.setAttribute('data-base', String(s.uptime));

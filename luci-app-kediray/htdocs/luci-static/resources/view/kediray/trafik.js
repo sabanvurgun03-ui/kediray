@@ -412,6 +412,7 @@ const CSS = `
 .krl-lbl{margin-top:3px;padding-top:3px;width:100%;border-top:1px solid rgba(128,128,128,.25);font-size:.62em;font-weight:600;letter-spacing:.09em;text-transform:uppercase;opacity:.75}
 .krl-peak{margin-top:0;font-size:.68em;opacity:.65;font-variant-numeric:tabular-nums}
 .krl-sub{margin-top:1px;font-size:.7em;opacity:.8;font-variant-numeric:tabular-nums;line-height:1.5}
+.krl-cmp{margin-top:3px;font-size:.68em}.krl-cup{color:#e8a33a}.krl-cdn{color:var(--krl-g,#4ade80)}
 .krl-sub i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
 .krl-per .krl-val{color:inherit;font-size:1.02em;font-weight:700}
 .krl-bar{display:flex;width:100%;height:4px;margin-top:4px;border-radius:5px;overflow:hidden;background:rgba(128,128,128,.22)}
@@ -426,7 +427,7 @@ const CSS = `
 .krl-drates{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .krl-dr{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:700}
 .krl-dr small{font-size:.62em;font-weight:600;opacity:.75;margin-left:2px}
-.krl-dr.d{color:var(--krl-g)}.krl-dr.u{color:var(--krl-b)}
+.krl-dr.d{color:var(--krl-g,#4ade80)}.krl-dr.u{color:var(--krl-b)}
 .krl-dtoday{margin-top:5px;font-size:.74em;opacity:.85;font-variant-numeric:tabular-nums;display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap}
 .krl-bar .krl-fill{background:var(--c)}
 .kr-traffic{--krl-g:#16a34a;--krl-b:#2f6fe0}
@@ -1634,8 +1635,22 @@ return view.extend({
 		this.renderLiveBand(s, r);
 
 		const allRows = [['today', 'Bugün', s.today], ['yesterday', 'Dün', s.yesterday], ['week', 'Bu hafta', s.week], ['month', 'Bu ay', s.month], ['total', 'Toplam', s.total]];
-		const rows = allRows.filter(x => !this.layoutCfg.hideRows[x[0]]).map(x => [x[1], x[2]]);
-		const per = (l, b) => {
+		const rows = allRows.filter(x => !this.layoutCfg.hideRows[x[0]]).map(x => [x[1], x[2], x[0]]);
+		// Dönem karşılaştırması (yalnızca son 30 günlük kovalardan): bugün→dün, dün→önceki gün, bu hafta→geçen hafta aynı süre
+		const dd = s.days || [], tot = x => x.vr + x.vt + x.dr + x.dt, nd = dd.length;
+		const sumD = (i, j) => { let t = 0; for (let k = Math.max(0, i); k <= j && k < nd; k++) t += tot(dd[k]); return t; };
+		const wdx = nd ? (new Date(dd[nd - 1].day + 'T12:00:00').getDay() + 6) % 7 : 0;
+		const notes = {};
+		if (nd >= 3) {
+			const t0 = tot(dd[nd - 1]), t1 = tot(dd[nd - 2]), t2 = tot(dd[nd - 3]);
+			if (t1 > 0) notes.today = { t: 'Dünün %' + Math.round(t0 / t1 * 100) + '\'i', d: 0 };
+			if (t2 > 0) notes.yesterday = { t: Math.round((t1 / t2 - 1) * 100), s: 'önceki güne göre' };
+			if (nd >= wdx + 8) {
+				const cw = sumD(nd - 1 - wdx, nd - 1), pw = sumD(nd - 8 - wdx, nd - 8);
+				if (pw > 0) notes.week = { t: Math.round((cw / pw - 1) * 100), s: 'geçen haftaya göre' };
+			}
+		}
+		const per = (l, b, key) => {
 			const vpn = b.vr + b.vt, dir = b.dr + b.dt, all = vpn + dir, pv = all > 0 ? Math.round(vpn / all * 100) : 0;
 			const pt = fmtParts(all);
 			return h('div', { 'class': 'krl-tile krl-per' }, [
@@ -1643,10 +1658,17 @@ return view.extend({
 				h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, [h('i', { 'class': 'krc-vpn' }), 'VPN ' + fmtBytes(vpn)]),
 				h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': 'krc-dir' }), 'Direkt ' + fmtBytes(dir)]),
 				h('div', { 'class': 'krl-bar' }, [h('span', { 'class': 'krc-vpn', 'style': 'width:' + (all > 0 ? pv : 0) + '%' }), h('span', { 'class': 'krc-dir', 'style': 'width:' + (all > 0 ? 100 - pv : 0) + '%' })]),
+				(() => {
+					const nt = notes[key];
+					if (!nt) return '';
+					if (nt.d === 0) return h('div', { 'class': 'krl-sub krl-cmp' }, nt.t);
+					const up = nt.t > 0, same = nt.t === 0;
+					return h('div', { 'class': 'krl-sub krl-cmp ' + (same ? '' : up ? 'krl-cup' : 'krl-cdn') }, (same ? '＝ ' : up ? '▲ %' : '▼ %') + Math.abs(nt.t) + ' · ' + nt.s);
+				})(),
 				h('div', { 'class': 'krl-lbl' }, l)
 			]);
 		};
-		dom.content(this.elPeriods, h('div', { 'class': 'krl-pgrid kr-traffic' }, rows.map(([l, b]) => per(l, b))));
+		dom.content(this.elPeriods, h('div', { 'class': 'krl-pgrid kr-traffic' }, rows.map(([l, b, k]) => per(l, b, k))));
 
 		this.renderDevTraffic(s.devices || [], s.t, s.others);
 
