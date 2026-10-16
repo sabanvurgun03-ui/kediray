@@ -551,10 +551,22 @@ return view.extend({
 			'Sunucuya giden bağlantı isteği (SYN) düşerse çekirdek varsayılan olarak ~50 saniye yeniden dener; tarayıcı o isteği 50 saniye askıda tutar ve sayfa "yükleniyor" kalır. Açıkken 3 denemeye (≈15 sn) iner: bağlantı hızlı başarısız olur, tarayıcı kendisi tekrar dener ve sayfa tamamlanır. (tcp_syn_retries=3, tcp_retries2=8)');
 		o.default = '1';
 		o.rmempty = false;
-		o = s.taboption('stable', form.Flag, 'mux', 'TCP Mux',
-			'Kapalıyken her istek sunucuya yeni bir bağlantı açar: bir sayfa 70-100 bağlantı demektir. Hattın ara sıra bağlantı düşürüyorsa (Günlük\'te "failed to dial / EOF / connection reset") her sayfada birkaç istek askıda kalır ve tarayıcı dönmeye devam eder. Açıldığında tek bağlantı çok isteği taşır, açılan bağlantı sayısı ~10 kat azalır. Hız biraz düşebilir; takılma yaşıyorsan aç, "kediray doctor" ile önce/sonra ölç. UDP (oyun, arama) için XUDP bu ayardan bağımsız olarak hep açıktır.');
+		o = s.taboption('stable', form.Flag, 'mux', 'TCP Mux ⓘ',
+			'Oyun oynuyorsan (Metin2 vb.) KAPALI tut: açıkken oyuna girilemiyor ya da oyundan atılıyorsun. Kapalıyken her istek sunucuya yeni bir bağlantı açar: bir sayfa 70-100 bağlantı demektir. Hattın ara sıra bağlantı düşürüyorsa (Günlük\'te "failed to dial / EOF / connection reset") her sayfada birkaç istek askıda kalır ve tarayıcı dönmeye devam eder. Açıldığında tek bağlantı çok isteği taşır, açılan bağlantı sayısı ~10 kat azalır. Hız biraz düşebilir; takılma yaşıyorsan aç, "kediray doctor" ile önce/sonra ölç. UDP (oyun, arama) için XUDP bu ayardan bağımsız olarak hep açıktır.');
 		o.default = '0';
 		o.rmempty = false;
+		// Fare ile üzerine gelince (ya da dokunup basılı tutunca) görünen hatırlatma
+		o.render = function () {
+			return Promise.resolve(form.Flag.prototype.render.apply(this, arguments)).then(function (node) {
+				var tip = 'Oyun (Metin2 vb.) oynuyorsan TCP Mux KAPALI kalsın: açıkken oyuna girilemiyor ya da oyundan atılıyorsun. Varsayılan: kapalı.';
+				if (node && node.setAttribute) {
+					node.setAttribute('title', tip);
+					var lab = node.querySelector('.cbi-value-title');
+					if (lab) lab.setAttribute('title', tip);
+				}
+				return node;
+			});
+		};
 		o = s.taboption('stable', form.Flag, 'ws_early', 'WebSocket erken veri',
 			'Path\'e "?ed=2048" ekler. Bazı sunucu/CDN kurulumlarında sorun çıkarabildiği için varsayılan kapalı.');
 		o.default = '0';
