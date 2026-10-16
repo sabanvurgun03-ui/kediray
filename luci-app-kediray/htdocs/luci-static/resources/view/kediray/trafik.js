@@ -35,6 +35,26 @@ function fmtBytes(b) {
 	return (i ? b.toFixed(1) : Math.round(b)) + ' ' + u[i];
 }
 function fmtRate(b) { return fmtBytes(b) + '/s'; }
+const LIVE_N = 60;   // canlı hız çizgisinde tutulan örnek sayısı (2 sn aralıkla ≈ 2 dk)
+// büyük sayı + küçük birim olarak ayrı verir: 12.81 · GB
+function fmtParts(b) {
+	b = Math.max(0, +b || 0);
+	const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
+	while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+	return [i === 0 ? String(Math.round(b)) : b.toFixed(i >= 2 ? 2 : 1), u[i]];
+}
+// canlı hız çizgisi (yalnızca sayılardan üretilen SVG): son N örnek, sağa yaslı
+function sparkSvg(vals, n) {
+	const W = 120, H = 34, step = W / (n - 1);
+	if (vals.length < 2) return '';
+	const top = Math.max(1024, ...vals), len = vals.length;
+	const pts = vals.map((v, i) => [(W - (len - 1 - i) * step), (H - 2 - (v / top) * (H - 6))]);
+	const f = v => v.toFixed(1);
+	const line = pts.map((p, i) => (i ? 'L' : 'M') + f(p[0]) + ',' + f(p[1])).join(' ');
+	const area = line + ' L' + f(pts[len - 1][0]) + ',' + H + ' L' + f(pts[0][0]) + ',' + H + ' Z';
+	return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" class="krl-svg" aria-hidden="true">' +
+		'<path d="' + area + '" class="krl-area"/><path d="' + line + '" class="krl-line"/></svg>';
+}
 // süre: 3 gün 5 sa 22 dk · 5 sa 22 dk 10 sn · 14 dk 49 sn · 49 sn
 function fmtDur(s) {
 	s = Math.max(0, Math.floor(+s || 0));
@@ -336,6 +356,27 @@ const CSS = `
 .kr-card{transition:border-color .25s ease,box-shadow .25s ease}
 .kr-card:hover{box-shadow:0 2px 14px rgba(0,0,0,.14)}
 @media (prefers-reduced-motion:reduce){.kr-dot.kr-on,.kr-seg,.kr-seg button,.kr-tag{animation:none!important}.kr-cbody,.kr-cbody.kr-fold{transition:none}}
+.krl-band{--krl-g:#16a34a;--krl-b:#2f6fe0;display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:8px;margin:0 0 10px}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-krt="light"]) .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}}
+:root[data-theme="dark"] .krl-band,:root[data-darkmode="true"] .krl-band,:root[data-krt="dark"] .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}
+.krl-tile{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;text-align:center;min-height:88px;padding:7px 9px 6px;border-radius:12px;border:1px solid rgba(128,128,128,.28);background:linear-gradient(160deg,rgba(128,128,128,.10),rgba(128,128,128,.02))}
+.krl-down{--c:var(--krl-g)}.krl-up{--c:var(--krl-b)}.krl-tvpn{--c:var(--krc-vpn)}.krl-tdir{--c:var(--krc-dir)}
+.krl-down,.krl-up,.krl-tvpn,.krl-tdir{border-color:color-mix(in srgb,var(--c) 55%,transparent)}
+.krl-spark{position:absolute;left:0;right:0;top:4px;height:26px;opacity:.95;pointer-events:none}
+.krl-svg{width:100%;height:100%;display:block}
+.krl-line{fill:none;stroke:var(--c);stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.krl-area{fill:var(--c);opacity:.14}
+.krl-val{margin-top:30px;font-variant-numeric:tabular-nums;color:var(--c);line-height:1.1;white-space:nowrap}
+.krl-tvpn .krl-val,.krl-tdir .krl-val,.krl-per .krl-val{margin-top:4px}
+.krl-num{font-size:1.45em;font-weight:700}
+.krl-unit{font-size:.95em;font-weight:600;margin-left:4px;opacity:.9}
+.krl-lbl{margin-top:5px;padding-top:4px;width:100%;border-top:1px solid rgba(128,128,128,.25);font-size:.68em;font-weight:600;letter-spacing:.09em;text-transform:uppercase;opacity:.75}
+.krl-sub{margin-top:2px;font-size:.74em;opacity:.8;font-variant-numeric:tabular-nums;line-height:1.5}
+.krl-sub i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.krl-per .krl-val{color:inherit;font-size:1.02em;font-weight:700}
+.krl-bar{display:flex;width:100%;height:6px;margin-top:6px;border-radius:5px;overflow:hidden;background:rgba(128,128,128,.22)}
+.krl-bar span{display:block;height:100%;transition:width .4s}
+.krl-pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
 `;
 
 // Tarayıcıda saklanan eski menüyü (Hizmetler altındaki kayıt) bir kez temizle
@@ -1315,11 +1356,59 @@ return view.extend({
 		return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" class="krc-svg" role="img" aria-label="Son 30 gün trafik (VPN ve Direkt)">' + g + bars + '</svg>';
 	},
 
+	/* Canlı şerit: anlık hız (çizgili) + VPN/Direkt ayrımı, toplam kutuları. Ana sayfadaki şeritle aynı tasarım. */
+	buildLiveBand() {
+		const lb = this.lb;
+		const big = k => {
+			lb[k + 'N'] = h('span', { 'class': 'krl-num' }, '0');
+			lb[k + 'U'] = h('span', { 'class': 'krl-unit' }, 'B/s');
+			return h('div', { 'class': 'krl-val' }, [lb[k + 'N'], lb[k + 'U']]);
+		};
+		const split = (k, a, b) => {
+			lb[k + 'V'] = h('span', {}, '—'); lb[k + 'D'] = h('span', {}, '—');
+			return [h('div', { 'class': 'krl-sub', 'style': 'margin-top:2px' }, [h('i', { 'class': 'krc-vpn' }), a + ' ', lb[k + 'V']]),
+				h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': 'krc-dir' }), b + ' ', lb[k + 'D']])];
+		};
+		const speed = (k, cls, label) => {
+			lb[k + 'S'] = h('div', { 'class': 'krl-spark' });
+			return h('div', { 'class': 'krl-tile ' + cls }, [lb[k + 'S'], big(k), ...split(k, 'VPN', 'Direkt'), h('div', { 'class': 'krl-lbl' }, label)]);
+		};
+		const tot = (k, cls, label) => {
+			lb[k + 'T'] = h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, '—');
+			return h('div', { 'class': 'krl-tile ' + cls }, [big(k), lb[k + 'T'], h('div', { 'class': 'krl-lbl' }, label)]);
+		};
+		return h('div', { 'class': 'krl-band kr-traffic' }, [
+			speed('d', 'krl-down', 'İndirme'),
+			speed('u', 'krl-up', 'Yükleme'),
+			tot('tv', 'krl-tvpn', 'VPN toplam'),
+			tot('td', 'krl-tdir', 'Direkt toplam')
+		]);
+	},
+
+	renderLiveBand(s, r) {
+		const lb = this.lb, N = LIVE_N;
+		const dn = r.vd + r.dd, up = r.vu + r.du;
+		lb.hd.push(dn); lb.hu.push(up);
+		if (lb.hd.length > N) lb.hd.shift();
+		if (lb.hu.length > N) lb.hu.shift();
+		const rate = (k, v) => { const p = fmtParts(v); lb[k + 'N'].textContent = p[0]; lb[k + 'U'].textContent = p[1] + '/s'; };
+		rate('d', dn); rate('u', up);
+		lb.dS.innerHTML = sparkSvg(lb.hd, N);   // yalnızca sayılardan üretilen SVG
+		lb.uS.innerHTML = sparkSvg(lb.hu, N);
+		lb.dV.textContent = fmtRate(r.vd); lb.dD.textContent = fmtRate(r.dd);
+		lb.uV.textContent = fmtRate(r.vu); lb.uD.textContent = fmtRate(r.du);
+		const t = (k, b) => { const p = fmtParts(b.r + b.t); lb[k + 'N'].textContent = p[0]; lb[k + 'U'].textContent = p[1]; lb[k + 'T'].textContent = '↓ ' + fmtBytes(b.r) + ' · ↑ ' + fmtBytes(b.t); };
+		t('tv', { r: s.total.vr, t: s.total.vt });
+		t('td', { r: s.total.dr, t: s.total.dt });
+	},
+
 	renderTraffic(s) {
 		if (!s || !s.counters || !s.today) { this.card(this.elTraffic, 'traffic', 'Trafik', h('div', { 'class': 'kr-sub' }, 'Henüz veri yok')); this.trafficBuilt = false; return; }
 		const r = this.trafficLive(s);
 		if (!this.trafficBuilt) {
 			this.elLive = h('div', {});
+			this.lb = { hd: [], hu: [] };
+			this.elLive.appendChild(this.buildLiveBand());
 			this.elPeriods = h('div', {});
 			this.elDevTr = h('div', {});
 			this.elChart = h('div', { 'class': 'krc-wrap' });
@@ -1355,36 +1444,22 @@ return view.extend({
 			this.trafficBuilt = true;
 		}
 
-		const pill = (cls, label, d, u) => h('div', { 'class': 'krt-live ' + cls }, [
-			h('div', { 'class': 'krt-lh' }, [h('i', { 'class': 'krc-sw ' + (cls === 'v' ? 'krc-vpn' : 'krc-dir') }), label]),
-			h('div', { 'class': 'krt-lv' }, [h('span', {}, '↓ ' + fmtRate(d)), h('span', {}, '↑ ' + fmtRate(u))])
-		]);
-		dom.content(this.elLive, [
-			h('div', { 'class': 'krt-now' }, 'Şu an'),
-			h('div', { 'class': 'krt-lives' }, [pill('v', 'VPN', r.vd, r.vu), pill('d', 'Direkt', r.dd, r.du)]),
-			h('div', { 'class': 'krt-totals' }, [
-				h('div', { 'class': 'krt-tot' }, [h('div', { 'class': 'kr-sub' }, 'VPN toplam'), h('div', { 'class': 'krt-big' }, fmtBytes(s.total.vr + s.total.vt)),
-					h('div', { 'class': 'kr-sub' }, '↓ ' + fmtBytes(s.total.vr) + ' · ↑ ' + fmtBytes(s.total.vt))]),
-				h('div', { 'class': 'krt-tot' }, [h('div', { 'class': 'kr-sub' }, 'Direkt toplam'), h('div', { 'class': 'krt-big' }, fmtBytes(s.total.dr + s.total.dt)),
-					h('div', { 'class': 'kr-sub' }, '↓ ' + fmtBytes(s.total.dr) + ' · ↑ ' + fmtBytes(s.total.dt))])
-			])
-		]);
+		this.renderLiveBand(s, r);
 
 		const allRows = [['today', 'Bugün', s.today], ['yesterday', 'Dün', s.yesterday], ['week', 'Bu hafta', s.week], ['month', 'Bu ay', s.month], ['total', 'Toplam', s.total]];
 		const rows = allRows.filter(x => !this.layoutCfg.hideRows[x[0]]).map(x => [x[1], x[2]]);
-		const cell = b => [h('td', { 'class': 'td krt-n' }, fmtBytes(b.vr + b.vt)), h('td', { 'class': 'td krt-n kr-hide-sm kr-sub' }, '↓' + fmtBytes(b.vr) + ' ↑' + fmtBytes(b.vt))];
-		dom.content(this.elPeriods, h('table', { 'class': 'table kr-table krt-table' }, [
-			h('tr', { 'class': 'tr table-titles' }, [
-				h('th', { 'class': 'th' }, 'Dönem'),
-				h('th', { 'class': 'th krt-n', 'colspan': 2 }, [h('i', { 'class': 'krc-sw krc-vpn' }), 'VPN']),
-				h('th', { 'class': 'th krt-n', 'colspan': 2 }, [h('i', { 'class': 'krc-sw krc-dir' }), 'Direkt']),
-				h('th', { 'class': 'th krt-n' }, 'Hepsi')
-			]),
-			...rows.map(([l, b]) => h('tr', { 'class': 'tr' }, [
-				h('td', { 'class': 'td' }, h('b', {}, l)), ...cell({ vr: b.vr, vt: b.vt }), ...cell({ vr: b.dr, vt: b.dt }),
-				h('td', { 'class': 'td krt-n' }, fmtBytes(b.vr + b.vt + b.dr + b.dt))
-			]))
-		]));
+		const per = (l, b) => {
+			const vpn = b.vr + b.vt, dir = b.dr + b.dt, all = vpn + dir, pv = all > 0 ? Math.round(vpn / all * 100) : 0;
+			const pt = fmtParts(all);
+			return h('div', { 'class': 'krl-tile krl-per' }, [
+				h('div', { 'class': 'krl-val' }, [h('span', { 'class': 'krl-num' }, pt[0]), h('span', { 'class': 'krl-unit' }, pt[1])]),
+				h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, [h('i', { 'class': 'krc-vpn' }), 'VPN ' + fmtBytes(vpn)]),
+				h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': 'krc-dir' }), 'Direkt ' + fmtBytes(dir)]),
+				h('div', { 'class': 'krl-bar' }, [h('span', { 'class': 'krc-vpn', 'style': 'width:' + (all > 0 ? pv : 0) + '%' }), h('span', { 'class': 'krc-dir', 'style': 'width:' + (all > 0 ? 100 - pv : 0) + '%' })]),
+				h('div', { 'class': 'krl-lbl' }, l)
+			]);
+		};
+		dom.content(this.elPeriods, h('div', { 'class': 'krl-pgrid kr-traffic' }, rows.map(([l, b]) => per(l, b))));
 
 		this.renderDevTraffic(s.devices || [], s.t, s.others);
 
