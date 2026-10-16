@@ -552,7 +552,7 @@ return view.extend({
 		o.default = '1';
 		o.rmempty = false;
 		o = s.taboption('stable', form.Flag, 'mux', 'TCP Mux ⓘ',
-			'Oyun oynuyorsan (Metin2 vb.) KAPALI tut: açıkken oyuna girilemiyor ya da oyundan atılıyorsun. Kapalıyken her istek sunucuya yeni bir bağlantı açar: bir sayfa 70-100 bağlantı demektir. Hattın ara sıra bağlantı düşürüyorsa (Günlük\'te "failed to dial / EOF / connection reset") her sayfada birkaç istek askıda kalır ve tarayıcı dönmeye devam eder. Açıldığında tek bağlantı çok isteği taşır, açılan bağlantı sayısı ~10 kat azalır. Hız biraz düşebilir; takılma yaşıyorsan aç, "kediray doctor" ile önce/sonra ölç. UDP (oyun, arama) için XUDP bu ayardan bağımsız olarak hep açıktır.');
+			'Oyun oynuyorsan (Metin2 vb.) KAPALI tut: açıkken oyuna girilemiyor ya da oyundan atılıyorsun. Açıkken bağlantılar tek tünelde birleşir; sadece sayfalar sürekli askıda kalıyorsa dene. Varsayılan: kapalı.');
 		o.default = '0';
 		o.rmempty = false;
 		// Fare ile üzerine gelince (ya da dokunup basılı tutunca) görünen hatırlatma
