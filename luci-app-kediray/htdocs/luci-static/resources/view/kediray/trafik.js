@@ -34,14 +34,12 @@ function fmtBytes(b) {
 	while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
 	return (i ? b.toFixed(1) : Math.round(b)) + ' ' + u[i];
 }
-function fmtRate(b) { return fmtBytes(b) + '/s'; }
 const CH = {   // grafik görünümleri: a = alttaki, b = üstteki parça
 	vd: { a: 'VPN', b: 'Direkt', ca: 'krc-vpn', cb: 'krc-dir', fa: x => x.vr + x.vt, fb: x => x.dr + x.dt },
 	io: { a: 'İndirme', b: 'Yükleme', ca: 'krc-dl', cb: 'krc-ul', fa: x => x.vr + x.dr, fb: x => x.vt + x.dt }
 };
 const GUN = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 function gunAd(day) { const d = new Date(day + 'T12:00:00'); return (isNaN(d) ? '' : GUN[d.getDay()] + ' ') + day.slice(8) + '.' + day.slice(5, 7); }
-const MAX_RATE = 1.5e9;   // B/s: bunun üstü sayaç sıfırlanma/okuma hatasıdır, örnek yok sayılır
 const LIVE_N = 60;   // canlı hız çizgisinde tutulan örnek sayısı (2 sn aralıkla ≈ 2 dk)
 // büyük sayı + küçük birim olarak ayrı verir: 12.81 · GB
 function fmtParts(b) {
@@ -50,6 +48,40 @@ function fmtParts(b) {
 	while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
 	return [i === 0 ? String(Math.round(b)) : b.toFixed(i >= 2 ? 2 : 1), u[i]];
 }
+function fmtRate(b) { return rateParts(b).join(' '); }
+// Hız birimi: bayt (B/s, KB/s, MB/s; 1024) ya da bit (bps, Kbps, Mbps; 1000). Seçim tarayıcıda saklanır, tüm KediRay sayfalarında geçerlidir.
+function rateUnitMode() { try { return localStorage.getItem('kediray-rate-unit') === 'bit' ? 'bit' : 'byte'; } catch (e) { return 'byte'; } }
+function setRateUnit(m) { try { localStorage.setItem('kediray-rate-unit', m); } catch (e) {} }
+function rateParts(v) {   // [sayı, birim]
+	v = Math.max(0, +v || 0);
+	if (rateUnitMode() === 'bit') {
+		let b = v * 8; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0;
+		while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; }
+		return [i === 0 ? String(Math.round(b)) : (b < 10 ? b.toFixed(2) : b < 100 ? b.toFixed(1) : String(Math.round(b))), u[i]];
+	}
+	const q = fmtParts(v);
+	return [q[0], q[1] + '/s'];
+}
+/* Canlı hız geçmişi ve tepe değerler: sayfa/sekme değişince kaybolmasın diye tarayıcıda saklanır.
+   Tepe değerler aynı modem açılışı boyunca korunur (modem yeniden açılınca sıfırlanır); çizgi geçmişi yalnızca kısa aralıkta (90 sn). */
+const LIVE_KEY = 'kediray-live-v1';
+function loadLive(s) {
+	const boot = s.uptime > 0 ? Math.round(s.t - s.uptime) : 0, d = { boot: boot, pd: 0, pu: 0, hd: [], hu: [] };
+	try {
+		const c = JSON.parse(localStorage.getItem(LIVE_KEY) || 'null');
+		if (c && Math.abs((+c.boot || 0) - boot) < 120) {
+			d.pd = +c.pd || 0; d.pu = +c.pu || 0;
+			if (Date.now() - (+c.at || 0) < 90000 && Array.isArray(c.hd) && Array.isArray(c.hu)) {
+				d.hd = c.hd.slice(-LIVE_N).map(Number); d.hu = c.hu.slice(-LIVE_N).map(Number);
+			}
+		}
+	} catch (e) {}
+	return d;
+}
+function saveLive(lb) {
+	try { localStorage.setItem(LIVE_KEY, JSON.stringify({ boot: lb.boot, pd: Math.round(lb.pd), pu: Math.round(lb.pu), hd: lb.hd.map(Math.round), hu: lb.hu.map(Math.round), at: Date.now() })); } catch (e) {}
+}
+const MAX_RATE = 1.5e9;   // B/s: bunun üstü sayaç sıfırlanma/okuma hatasıdır, örnek yok sayılır
 // canlı hız çizgisi (yalnızca sayılardan üretilen SVG): son N örnek, sağa yaslı
 function sparkSvg(vals, n) {
 	const W = 120, H = 34, step = W / (n - 1);
@@ -1474,7 +1506,7 @@ return view.extend({
 		const lb = this.lb;
 		const big = k => {
 			lb[k + 'N'] = h('span', { 'class': 'krl-num' }, '0');
-			lb[k + 'U'] = h('span', { 'class': 'krl-unit' }, 'B/s');
+			lb[k + 'U'] = h('span', { 'class': 'krl-unit' }, rateParts(0)[1]);
 			return h('div', { 'class': 'krl-val' }, [lb[k + 'N'], lb[k + 'U']]);
 		};
 		const split = (k, a, b) => {
@@ -1498,14 +1530,33 @@ return view.extend({
 		]);
 	},
 
-	renderLiveBand(s, r) {
+	/* Hız birimi seçici: MB/s (bayt) ya da Mbps (bit). Seçim tarayıcıda saklanır. */
+	buildRateSeg() {
+		const btns = {};
+		const paint = () => Object.keys(btns).forEach(k => btns[k].classList.toggle('kr-act', k === rateUnitMode()));
+		const mk = (k, label) => { btns[k] = h('button', { 'class': 'btn', 'click': () => { setRateUnit(k); paint(); if (this.lastStats && this.liveRate) this.renderLiveBand(this.lastStats, this.liveRate, true); } }, label); return btns[k]; };
+		const el = h('div', { 'class': 'kr-seg kr-seg-sm', 'style': 'margin:0 0 8px' }, [mk('byte', 'MB/s'), mk('bit', 'Mbps')]);
+		paint();
+		return el;
+	},
+
+	renderLiveBand(s, r, again) {
 		const lb = this.lb, N = LIVE_N;
-		const dn = r.vd + r.dd, up = r.vu + r.du;
-		lb.hd.push(dn); lb.hu.push(up);
-		if (lb.hd.length > N) lb.hd.shift();
-		if (lb.hu.length > N) lb.hu.shift();
-		const rate = (k, v) => { const p = fmtParts(v); lb[k + 'N'].textContent = p[0]; lb[k + 'U'].textContent = p[1] + '/s'; };
-		rate('d', dn); rate('u', up);
+		if (!lb.loaded) {   // sekme değişince sıfırlanmasın: tepe değerler ve çizgi geçmişi tarayıcıdan geri yüklenir
+			const sv = loadLive(s);
+			lb.loaded = true; lb.boot = sv.boot; lb.pd = sv.pd; lb.pu = sv.pu; lb.hd = sv.hd; lb.hu = sv.hu; lb.cd = 0; lb.cu = 0;
+		}
+		if (!again) {
+			const dn = r.vd + r.dd, up = r.vu + r.du;
+			lb.hd.push(dn); lb.hu.push(up);
+			if (lb.hd.length > N) lb.hd.shift();
+			if (lb.hu.length > N) lb.hu.shift();
+			lb.pd = Math.max(lb.pd, dn); lb.pu = Math.max(lb.pu, up);
+			lb.cd = dn; lb.cu = up;
+			saveLive(lb);
+		}
+		const rate = (k, v) => { const p = rateParts(v); lb[k + 'N'].textContent = p[0]; lb[k + 'U'].textContent = p[1]; };
+		rate('d', lb.cd); rate('u', lb.cu);
 		lb.dS.innerHTML = sparkSvg(lb.hd, N);   // yalnızca sayılardan üretilen SVG
 		lb.uS.innerHTML = sparkSvg(lb.hu, N);
 		lb.dV.textContent = fmtRate(r.vd); lb.dD.textContent = fmtRate(r.dd);
@@ -1521,6 +1572,7 @@ return view.extend({
 		if (!this.trafficBuilt) {
 			this.elLive = h('div', {});
 			this.lb = { hd: [], hu: [] };
+			this.elLive.appendChild(this.buildRateSeg());
 			this.elLive.appendChild(this.buildLiveBand());
 			this.elPeriods = h('div', {});
 			this.elDevTr = h('div', {});
@@ -1631,7 +1683,7 @@ return view.extend({
 		const todayAll = Math.max(1, srx + stx);
 		list.sort((x, y) => (y.dv.today.rx + y.dv.today.tx) - (x.dv.today.rx + x.dv.today.tx));
 
-		const rate = v => { const q = fmtParts(v); return [q[0], q[1] + '/s']; };
+		const rate = v => rateParts(v);
 
 		const cards = list.map(({ dv, dd, du, hs }) => {
 			const dtot = dv.today.rx + dv.today.tx, pct = Math.min(100, Math.round(dtot / todayAll * 100));

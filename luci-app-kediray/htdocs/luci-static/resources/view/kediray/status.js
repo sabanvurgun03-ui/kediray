@@ -51,7 +51,6 @@ function fmtBytes(b) {
 	while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
 	return (i ? b.toFixed(1) : Math.round(b)) + ' ' + u[i];
 }
-function fmtRate(b) { return fmtBytes(b) + '/s'; }
 // büyük sayı + küçük birim olarak ayrı verir: 12.81 · GB
 function fmtParts(b) {
 	b = Math.max(0, +b || 0);
@@ -59,6 +58,40 @@ function fmtParts(b) {
 	while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
 	return [i === 0 ? String(Math.round(b)) : b.toFixed(i >= 2 ? 2 : 1), u[i]];
 }
+function fmtRate(b) { return rateParts(b).join(' '); }
+// Hız birimi: bayt (B/s, KB/s, MB/s; 1024) ya da bit (bps, Kbps, Mbps; 1000). Seçim tarayıcıda saklanır, tüm KediRay sayfalarında geçerlidir.
+function rateUnitMode() { try { return localStorage.getItem('kediray-rate-unit') === 'bit' ? 'bit' : 'byte'; } catch (e) { return 'byte'; } }
+function setRateUnit(m) { try { localStorage.setItem('kediray-rate-unit', m); } catch (e) {} }
+function rateParts(v) {   // [sayı, birim]
+	v = Math.max(0, +v || 0);
+	if (rateUnitMode() === 'bit') {
+		let b = v * 8; const u = ['bps', 'Kbps', 'Mbps', 'Gbps']; let i = 0;
+		while (b >= 1000 && i < u.length - 1) { b /= 1000; i++; }
+		return [i === 0 ? String(Math.round(b)) : (b < 10 ? b.toFixed(2) : b < 100 ? b.toFixed(1) : String(Math.round(b))), u[i]];
+	}
+	const q = fmtParts(v);
+	return [q[0], q[1] + '/s'];
+}
+/* Canlı hız geçmişi ve tepe değerler: sayfa/sekme değişince kaybolmasın diye tarayıcıda saklanır.
+   Tepe değerler aynı modem açılışı boyunca korunur (modem yeniden açılınca sıfırlanır); çizgi geçmişi yalnızca kısa aralıkta (90 sn). */
+const LIVE_KEY = 'kediray-live-v1';
+function loadLive(s) {
+	const boot = s.uptime > 0 ? Math.round(s.t - s.uptime) : 0, d = { boot: boot, pd: 0, pu: 0, hd: [], hu: [] };
+	try {
+		const c = JSON.parse(localStorage.getItem(LIVE_KEY) || 'null');
+		if (c && Math.abs((+c.boot || 0) - boot) < 120) {
+			d.pd = +c.pd || 0; d.pu = +c.pu || 0;
+			if (Date.now() - (+c.at || 0) < 90000 && Array.isArray(c.hd) && Array.isArray(c.hu)) {
+				d.hd = c.hd.slice(-LIVE_N).map(Number); d.hu = c.hu.slice(-LIVE_N).map(Number);
+			}
+		}
+	} catch (e) {}
+	return d;
+}
+function saveLive(lb) {
+	try { localStorage.setItem(LIVE_KEY, JSON.stringify({ boot: lb.boot, pd: Math.round(lb.pd), pu: Math.round(lb.pu), hd: lb.hd.map(Math.round), hu: lb.hu.map(Math.round), at: Date.now() })); } catch (e) {}
+}
+const MAX_RATE = 1.5e9;   // B/s: bunun üstü sayaç sıfırlanma/okuma hatasıdır, örnek yok sayılır
 // canlı hız çizgisi (yalnızca sayılardan üretilen SVG): son N örnek, sağa yaslı
 function sparkSvg(vals, n) {
 	const W = 120, H = 34, step = W / (n - 1);
@@ -1299,7 +1332,7 @@ return view.extend({
 		if (p && s.t > p.t) {
 			const dt = s.t - p.t, pc = p.counters;
 			// sayaç sıfırlandıysa (tablo yeniden kuruldu) fark = şimdiki değer
-			const d = (a, b) => (a >= b ? a - b : a) / dt;
+			const d = (a, b) => { const v = (a >= b ? a - b : a) / dt; return v > MAX_RATE ? 0 : v; };
 			const vd = d(c.vr, pc.vr), vu = d(c.vt, pc.vt);
 			r = { vd, vu, dd: Math.max(0, d(c.wr, pc.wr) - vd), du: Math.max(0, d(c.wt, pc.wt) - vu) };
 		} else if (this.liveRate) r = this.liveRate;
@@ -1626,21 +1659,41 @@ return view.extend({
 		]);
 	},
 
-	renderLiveBand(s) {
+	/* Hız birimi seçici: MB/s (bayt) ya da Mbps (bit). Seçim tarayıcıda saklanır. */
+	buildRateSeg() {
+		const btns = {};
+		const paint = () => Object.keys(btns).forEach(k => btns[k].classList.toggle('kr-act', k === rateUnitMode()));
+		const mk = (k, label) => { btns[k] = h('button', { 'class': 'btn', 'click': () => { setRateUnit(k); paint(); if (this.lastStats) this.renderLiveBand(this.lastStats, true); } }, label); return btns[k]; };
+		const el = h('div', { 'class': 'kr-seg kr-seg-sm', 'style': 'margin:0 0 8px' }, [mk('byte', 'MB/s'), mk('bit', 'Mbps')]);
+		paint();
+		return el;
+	},
+
+	renderLiveBand(s, again) {
 		const lb = this.lb;
 		if (!lb || !s || !s.counters) return;
-		const r = this.trafficLive(s);
-		const dn = r.vd + r.dd, up = r.vu + r.du, N = LIVE_N;
-		lb.hd.push(dn); lb.hu.push(up);
-		if (lb.hd.length > N) lb.hd.shift();
-		if (lb.hu.length > N) lb.hu.shift();
-		lb.pd = Math.max(lb.pd, dn); lb.pu = Math.max(lb.pu, up);
-		const rate = (k, v) => { const p = fmtParts(v); lb[k + 'N'].textContent = p[0]; lb[k + 'U'].textContent = p[1] + '/s'; };
-		rate('d', dn); rate('u', up);
+		const N = LIVE_N;
+		if (!lb.loaded) {   // sekme değişince sıfırlanmasın: tepe değerler ve çizgi geçmişi tarayıcıdan geri yüklenir
+			const sv = loadLive(s);
+			lb.loaded = true; lb.boot = sv.boot; lb.pd = sv.pd; lb.pu = sv.pu; lb.hd = sv.hd; lb.hu = sv.hu; lb.cd = 0; lb.cu = 0;
+		}
+		if (!again) {
+			const r = this.trafficLive(s);
+			const dn = r.vd + r.dd, up = r.vu + r.du;
+			lb.hd.push(dn); lb.hu.push(up);
+			if (lb.hd.length > N) lb.hd.shift();
+			if (lb.hu.length > N) lb.hu.shift();
+			lb.pd = Math.max(lb.pd, dn); lb.pu = Math.max(lb.pu, up);
+			lb.cd = dn; lb.cu = up;
+			saveLive(lb);
+		}
+		const rate = (k, v) => { const p = rateParts(v); lb[k + 'N'].textContent = p[0]; lb[k + 'U'].textContent = p[1]; };
+		rate('d', lb.cd); rate('u', lb.cu);
 		lb.dS.innerHTML = sparkSvg(lb.hd, N);   // yalnızca sayılardan üretilen SVG
 		lb.uS.innerHTML = sparkSvg(lb.hu, N);
-		lb.dP.textContent = 'Tepe: ' + fmtRate(lb.pd);
-		lb.uP.textContent = 'Tepe: ' + fmtRate(lb.pu);
+		lb.dP.textContent = 'Tepe: ' + (lb.pd > 0 ? fmtRate(lb.pd) : '—');
+		lb.uP.textContent = 'Tepe: ' + (lb.pu > 0 ? fmtRate(lb.pu) : '—');
+		if (again) return;
 
 		// oturum toplamı (eski traffic.uc'de yoksa WAN sayaçlarından)
 		const c = s.counters;
@@ -1701,7 +1754,7 @@ return view.extend({
 			h('h2', {}, [h('img', { 'src': '/luci-static/kedi-logo.svg', 'style': 'height:1.3em;vertical-align:-0.25em;margin-right:8px;border-radius:6px' }), 'KediRay VPN']),
 			krLicBanner(),
 			// başlığa tıklayınca küçülür/açılır; tercih tarayıcıda saklanır (diğer kartlarla aynı sistem)
-			h('div', { 'style': 'margin:0 0 6px' }, this.fold('live', 'Canlı trafik', this.buildLiveBand())),
+			h('div', { 'style': 'margin:0 0 6px' }, this.fold('live', 'Canlı trafik', h('div', {}, [this.buildRateSeg(), this.buildLiveBand()]))),
 			h('div', { 'class': 'kr-grid' }, [this.elStatus, this.elNode, this.elApps]),
 			this.elNodes,
 			this.elDevs
