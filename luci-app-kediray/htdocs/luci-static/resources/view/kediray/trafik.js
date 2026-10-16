@@ -443,6 +443,11 @@ const CSS = `
 @keyframes krGrow{from{transform:scaleY(0)}to{transform:none}}
 .krc-anim .krc-bar{transform-box:fill-box;transform-origin:50% 100%;animation:krGrow .55s cubic-bezier(.2,.8,.2,1) both}
 @media (prefers-reduced-motion:reduce){.krc-anim .krc-bar{animation:none}}
+.krl-usw{display:flex;justify-content:flex-end;align-items:center;gap:2px;margin:0 2px 4px;font-size:.76em;letter-spacing:.03em;user-select:none}
+.krl-usw span{cursor:pointer;padding:3px 7px;opacity:.5;border-radius:6px;transition:opacity .2s,color .2s}
+.krl-usw span:hover{opacity:.85}
+.krl-usw span.krl-on{opacity:1;color:var(--kr-accent,#2a7de1);font-weight:600}
+.krl-usw i{opacity:.3;font-style:normal}
 `;
 
 // Tarayıcıda saklanan eski menüyü (Hizmetler altındaki kayıt) bir kez temizle
@@ -1533,9 +1538,9 @@ return view.extend({
 	/* Hız birimi seçici: MB/s (bayt) ya da Mbps (bit). Seçim tarayıcıda saklanır. */
 	buildRateSeg() {
 		const btns = {};
-		const paint = () => Object.keys(btns).forEach(k => btns[k].classList.toggle('kr-act', k === rateUnitMode()));
-		const mk = (k, label) => { btns[k] = h('button', { 'class': 'btn', 'click': () => { setRateUnit(k); paint(); if (this.lastStats && this.liveRate) this.renderLiveBand(this.lastStats, this.liveRate, true); } }, label); return btns[k]; };
-		const el = h('div', { 'class': 'kr-seg kr-seg-sm', 'style': 'margin:0 0 8px' }, [mk('byte', 'MB/s'), mk('bit', 'Mbps')]);
+		const paint = () => Object.keys(btns).forEach(k => btns[k].classList.toggle('krl-on', k === rateUnitMode()));
+		const mk = (k, label) => { btns[k] = h('span', { 'role': 'button', 'click': () => { setRateUnit(k); paint(); if (this.lastStats && this.liveRate) this.renderLiveBand(this.lastStats, this.liveRate, true); } }, label); return btns[k]; };
+		const el = h('div', { 'class': 'krl-usw' }, [mk('byte', 'MB/s'), h('i', {}, '·'), mk('bit', 'Mbps')]);
 		paint();
 		return el;
 	},
