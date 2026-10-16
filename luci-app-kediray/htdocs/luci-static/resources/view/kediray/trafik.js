@@ -1285,7 +1285,7 @@ return view.extend({
 	   Kaynak: `kediray stats` = { t, counters:{vr,vt,wr,wt}, today, yesterday, week, month, total, since, days:[{day,vr,vt,dr,dt}] }
 	   vr/vt = VPN indirme/yükleme (tünelin dış baytları), dr/dt = Direkt = WAN toplamı − VPN. */
 	/* Düzen: hangi bölüm görünsün, hangi sırada, hangi dönem satırları. Tarayıcıda saklanır. */
-	secTitles: { live: 'Şu an + toplamlar', periods: 'Dönemler (Bugün / Dün / Hafta / Ay)', devs: 'Cihaz bazında trafik', chart: 'Günlük trafik grafiği' },
+	secTitles: { live: 'Şu an + toplamlar', periods: 'Dönemler (Bugün / Dün / Hafta / Ay)', devs: 'Cihaz bazında trafik', chart: 'Trafik geçmişi' },
 	rowTitles: { today: 'Bugün', yesterday: 'Dün', week: 'Bu hafta', month: 'Bu ay', total: 'Toplam' },
 	loadLayout() {
 		const def = { order: ['live', 'periods', 'devs', 'chart'], hide: {}, hideRows: {} };
@@ -1376,8 +1376,11 @@ return view.extend({
 		const n = days.length, slot = pw / n, bw = Math.min(24, Math.max(4, slot - 4));
 		const tot = days.map(x => M.fa(x) + M.fb(x));
 		const max = Math.max(1, ...tot);
-		// "güzel" üst sınır: 1/2/5 × 10^k
-		const pow = Math.pow(10, Math.floor(Math.log10(max))), top = [1, 2, 5, 10].map(m => m * pow).find(v => v >= max);
+		// "güzel" üst sınır: 4 eşit aralık, adım güzel bir sayı (etiketler 1024 tabanlı birimde: 6, 12, 18, 24 GB gibi)
+		const bu = Math.max(0, Math.min(4, Math.floor(Math.log(max) / Math.log(1024)))), unit = Math.pow(1024, bu), mu = max / unit;
+		const mag = Math.pow(10, Math.floor(Math.log10(mu / 4)));
+		const step = ([1, 1.5, 2, 2.5, 3, 4, 5, 6, 7.5, 8, 10, 15, 20].map(m => m * mag).find(v => v * 4 >= mu * 1.02) || 20 * mag) * unit;
+		const top = step * 4;
 		const y = v => T + ph - (v / top) * ph;
 		const avg = tot.reduce((p, v) => p + v, 0) / n;
 		let g = '';
@@ -1543,7 +1546,7 @@ return view.extend({
 				live: this.elLive,
 				periods: this.fold('t-periods', 'Bugün / Dün / Bu hafta / Bu ay / Toplam', this.elPeriods),
 				devs: this.fold('t-devs', 'Cihaz bazında trafik', this.elDevTr),
-				chart: this.fold('t-chart', 'Günlük trafik', h('div', {}, [
+				chart: this.fold('t-chart', 'Trafik geçmişi', h('div', {}, [
 					this.elChartTiles,
 					h('div', { 'class': 'krc-ctl' }, [modeSeg, rangeSeg]),
 					this.elLegend,
