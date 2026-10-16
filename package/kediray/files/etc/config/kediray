@@ -52,7 +52,7 @@ config main 'main'
 	option mux '0'
 	# WebSocket erken veri
 	option ws_early '0'
-	option cfgver '14'
+	option cfgver '15'
 	option ad_block '0'
 	# VPN süreci çökerse: killswitch = VPN trafiği kesilir (WhatsApp asla direkt çıkmaz) | open = internet direkt açılır
 	# Mobil/CGNAT hatlar: düşen SYN yüzünden bağlantı 50 sn asılı kalmasın (3 deneme ≈ 15 sn)
@@ -68,7 +68,9 @@ config main 'main'
 	option tproxy_port '12345'
 	# Cihazların yazdığı DNS'i (8.8.8.8 vb.) çekirdekte KediRay DNS'ine çevir: tünele girmez, hızlıdır
 	option dns_hijack '1'
-	option block_doh '1'
+	# Tarayıcı/Android "Özel DNS" (DoH/DoT) bağlantılarını reddet. Varsayılan KAPALI: açıkken Speedtest gibi uygulamalar
+	# "Check your connection" uyarısı veriyordu (Android ağı doğrulanamadı sayıyor). Sayfalar hâlâ askıda kalıyorsa 1 yapın.
+	option block_doh '0'
 	option dns_port '15353'
 	option socks_port '10808'
 	option api_port '10085'

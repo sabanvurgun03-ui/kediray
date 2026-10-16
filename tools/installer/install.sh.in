@@ -317,11 +317,18 @@ if [ -f /etc/config/kediray ]; then
 		case "$(uci -q get kediray.main.dns_direct)" in https*|"") uci set kediray.main.dns_direct=auto ;; esac
 		case "$(uci -q get kediray.main.dns_direct2)" in https*|"") uci set kediray.main.dns_direct2=auto ;; esac
 		[ -n "$(uci -q get kediray.main.dns_hijack)" ] || uci set kediray.main.dns_hijack=1
-		[ -n "$(uci -q get kediray.main.block_doh)" ] || uci set kediray.main.block_doh=1
+		[ -n "$(uci -q get kediray.main.block_doh)" ] || uci set kediray.main.block_doh=0
 		[ -n "$(uci -q get kediray.main.mobile_tune)" ] || uci set kediray.main.mobile_tune=1
 		[ -n "$(uci -q get kediray.main.probe_url2)" ] || uci set kediray.main.probe_url2='https://cp.cloudflare.com/generate_204'
 		uci set kediray.main.cfgver=14; uci commit kediray
 		ok "Bağlantı ve DNS ayarları güncel varsayılanlara getirildi (yakalama: $CAPTURE)"
+	fi
+	# cfgver 15: "Tarayıcıların kendi DNS'ini (DoH) engelle" varsayılan KAPALI. Açıkken Android'in Özel DNS'i reddediliyor ve
+	# Speedtest gibi uygulamalar "Check your connection" uyarısı veriyordu. Bir kerelik kapatılır; sonra isteyen panelden açabilir.
+	if [ "$cv" -lt 15 ] 2>/dev/null; then
+		uci set kediray.main.block_doh=0
+		uci set kediray.main.cfgver=15; uci commit kediray
+		ok "DoH engeli varsayılan olarak kapatıldı (Ayarlar → DNS'ten açılabilir)"
 	fi
 	# Metin2 ışınlanma kopması - kanal portları tek aralık, Gameforge ağı ve komşu /24'ler direkt
 	if [ "$cv" -lt 5 ] 2>/dev/null; then

@@ -523,7 +523,7 @@ function xray() {
 
 	// Tarayıcının kendi DoH'u: engelle -> tarayıcı anında sistem DNS'ine düşer (50 sn'lik askıda kalma biter).
 	// Kural DNS kurallarından SONRA: KediRay'in kendi DoH sorguları (dns-internal) yukarıda çözülmüş olur.
-	if (on(opt('block_doh'), true))
+	if (on(opt('block_doh'), false))
 		push(R, { ruleTag: 'doh-block', inboundTag: ['lan-in', 'lan-in-udp', 'socks-in'],
 			domain: DOH_DOMAINS, port: '443,853', outboundTag: 'block' });
 
@@ -697,7 +697,7 @@ function nft() {
 	set('devip_vpn', 'ipv4_addr', dev.vpn.ip, true);
 	set('devip_direct', 'ipv4_addr', dev.direct.ip, true);
 	// Tarayıcıların kendi DoH sunucuları (443/853 reddedilir; 53 zaten DNS yönlendirmesine takılır)
-	set('doh4', 'ipv4_addr', on(opt('block_doh'), true) ? filter(DOH_IPS, x => x != rem_ip4()) : [], true);
+	set('doh4', 'ipv4_addr', on(opt('block_doh'), false) ? filter(DOH_IPS, x => x != rem_ip4()) : [], true);
 	set('dev_block', 'ether_addr', dev.block.mac, false);
 	set('devip_block', 'ipv4_addr', dev.block.ip, true);
 	// Trafik sayacı: tünelin dış baytları (modemin kendi bağlantısı; donanım hızlandırmaya girmez, kesin sayılır)
@@ -788,7 +788,7 @@ function nft() {
 
 	// Tarayıcının kendi DoH'u, adresi elle yazılmışsa (IP ile): 443/853 anında reddedilir.
 	// Alan adıyla gidenler Xray tarafında engellenir; ikisi birlikte tarayıcıyı sistem DNS'ine döndürür.
-	if (on(opt('block_doh'), true)) {
+	if (on(opt('block_doh'), false)) {
 		push(o, '\tchain doh_fwd {');
 		push(o, '\t\ttype filter hook forward priority filter - 6; policy accept;');
 		push(o, '\t\tmeta nfproto != ipv4 return');

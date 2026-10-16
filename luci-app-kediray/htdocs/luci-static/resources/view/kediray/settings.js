@@ -463,8 +463,8 @@ return view.extend({
 			'Cihaz kendi DNS\'ini (8.8.8.8 gibi) yazsa bile sorgu modemin DNS\'ine yönlendirilir. Kapatmayın: açıkken sorgu tünel/TUN yoluna hiç girmez ve sayfalar belirgin şekilde hızlı açılır (ölçüm: 205 ms yerine 1 ms).');
 		o.default = '1';
 		o = s.taboption('dns', form.Flag, 'block_doh', 'Tarayıcıların kendi DNS\'ini (DoH) engelle',
-			'Chrome ve Firefox "Güvenli DNS" ile sistem DNS\'ini atlayıp doğrudan dns.google / cloudflare-dns.com gibi adreslere sorar. Bu hatta o adreslere ulaşılamadığı için sayfa başına 1-3 istek ~50 saniye askıda kalıyor ve tarayıcıda çark dönmeye devam ediyor. Açıkken bu istekler anında reddedilir (RST/ICMP), tarayıcı hemen KediRay\'in DNS\'ine döner. Alan adı kuralların ve gizliliğin etkilenmez.');
-		o.default = '1';
+			'Chrome ve Firefox "Güvenli DNS" ile sistem DNS\'ini atlayıp doğrudan dns.google / cloudflare-dns.com gibi adreslere sorar. Bu hatta o adreslere ulaşılamadığı için sayfa başına 1-3 istek ~50 saniye askıda kalıyor ve tarayıcıda çark dönmeye devam ediyor. Açıkken bu istekler anında reddedilir (RST/ICMP), tarayıcı hemen KediRay\'in DNS\'ine döner. Alan adı kuralların ve gizliliğin etkilenmez. Varsayılan KAPALI: açıkken telefonun "Özel DNS" ayarı da reddedildiği için Speedtest gibi uygulamalar "Check your connection" uyarısı verebilir. Sayfalar askıda kalıyorsa açın.');
+		o.default = '0';
 		o.rmempty = false;
 
 		o = s.taboption('dns', form.Value, 'dns_direct2', 'Direkt DNS (yedek)',
