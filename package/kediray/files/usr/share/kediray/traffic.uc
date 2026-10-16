@@ -15,6 +15,13 @@ function writej(p, v) { fs.writefile(p + '.tmp', sprintf('%J', v)); fs.rename(p 
 function n(v) { let x = int(v ?? 0); return x != x ? 0 : x; }
 function dkey(ts) { let t = localtime(ts); return sprintf('%04d-%02d-%02d', t.year, t.mon, t.mday); }
 function cur() { return { vr: n(getenv('KR_VR')), vt: n(getenv('KR_VT')), wr: n(getenv('KR_WR')), wt: n(getenv('KR_WT')), t: time() }; }
+// Bir sayaç o an okunamadıysa (nft/ağ okuması boş döndü) 0 SAYILMAZ: son bilinen değer taşınır.
+// 0 sayılırsa son değer 0'a iner, sonraki doğru okuma "tüm sayaç bir anda geldi" diye bir daha eklenirdi (çift sayım).
+function fixc(c, l) {
+	for (let k in ['vr', 'vt', 'wr', 'wt'])
+		if (!length(getenv('KR_' + uc(k)) ?? '')) c[k] = n(l?.[k]);
+	return c;
+}
 function load() {
 	let s = readj(RAMF) ?? readj(FLASHF) ?? {};
 	s.days ??= {};
@@ -37,15 +44,18 @@ function add(b, x) { b.vr = n(b.vr) + x.vr; b.vt = n(b.vt) + x.vt; b.dr = n(b.dr
 // KR_DEVF satırları: "ip<TAB>rx|tx<TAB>bayt"  (rx = cihaza gelen, tx = cihazdan giden)
 function readdev() {
 	let r = {}, f = getenv('KR_DEVF');
-	if (!f) return r;
+	if (!f) return {};
 	for (let l in split(fs.readfile(f) ?? '', '\n')) {
 		let p = split(l, '\t');
 		if (length(p) < 3 || !match(p[0], /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/)) continue;
 		if (p[1] != 'rx' && p[1] != 'tx') continue;
-		r[p[0]] ??= { rx: 0, tx: 0 };
+		r[p[0]] ??= { rx: null, tx: null };
 		r[p[0]][p[1]] = n(p[2]);
 	}
-	return r;
+	// yalnız iki yönü de okunabilen cihazlar: bir zincir okunamadıysa o cihaz bu turda atlanır (0 sayılmaz)
+	let out = {};
+	for (let ip, v in r) if (v.rx != null && v.tx != null) out[ip] = v;
+	return out;
 }
 function leases() { // ip -> { mac, name }
 	let r = {};
@@ -84,7 +94,7 @@ function devsample(s, c) {
 }
 
 if (CMD == 'sample') {
-	let s = load(), c = cur(), x = delta(s, c);
+	let s = load(), c = fixc(cur(), s.last), x = delta(s, c);
 	if (x) { s.days[dkey(c.t)] ??= {}; add(s.days[dkey(c.t)], x); }
 	// oturum toplamı: modem açılışından beri (restore açılışta sıfırlar; flash'ta kalıcı değildir)
 	s.sess ??= { vr: 0, vt: 0, dr: 0, dt: 0 };
@@ -116,7 +126,7 @@ if (CMD == 'restore') {
 if (CMD == 'reset') { fs.unlink(RAMF); fs.unlink(FLASHF); print('ok\n'); exit(0); }
 
 if (CMD == 'report') {
-	let s = load(), c = cur(), live = delta(s, c) ?? { vr: 0, vt: 0, dr: 0, dt: 0 };
+	let s = load(), c = fixc(cur(), s.last), live = delta(s, c) ?? { vr: 0, vt: 0, dr: 0, dt: 0 };
 	let today = dkey(c.t);
 	let day = k => ({ vr: n(s.days[k]?.vr), vt: n(s.days[k]?.vt), dr: n(s.days[k]?.dr), dt: n(s.days[k]?.dt) });
 	let sum = (from) => {

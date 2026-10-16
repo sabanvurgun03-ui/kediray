@@ -2744,7 +2744,8 @@ traffic_env() { # sayaçları ortam değişkeni olarak ver
 	export KR_DEVF="$RUN/dev.cur"
 	KR_VR=$(nft_counter vpn_rx); KR_VT=$(nft_counter vpn_tx)
 	KR_WR=$(cat "/sys/class/net/$dev/statistics/rx_bytes" 2>/dev/null); KR_WT=$(cat "/sys/class/net/$dev/statistics/tx_bytes" 2>/dev/null)
-	export KR_VR="${KR_VR:-0}" KR_VT="${KR_VT:-0}" KR_WR="${KR_WR:-0}" KR_WT="${KR_WT:-0}"
+	# okunamayan sayaç boş kalır (0 değil): traffic.uc son bilinen değeri taşır, çift sayım olmaz
+	export KR_VR KR_VT KR_WR KR_WT
 	[ -f /etc/TZ ] && { TZ=$(cat /etc/TZ); export TZ; }
 }
 traffic_sample() { # [save]
