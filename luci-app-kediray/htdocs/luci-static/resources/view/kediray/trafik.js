@@ -1578,6 +1578,55 @@ return view.extend({
 		t('td', { r: s.total.dr, t: s.total.dt });
 	},
 
+	/* Dönem kutuları (Bugün/Dün/Bu hafta/Bu ay/Toplam): VPN/Direkt ya da İndirme/Yükleme görünümü */
+	perMode() { let m = 'vd'; try { m = localStorage.getItem('kediray-per-mode') || 'vd'; } catch (e) {} return CH[m] ? m : 'vd'; },
+	buildPerSeg() {
+		const btns = {};
+		const paint = () => Object.keys(btns).forEach(k => btns[k].classList.toggle('kr-act', k === this.perMode()));
+		const mk = (k, label) => btns[k] = h('button', { 'class': 'btn', 'click': () => { try { localStorage.setItem('kediray-per-mode', k); } catch (e) {} paint(); if (this.lastStats) this.renderPeriods(this.lastStats); } }, label);
+		const el = h('div', { 'class': 'kr-seg kr-seg-sm', 'style': 'margin:0 0 6px' }, [mk('vd', 'VPN / Direkt'), mk('io', 'İndirme / Yükleme')]);
+		paint();
+		return el;
+	},
+	renderPeriods(s) {
+		const allRows = [['today', 'Bugün', s.today], ['yesterday', 'Dün', s.yesterday], ['week', 'Bu hafta', s.week], ['month', 'Bu ay', s.month], ['total', 'Toplam', s.total]];
+		const rows = allRows.filter(x => !this.layoutCfg.hideRows[x[0]]).map(x => [x[1], x[2], x[0]]);
+		// Dönem karşılaştırması (yalnızca son 30 günlük kovalardan): bugün→dün, dün→önceki gün, bu hafta→geçen hafta aynı süre
+		const dd = s.days || [], tot = x => x.vr + x.vt + x.dr + x.dt, nd = dd.length;
+		const sumD = (i, j) => { let t = 0; for (let k = Math.max(0, i); k <= j && k < nd; k++) t += tot(dd[k]); return t; };
+		const wdx = nd ? (new Date(dd[nd - 1].day + 'T12:00:00').getDay() + 6) % 7 : 0;
+		const notes = {};
+		if (nd >= 3) {
+			const t0 = tot(dd[nd - 1]), t1 = tot(dd[nd - 2]), t2 = tot(dd[nd - 3]);
+			if (t1 > 0) notes.today = { t: 'Dünün %' + Math.round(t0 / t1 * 100) + '\'i', d: 0 };
+			if (t2 > 0) notes.yesterday = { t: Math.round((t1 / t2 - 1) * 100), s: 'önceki güne göre' };
+			if (nd >= wdx + 8) {
+				const cw = sumD(nd - 1 - wdx, nd - 1), pw = sumD(nd - 8 - wdx, nd - 8);
+				if (pw > 0) notes.week = { t: Math.round((cw / pw - 1) * 100), s: 'geçen haftaya göre' };
+			}
+		}
+		const per = (l, b, key) => {
+			const M = CH[this.perMode()], vpn = M.fa(b), dir = M.fb(b), all = vpn + dir, pv = all > 0 ? Math.round(vpn / all * 100) : 0;
+			const pt = fmtParts(all);
+			return h('div', { 'class': 'krl-tile krl-per' }, [
+				h('div', { 'class': 'krl-val' }, [h('span', { 'class': 'krl-num' }, pt[0]), h('span', { 'class': 'krl-unit' }, pt[1])]),
+				h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, [h('i', { 'class': M.ca }), M.a + ' ' + fmtBytes(vpn)]),
+				h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': M.cb }), M.b + ' ' + fmtBytes(dir)]),
+				h('div', { 'class': 'krl-bar' }, [h('span', { 'class': M.ca, 'style': 'width:' + (all > 0 ? pv : 0) + '%' }), h('span', { 'class': M.cb, 'style': 'width:' + (all > 0 ? 100 - pv : 0) + '%' })]),
+				(() => {
+					const nt = notes[key];
+					if (!nt) return '';
+					if (nt.d === 0) return h('div', { 'class': 'krl-sub krl-cmp' }, nt.t);
+					const up = nt.t > 0, same = nt.t === 0;
+					return h('div', { 'class': 'krl-sub krl-cmp ' + (same ? '' : up ? 'krl-cup' : 'krl-cdn') }, (same ? '＝ ' : up ? '▲ %' : '▼ %') + Math.abs(nt.t) + ' · ' + nt.s);
+				})(),
+				h('div', { 'class': 'krl-lbl' }, l)
+			]);
+		};
+		dom.content(this.elPeriods, h('div', { 'class': 'krl-pgrid kr-traffic' }, rows.map(([l, b, k]) => per(l, b, k))));
+
+	},
+
 	renderTraffic(s) {
 		if (!s || !s.counters || !s.today) { this.card(this.elTraffic, 'traffic', 'Trafik', h('div', { 'class': 'kr-sub' }, 'Henüz veri yok')); this.trafficBuilt = false; return; }
 		const r = this.trafficLive(s);
@@ -1609,7 +1658,7 @@ return view.extend({
 			const rangeSeg = segment([[7, '7 gün'], [30, '30 gün']], k => { cs.range = +k; cs.sel = null; again(); });
 			this.secs = {
 				live: this.elLive,
-				periods: this.fold('t-periods', 'Bugün / Dün / Bu hafta / Bu ay / Toplam', this.elPeriods),
+				periods: this.fold('t-periods', 'Bugün / Dün / Bu hafta / Bu ay / Toplam', h('div', {}, [this.buildPerSeg(), this.elPeriods])),
 				devs: this.fold('t-devs', 'Cihaz bazında trafik', this.elDevTr),
 				chart: this.fold('t-chart', 'Trafik geçmişi', h('div', {}, [
 					this.elChartTiles,
@@ -1634,41 +1683,7 @@ return view.extend({
 
 		this.renderLiveBand(s, r);
 
-		const allRows = [['today', 'Bugün', s.today], ['yesterday', 'Dün', s.yesterday], ['week', 'Bu hafta', s.week], ['month', 'Bu ay', s.month], ['total', 'Toplam', s.total]];
-		const rows = allRows.filter(x => !this.layoutCfg.hideRows[x[0]]).map(x => [x[1], x[2], x[0]]);
-		// Dönem karşılaştırması (yalnızca son 30 günlük kovalardan): bugün→dün, dün→önceki gün, bu hafta→geçen hafta aynı süre
-		const dd = s.days || [], tot = x => x.vr + x.vt + x.dr + x.dt, nd = dd.length;
-		const sumD = (i, j) => { let t = 0; for (let k = Math.max(0, i); k <= j && k < nd; k++) t += tot(dd[k]); return t; };
-		const wdx = nd ? (new Date(dd[nd - 1].day + 'T12:00:00').getDay() + 6) % 7 : 0;
-		const notes = {};
-		if (nd >= 3) {
-			const t0 = tot(dd[nd - 1]), t1 = tot(dd[nd - 2]), t2 = tot(dd[nd - 3]);
-			if (t1 > 0) notes.today = { t: 'Dünün %' + Math.round(t0 / t1 * 100) + '\'i', d: 0 };
-			if (t2 > 0) notes.yesterday = { t: Math.round((t1 / t2 - 1) * 100), s: 'önceki güne göre' };
-			if (nd >= wdx + 8) {
-				const cw = sumD(nd - 1 - wdx, nd - 1), pw = sumD(nd - 8 - wdx, nd - 8);
-				if (pw > 0) notes.week = { t: Math.round((cw / pw - 1) * 100), s: 'geçen haftaya göre' };
-			}
-		}
-		const per = (l, b, key) => {
-			const vpn = b.vr + b.vt, dir = b.dr + b.dt, all = vpn + dir, pv = all > 0 ? Math.round(vpn / all * 100) : 0;
-			const pt = fmtParts(all);
-			return h('div', { 'class': 'krl-tile krl-per' }, [
-				h('div', { 'class': 'krl-val' }, [h('span', { 'class': 'krl-num' }, pt[0]), h('span', { 'class': 'krl-unit' }, pt[1])]),
-				h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, [h('i', { 'class': 'krc-vpn' }), 'VPN ' + fmtBytes(vpn)]),
-				h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': 'krc-dir' }), 'Direkt ' + fmtBytes(dir)]),
-				h('div', { 'class': 'krl-bar' }, [h('span', { 'class': 'krc-vpn', 'style': 'width:' + (all > 0 ? pv : 0) + '%' }), h('span', { 'class': 'krc-dir', 'style': 'width:' + (all > 0 ? 100 - pv : 0) + '%' })]),
-				(() => {
-					const nt = notes[key];
-					if (!nt) return '';
-					if (nt.d === 0) return h('div', { 'class': 'krl-sub krl-cmp' }, nt.t);
-					const up = nt.t > 0, same = nt.t === 0;
-					return h('div', { 'class': 'krl-sub krl-cmp ' + (same ? '' : up ? 'krl-cup' : 'krl-cdn') }, (same ? '＝ ' : up ? '▲ %' : '▼ %') + Math.abs(nt.t) + ' · ' + nt.s);
-				})(),
-				h('div', { 'class': 'krl-lbl' }, l)
-			]);
-		};
-		dom.content(this.elPeriods, h('div', { 'class': 'krl-pgrid kr-traffic' }, rows.map(([l, b, k]) => per(l, b, k))));
+		this.renderPeriods(s);
 
 		this.renderDevTraffic(s.devices || [], s.t, s.others);
 
