@@ -416,7 +416,7 @@ const CSS = `
 .krl-svg{width:100%;height:100%;display:block}
 .krl-line{fill:none;stroke:var(--c);stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .krl-area{fill:var(--c);opacity:.14}
-.krl-val{margin-top:22px;font-variant-numeric:tabular-nums;color:var(--c);line-height:1.1;white-space:nowrap}
+.krl-val{margin-top:27px;font-variant-numeric:tabular-nums;color:var(--c);line-height:1.1;white-space:nowrap}
 .krl-sdown .krl-val,.krl-sup .krl-val,.krl-info .krl-val{margin-top:4px}
 .krl-num{font-size:1.2em;font-weight:700}
 .krl-unit{font-size:.88em;font-weight:600;margin-left:3px;opacity:.9}
@@ -427,7 +427,7 @@ const CSS = `
 .krl-info .krl-val{font-size:1.02em;font-weight:700;color:inherit;margin-top:4px}
 .krl-bar{display:flex;width:100%;height:4px;margin-top:4px;border-radius:5px;overflow:hidden;background:rgba(128,128,128,.22)}
 .krl-bar span{display:block;height:100%;transition:width .4s}
-.krl-usw{display:flex;justify-content:flex-end;align-items:center;gap:2px;margin:0 2px 4px;font-size:.76em;letter-spacing:.03em;user-select:none}
+.krl-usw{display:flex;justify-content:flex-end;align-items:center;gap:2px;margin:0 -7px 3px 0;font-size:.76em;letter-spacing:.03em;user-select:none}
 .krl-usw span{cursor:pointer;padding:3px 7px;opacity:.5;border-radius:6px;transition:opacity .2s,color .2s}
 .krl-usw span:hover{opacity:.85}
 .krl-usw span.krl-on{opacity:1;color:var(--kr-accent,#2a7de1);font-weight:600}
