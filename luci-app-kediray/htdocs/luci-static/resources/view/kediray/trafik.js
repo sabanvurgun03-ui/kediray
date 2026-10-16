@@ -1349,7 +1349,8 @@ return view.extend({
 		const c = this.layoutCfg, ed = this.editing, out = [];
 		dom.content(this.elTools, [
 			h('button', { 'class': 'btn cbi-button' + (ed ? ' cbi-button-positive' : ''), 'click': ui.createHandlerFn(this, () => { this.editing = !this.editing; this.layout(); }) }, ed ? '✓ Bitti' : '⚙ Düzenle'),
-			ed ? h('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, () => { this.layoutCfg = { order: ['live', 'periods', 'devs', 'chart'], hide: {}, hideRows: {} }; this.relayout(); }) }, 'Varsayılana dön') : ''
+			ed ? h('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, () => { this.layoutCfg = { order: ['live', 'periods', 'devs', 'chart'], hide: {}, hideRows: {} }; this.relayout(); }) }, 'Varsayılana dön') : '',
+			(!c.hide.live || ed) ? this.elRate : ''
 		]);
 		c.order.forEach((k, i) => {
 			if (c.hide[k] && !ed) return;
@@ -1582,7 +1583,8 @@ return view.extend({
 		if (!this.trafficBuilt) {
 			this.elLive = h('div', {});
 			this.lb = { hd: [], hu: [] };
-			this.elLive.appendChild(this.buildRateSeg());
+			this.elRate = this.buildRateSeg();
+			this.elRate.style.margin = '0 -7px 0 auto';
 			this.elLive.appendChild(this.buildLiveBand());
 			this.elPeriods = h('div', {});
 			this.elDevTr = h('div', {});
