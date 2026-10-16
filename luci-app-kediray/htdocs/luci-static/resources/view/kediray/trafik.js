@@ -41,6 +41,7 @@ const CH = {   // grafik görünümleri: a = alttaki, b = üstteki parça
 };
 const GUN = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 function gunAd(day) { const d = new Date(day + 'T12:00:00'); return (isNaN(d) ? '' : GUN[d.getDay()] + ' ') + day.slice(8) + '.' + day.slice(5, 7); }
+const MAX_RATE = 1.5e9;   // B/s: bunun üstü sayaç sıfırlanma/okuma hatasıdır, örnek yok sayılır
 const LIVE_N = 60;   // canlı hız çizgisinde tutulan örnek sayısı (2 sn aralıkla ≈ 2 dk)
 // büyük sayı + küçük birim olarak ayrı verir: 12.81 · GB
 function fmtParts(b) {
@@ -1346,7 +1347,7 @@ return view.extend({
 		if (p && s.t > p.t) {
 			const dt = s.t - p.t, pc = p.counters;
 			// sayaç sıfırlandıysa (tablo yeniden kuruldu) fark = şimdiki değer
-			const d = (a, b) => (a >= b ? a - b : a) / dt;
+			const d = (a, b) => { const v = (a >= b ? a - b : a) / dt; return v > MAX_RATE ? 0 : v; };
 			const vd = d(c.vr, pc.vr), vu = d(c.vt, pc.vt);
 			r = { vd, vu, dd: Math.max(0, d(c.wr, pc.wr) - vd), du: Math.max(0, d(c.wt, pc.wt) - vu) };
 		} else if (this.liveRate) r = this.liveRate;
@@ -1601,9 +1602,9 @@ return view.extend({
 			this.devPrev = next; this.devHist = hist;
 			return;
 		}
-		let sdd = 0, sdu = 0, srx = 0, stx = 0, mrx = 0, mtx = 0, trx = 0, ttx = 0;
+		let srx = 0, stx = 0;
 		if (others && others.n) {   // ağdan ayrılmış cihazlar listede yok, ama toplamlara dahil
-			srx += others.today.rx; stx += others.today.tx; mrx += others.month.rx; mtx += others.month.tx; trx += others.total.rx; ttx += others.total.tx;
+			srx += others.today.rx; stx += others.today.tx;
 		}
 		const hide = (() => { try { return localStorage.getItem('kr_hide_ids') === '1'; } catch (e) { return false; } })();
 		const maskIp = ip => (hide && /^\d+\.\d+\.\d+\.\d+$/.test(ip)) ? '•••.•••.•••.' + ip.split('.')[3] : ip;
@@ -1612,7 +1613,7 @@ return view.extend({
 			const c = dv.counter, p = prev[dv.ip];
 			if (c) {
 				if (p && t > p.t) {
-					const dt = t - p.t, f = (a, b) => (a >= b ? a - b : a) / dt;
+					const dt = t - p.t, f = (a, b) => { const v = (a >= b ? a - b : a) / dt; return v > MAX_RATE ? 0 : v; };
 					dd = f(c.rx, p.rx); du = f(c.tx, p.tx);
 				}
 				next[dv.ip] = { t: t, rx: c.rx, tx: c.tx };
@@ -1620,8 +1621,7 @@ return view.extend({
 			const hs = (oldHist[dv.ip] || []).concat([dd + du]);
 			if (hs.length > LIVE_N) hs.shift();
 			hist[dv.ip] = hs;
-			sdd += dd; sdu += du;
-			srx += dv.today.rx; stx += dv.today.tx; mrx += dv.month.rx; mtx += dv.month.tx; trx += dv.total.rx; ttx += dv.total.tx;
+			srx += dv.today.rx; stx += dv.today.tx;
 			return { dv, dd, du, hs };
 		});
 		this.devPrev = next; this.devHist = hist;
@@ -1629,28 +1629,6 @@ return view.extend({
 		list.sort((x, y) => (y.dv.today.rx + y.dv.today.tx) - (x.dv.today.rx + x.dv.today.tx));
 
 		const rate = v => { const q = fmtParts(v); return [q[0], q[1] + '/s']; };
-		const sumTile = (cls, label, v, subTxt) => {
-			const q = fmtParts(v);
-			return h('div', { 'class': 'krl-tile ' + cls }, [
-				h('div', { 'class': 'krl-val' }, [h('span', { 'class': 'krl-num' }, q[0]), h('span', { 'class': 'krl-unit' }, q[1])]),
-				subTxt ? h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, subTxt) : '',
-				h('div', { 'class': 'krl-lbl' }, label)
-			]);
-		};
-		const rateTile = (cls, label, v) => {
-			const q = rate(v);
-			return h('div', { 'class': 'krl-tile ' + cls }, [
-				h('div', { 'class': 'krl-val', 'style': 'margin-top:4px' }, [h('span', { 'class': 'krl-num' }, q[0]), h('span', { 'class': 'krl-unit' }, q[1])]),
-				h('div', { 'class': 'krl-lbl' }, label)
-			]);
-		};
-		const summary = h('div', { 'class': 'krl-band kr-traffic' }, [
-			rateTile('krl-down', 'Şu an indirme (' + devs.length + ' cihaz)', sdd),
-			rateTile('krl-up', 'Şu an yükleme', sdu),
-			sumTile('krl-per', 'Bugün', srx + stx, '↓ ' + fmtBytes(srx) + ' · ↑ ' + fmtBytes(stx)),
-			sumTile('krl-per', 'Bu ay', mrx + mtx, '↓ ' + fmtBytes(mrx) + ' · ↑ ' + fmtBytes(mtx)),
-			sumTile('krl-per', 'Toplam', trx + ttx, '↓ ' + fmtBytes(trx) + ' · ↑ ' + fmtBytes(ttx))
-		]);
 
 		const cards = list.map(({ dv, dd, du, hs }) => {
 			const dtot = dv.today.rx + dv.today.tx, pct = Math.min(100, Math.round(dtot / todayAll * 100));
@@ -1670,7 +1648,6 @@ return view.extend({
 			]);
 		});
 		dom.content(this.elDevTr, [
-			summary,
 			h('div', { 'class': 'krl-band krl-dgrid kr-traffic' }, cards),
 			h('div', { 'class': 'kr-sub', 'style': 'margin-top:6px' }, '↓ cihaza gelen (indirme), ↑ cihazdan giden (yükleme). Çubuk, cihazın bugünkü payı. VPN ve direkt trafik birlikte sayılır. Sayaçlar modem yeniden başlasa da saklanır; donanım hızlandırma (NSS) açıksa direkt giden büyük akışlar eksik görünebilir.')
 		]);
