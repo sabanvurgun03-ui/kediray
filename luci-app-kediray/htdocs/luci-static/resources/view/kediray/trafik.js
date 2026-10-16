@@ -410,6 +410,7 @@ const CSS = `
 .krl-num{font-size:1.2em;font-weight:700}
 .krl-unit{font-size:.88em;font-weight:600;margin-left:3px;opacity:.9}
 .krl-lbl{margin-top:3px;padding-top:3px;width:100%;border-top:1px solid rgba(128,128,128,.25);font-size:.62em;font-weight:600;letter-spacing:.09em;text-transform:uppercase;opacity:.75}
+.krl-peak{margin-top:0;font-size:.68em;opacity:.65;font-variant-numeric:tabular-nums}
 .krl-sub{margin-top:1px;font-size:.7em;opacity:.8;font-variant-numeric:tabular-nums;line-height:1.5}
 .krl-sub i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
 .krl-per .krl-val{color:inherit;font-size:1.02em;font-weight:700}
@@ -1521,7 +1522,8 @@ return view.extend({
 		};
 		const speed = (k, cls, label) => {
 			lb[k + 'S'] = h('div', { 'class': 'krl-spark' });
-			return h('div', { 'class': 'krl-tile ' + cls }, [lb[k + 'S'], big(k), ...split(k, 'VPN', 'Direkt'), h('div', { 'class': 'krl-lbl' }, label)]);
+			lb[k + 'P'] = h('div', { 'class': 'krl-peak' }, 'Tepe: —');
+			return h('div', { 'class': 'krl-tile ' + cls }, [lb[k + 'S'], big(k), lb[k + 'P'], ...split(k, 'VPN', 'Direkt'), h('div', { 'class': 'krl-lbl' }, label)]);
 		};
 		const tot = (k, cls, label) => {
 			lb[k + 'T'] = h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, '—');
@@ -1564,6 +1566,8 @@ return view.extend({
 		rate('d', lb.cd); rate('u', lb.cu);
 		lb.dS.innerHTML = sparkSvg(lb.hd, N);   // yalnızca sayılardan üretilen SVG
 		lb.uS.innerHTML = sparkSvg(lb.hu, N);
+		lb.dP.textContent = 'Tepe: ' + (lb.pd > 0 ? fmtRate(lb.pd) : '—');
+		lb.uP.textContent = 'Tepe: ' + (lb.pu > 0 ? fmtRate(lb.pu) : '—');
 		lb.dV.textContent = fmtRate(r.vd); lb.dD.textContent = fmtRate(r.dd);
 		lb.uV.textContent = fmtRate(r.vu); lb.uD.textContent = fmtRate(r.du);
 		const t = (k, b) => { const p = fmtParts(b.r + b.t); lb[k + 'N'].textContent = p[0]; lb[k + 'U'].textContent = p[1]; lb[k + 'T'].textContent = '↓ ' + fmtBytes(b.r) + ' · ↑ ' + fmtBytes(b.t); };
