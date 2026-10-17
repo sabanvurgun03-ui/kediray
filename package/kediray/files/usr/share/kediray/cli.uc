@@ -49,6 +49,17 @@ function pings() {
 }
 function out(x) { print(sprintf('%J\n', x)); }
 
+// Elle sıralama: main.node_order = "ad|adres:port" anahtarları. Abonelik güncellenip sunucular yeniden eklense de (bölüm adı değişir)
+// aynı ad+adres+port aynı yerde kalır; listede olmayanlar sona gider.
+function node_key(s) { return (s.remarks ?? '') + '|' + (s.address ?? '') + ':' + (s.port ?? ''); }
+function ordered_nodes(c) {
+	let list = [], ord = c.get_all('kediray', 'main')?.node_order ?? [], pos = {};
+	if (type(ord) != 'array') ord = [ord];
+	for (let i = 0; i < length(ord); i++) if (pos[ord[i]] == null) pos[ord[i]] = i;
+	c.foreach('kediray', 'node', s => push(list, { s: s, k: node_key(s), i: length(list) }));
+	return sort(list, (a, b) => ((pos[a.k] ?? 1000000) - (pos[b.k] ?? 1000000)) || (a.i - b.i));
+}
+
 if (CMD == 'status') {
 	let c = cursor();
 	let m = c.get_all('kediray', 'main') || {};
@@ -81,11 +92,24 @@ if (CMD == 'status') {
 		last_error: m.enabled == '1' && getenv('KR_RUNNING') != '1' ? trim(fs.readfile(RUN + '/last_error') ?? '') || null : null
 	});
 }
+else if (CMD == 'node-move') {   // node-move <bölüm> up|down — komşusuyla yer değiştirir
+	const u = require('uci').cursor();
+	let list = ordered_nodes(u), sec = ARGV[1], dir = ARGV[2], idx = -1;
+	for (let i = 0; i < length(list); i++) if (list[i].s['.name'] == sec) idx = i;
+	let j = dir == 'up' ? idx - 1 : (dir == 'down' ? idx + 1 : -1);
+	if (idx < 0 || j < 0 || j >= length(list)) { out({ ok: false, moved: false }); exit(idx < 0 ? 1 : 0); }
+	let t = list[idx]; list[idx] = list[j]; list[j] = t;
+	u.set('kediray', 'main', 'node_order', map(list, x => x.k));
+	u.save('kediray');
+	u.commit('kediray');
+	out({ ok: true, moved: true });
+}
 else if (CMD == 'nodes') {
 	let c = cursor(), p = pings(), res = [];
 	let tsv = {};
 	for (let n in nodes_tsv()) tsv[n.sec] = n;
-	c.foreach('kediray', 'node', s => {
+	for (let it in ordered_nodes(c)) {
+		let s = it.s;
 		let t = tsv[s['.name']];
 		push(res, {
 			sec: s['.name'], name: s.remarks || ((s.address ?? '?') + ':' + (s.port ?? '')),
@@ -95,7 +119,7 @@ else if (CMD == 'nodes') {
 			tag: t?.tag, insecure: t?.insecure ?? false, pinned: t?.pinned ?? false,
 			ping: p[s['.name']]?.ms, ping_at: p[s['.name']]?.at, rtt: p[s['.name']]?.rtt, warm: p[s['.name']]?.warm
 		});
-	});
+	}
 	out(res);
 }
 else if (CMD == 'apps') {

@@ -3334,6 +3334,7 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray rollback <servis> KediRay'i kapat, eski VPN'i geri aç
   kediray add <link|dosya>  vless/vmess/trojan/ss linki veya Xray JSON ekle (stdin de olur)
   kediray sub               Abonelikleri güncelle
+  kediray node-move <id> up|down   Sunucuyu listede yukarı/aşağı taşı (sıra elle belirlenir)
   kediray use <id|auto>     Sunucu değiştir (bağlantıları koparmadan)
   kediray ping [id|all]     Sunucu gecikmesini ölç
   kediray best              En hızlı sunucuyu bul ve ona geç
@@ -3433,6 +3434,7 @@ case "$cmd" in
 	engine-log) cmd_engine_log ;;
 	device) cmd_device "$@" ;;
 	nodes) ucode "$SHARE/cli.uc" nodes ;;
+	node-move) ucode "$SHARE/cli.uc" node-move "$@" ;;
 	apps) ucode "$SHARE/cli.uc" apps ;;
 	devices) ucode "$SHARE/cli.uc" devices ;;
 	stats) cmd_stats ;;
