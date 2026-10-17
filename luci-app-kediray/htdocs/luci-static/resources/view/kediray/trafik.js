@@ -1509,12 +1509,15 @@ return view.extend({
 		const big = v => { const q = fmtParts(v); return h('div', { 'class': 'krl-val' }, [h('span', { 'class': 'krl-num' }, q[0]), h('span', { 'class': 'krl-unit' }, q[1])]); };
 		const dot = (cls, txt) => h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': cls }), txt]);
 		const aA = A / na, aB = Bv / na;
+		// bu ayın toplamı (takvim ayı) ÷ ayın başından bugüne geçen gün sayısı
+		const ym = last.day.slice(0, 7), moDay = Math.max(1, +last.day.slice(8, 10) || 1);
+		const moTot = (this.days || []).filter(x => x.day.slice(0, 7) === ym).reduce((p, x) => p + M.fa(x) + M.fb(x), 0), moAvg = moTot / moDay;
 		dom.content(this.elChartTiles, h('div', { 'class': 'krl-band' }, [
 			h('div', { 'class': 'krl-tile krl-per' }, [big(avg), dot(M.ca, M.a + ' ' + fmtBytes(aA)), dot(M.cb, M.b + ' ' + fmtBytes(aB)),
 				h('div', { 'class': 'krl-bar' }, [h('span', { 'class': M.ca, 'style': 'width:' + (all > 0 ? pv : 0) + '%' }), h('span', { 'class': M.cb, 'style': 'width:' + (all > 0 ? 100 - pv : 0) + '%' })]),
 				h('div', { 'class': 'krl-lbl' }, 'Günlük ortalama (' + na + ' gün)')]),
 			h('div', { 'class': 'krl-tile krl-per' }, [big(avg / 24), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'bugün günlük ortalamanın %' + (avg > 0 ? Math.round(lv / avg * 100) : 0) + '\'i'), h('div', { 'class': 'krl-lbl' }, 'Saatlik ortalama')]),
-			h('div', { 'class': 'krl-tile krl-per' }, [big(avg * 30), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'günlük ortalama × 30 gün'), h('div', { 'class': 'krl-lbl' }, 'Aylık tahmin')]),
+			h('div', { 'class': 'krl-tile krl-per' }, [big(moAvg), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'bu ay ' + fmtBytes(moTot) + ' ÷ ' + moDay + ' gün'), h('div', { 'class': 'krl-lbl' }, 'Bu ay ortalama')]),
 			h('div', { 'class': 'krl-tile krl-per' }, [big(Math.max(0, mxv)), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, gunAd(mx.day)), h('div', { 'class': 'krl-lbl' }, 'En yoğun gün')])
 		]));
 	},
