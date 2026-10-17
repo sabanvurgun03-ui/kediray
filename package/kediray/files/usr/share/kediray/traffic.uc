@@ -101,9 +101,15 @@ if (CMD == 'sample') {
 	if (x) add(s.sess, x);
 	s.last = c;
 	devsample(s, c);
-	// 100 günden eskiyi at
+	// 100 günden eski günlük kovaları ay toplamına (s.months) katıp at: aylık görünüm ve genel toplam kaybolmaz
 	let ks = sort(keys(s.days));
-	while (length(ks) > 100) delete s.days[shift(ks)];
+	while (length(ks) > 100) {
+		let k = shift(ks), mk = substr(k, 0, 7);
+		s.months ??= {};
+		s.months[mk] ??= {};
+		add(s.months[mk], { vr: n(s.days[k]?.vr), vt: n(s.days[k]?.vt), dr: n(s.days[k]?.dr), dt: n(s.days[k]?.dt) });
+		delete s.days[k];
+	}
 	fs.mkdir(RUN);
 	writej(RAMF, s);
 	if (ARGV[1] == 'save' || time() - n(s.saved) >= 3600) { s.saved = time(); writej(RAMF, s); writej(FLASHF, s); }
@@ -132,6 +138,8 @@ if (CMD == 'report') {
 	let sum = (from) => {
 		let t = { vr: 0, vt: 0, dr: 0, dt: 0 };
 		for (let k, v in s.days) if (k >= from && k <= today) add(t, day(k));
+		if (from == '0000-00-00')   // genel toplam: 100 günden eski, aylara katılmış kısım da dahil
+			for (let mk, mv in (s.months ?? {})) add(t, { vr: n(mv.vr), vt: n(mv.vt), dr: n(mv.dr), dt: n(mv.dt) });
 		add(t, live);   // son örneklemeden bu yana (henüz kovaya yazılmamış) kısım
 		return t;
 	};
@@ -149,6 +157,18 @@ if (CMD == 'report') {
 		push(hist, { day: k, ...v });
 	}
 	let first = sort(keys(s.days))[0];
+	// aylık görünüm: son 12 ay (günlük kovalar + 100 günden eski ay toplamları); nd = o ayda geçen gün sayısı (ortalama için)
+	let ym = sprintf('%04d-%02d', lt.year, lt.mon);
+	let dim = (y, m) => (m == 2 ? ((y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)) ? 29 : 28) : [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]);
+	let mm = {};
+	for (let mk, mv in (s.months ?? {})) mm[mk] = { vr: n(mv.vr), vt: n(mv.vt), dr: n(mv.dr), dt: n(mv.dt) };
+	for (let k, v in s.days) { let mk = substr(k, 0, 7); mm[mk] ??= { vr: 0, vt: 0, dr: 0, dt: 0 }; add(mm[mk], day(k)); }
+	mm[ym] ??= { vr: 0, vt: 0, dr: 0, dt: 0 };
+	add(mm[ym], live);
+	let months = [];
+	for (let mk in sort(keys(mm)))
+		push(months, { day: mk + '-01', ...mm[mk], nd: mk == ym ? lt.mday : dim(int(substr(mk, 0, 4)), int(substr(mk, 5, 2))) });
+	if (length(months) > 12) months = slice(months, length(months) - 12);
 
 	// cihazlar: bugün / hafta / ay / toplam (rx = indirme, tx = yükleme) + canlı hız için ham sayaç
 	let cd = readdev(), devs = [];
@@ -215,7 +235,7 @@ if (CMD == 'report') {
 
 	print(sprintf('%J\n', {
 		t: c.t, counters: c, today: t_today, yesterday: day(yest), week: sum(week), month: sum(month),
-		total: sum('0000-00-00'), since: first, days: hist, devices: devs, others: others,
+		total: sum('0000-00-00'), since: first, days: hist, months: months, devices: devs, others: others,
 		session: sess, uptime: upt
 	}));
 	exit(0);

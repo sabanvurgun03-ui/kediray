@@ -40,6 +40,10 @@ const CH = {   // grafik görünümleri: a = alttaki, b = üstteki parça
 };
 const GUN = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 function gunAd(day) { const d = new Date(day + 'T12:00:00'); return (isNaN(d) ? '' : GUN[d.getDay()] + ' ') + day.slice(8) + '.' + day.slice(5, 7); }
+const AY = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+// grafik kovasının adı: gün ("Cmt 17.10") ya da ay ("Ekim 2026")
+function kovaAd(x) { return x.mo ? (AY[+x.day.slice(5, 7) - 1] || '') + ' ' + x.day.slice(0, 4) : gunAd(x.day); }
+function kovaKisa(x) { return x.mo ? (AY[+x.day.slice(5, 7) - 1] || '').slice(0, 3) : x.day.slice(8) + '.' + x.day.slice(5, 7); }
 const LIVE_N = 60;   // canlı hız çizgisinde tutulan örnek sayısı (2 sn aralıkla ≈ 2 dk)
 // büyük sayı + küçük birim olarak ayrı verir: 12.81 · GB
 function fmtParts(b) {
@@ -1424,7 +1428,7 @@ return view.extend({
 		if (!this.cs) {
 			let c = null;
 			try { c = JSON.parse(localStorage.getItem('kediray-trafik-chart') || 'null'); } catch (e) {}
-			this.cs = { mode: 'io', range: c && +c.range === 7 ? 7 : 30, sel: null, anim: true };
+			this.cs = { mode: 'io', range: c && c.range === 'a' ? 'a' : (c && +c.range === 7 ? 7 : 30), sel: null, anim: true };
 		}
 		return this.cs;
 	},
@@ -1455,7 +1459,8 @@ return view.extend({
 		const step = ([1, 1.5, 2, 2.5, 3, 4, 5, 6, 7.5, 8, 10, 15, 20].map(m => m * mag).find(v => v * 4 >= mu * 1.02) || 20 * mag) * unit;
 		const top = step * 4;
 		const y = v => T + ph - (v / top) * ph;
-		const avg = this.monthAvg(M).avg;   // çizgi: bu ayın ortalaması (7 ve 30 günlük görünümde aynı)
+		// çizgi: günlük görünümde bu ayın günlük ortalaması; aylık görünümde verisi olan ayların ortalaması
+		const act = tot.filter(v => v > 0), avg = cs.range === 'a' ? (act.length ? act.reduce((p, v) => p + v, 0) / act.length : 0) : this.monthAvg(M).avg;
 		let g = '';
 		for (let i = 0; i <= 4; i++) {
 			const v = top * i / 4, yy = y(v).toFixed(1);
@@ -1477,18 +1482,19 @@ return view.extend({
 			// gezinme/dokunma hedefi: sütunun tamamı (seçili gün vurgulu)
 			bars += '<rect x="' + (L + slot * i).toFixed(1) + '" y="' + T + '" width="' + slot.toFixed(1) + '" height="' + ph + '" class="krc-hit' + (i === sel ? ' krc-sel' : '') + '" data-i="' + i + '"/>';
 			if (i % Math.ceil(n / (W < 500 ? 5 : 10)) === 0 || i === n - 1)
-				bars += '<text x="' + cx.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" class="krc-ax' + (i === n - 1 ? ' krc-axb' : '') + '">' + x.day.slice(8) + '.' + x.day.slice(5, 7) + '</text>';
+				bars += '<text x="' + cx.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" class="krc-ax' + (i === n - 1 ? ' krc-axb' : '') + '">' + kovaKisa(x) + '</text>';
 		});
 		// günlük ortalama (kesikli çizgi)
 		const ya = y(avg).toFixed(1);
 		bars += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + ya + '" y2="' + ya + '" class="krc-avg"/>' +
-			'<text x="' + (W - R - 2) + '" y="' + (+ya - 4) + '" text-anchor="end" class="krc-avgt">ay ort. ' + fmtBytes(avg) + '</text>';
-		return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" class="krc-svg' + (cs.anim ? ' krc-anim' : '') + '" role="img" aria-label="Günlük trafik (' + M.a + ' ve ' + M.b + ')">' + g + bars + '</svg>';
+			'<text x="' + (W - R - 2) + '" y="' + (+ya - 4) + '" text-anchor="end" class="krc-avgt">' + (cs.range === 'a' ? 'ort. ' : 'ay ort. ') + fmtBytes(avg) + '</text>';
+		return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" class="krc-svg' + (cs.anim ? ' krc-anim' : '') + '" role="img" aria-label="' + (cs.range === 'a' ? 'Aylık' : 'Günlük') + ' trafik (' + M.a + ' ve ' + M.b + ')">' + g + bars + '</svg>';
 	},
 
 	chartDays() {
-		const cs = this.chartState(), all = this.days || [];
-		return all.slice(-cs.range);
+		const cs = this.chartState();
+		if (cs.range === 'a') return (this.months || []).map(x => Object.assign({ mo: true }, x));
+		return (this.days || []).slice(-cs.range);
 	},
 	chartSel(n) {
 		const cs = this.chartState();
@@ -1510,13 +1516,15 @@ return view.extend({
 		const dot = (cls, txt) => h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': cls }), txt]);
 		const aA = A / na, aB = Bv / na;
 		const mo = this.monthAvg(M), moTot = mo.tot, moDay = mo.day, moAvg = mo.avg;
+		const isM = cs.range === 'a', ndSum = days.slice(i0).reduce((p, x) => p + Math.max(1, x.nd || 1), 0);
 		dom.content(this.elChartTiles, h('div', { 'class': 'krl-band' }, [
 			h('div', { 'class': 'krl-tile krl-per' }, [big(avg), dot(M.ca, M.a + ' ' + fmtBytes(aA)), dot(M.cb, M.b + ' ' + fmtBytes(aB)),
 				h('div', { 'class': 'krl-bar' }, [h('span', { 'class': M.ca, 'style': 'width:' + (all > 0 ? pv : 0) + '%' }), h('span', { 'class': M.cb, 'style': 'width:' + (all > 0 ? 100 - pv : 0) + '%' })]),
-				h('div', { 'class': 'krl-lbl' }, 'Günlük ortalama (' + na + ' gün)')]),
-			h('div', { 'class': 'krl-tile krl-per' }, [big(avg / 24), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'bugün günlük ortalamanın %' + (avg > 0 ? Math.round(lv / avg * 100) : 0) + '\'i'), h('div', { 'class': 'krl-lbl' }, 'Saatlik ortalama')]),
+				h('div', { 'class': 'krl-lbl' }, (isM ? 'Aylık ortalama (' + na + ' ay)' : 'Günlük ortalama (' + na + ' gün)'))]),
+			(isM ? h('div', { 'class': 'krl-tile krl-per' }, [big(all / Math.max(1, ndSum)), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'verisi olan aylar'), h('div', { 'class': 'krl-lbl' }, 'Günlük ortalama')])
+				: h('div', { 'class': 'krl-tile krl-per' }, [big(avg / 24), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'bugün günlük ortalamanın %' + (avg > 0 ? Math.round(lv / avg * 100) : 0) + '\'i'), h('div', { 'class': 'krl-lbl' }, 'Saatlik ortalama')])),
 			h('div', { 'class': 'krl-tile krl-per' }, [big(moAvg), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'bu ay ' + fmtBytes(moTot) + ' ÷ ' + moDay + ' gün'), h('div', { 'class': 'krl-lbl' }, 'Bu ay ortalama')]),
-			h('div', { 'class': 'krl-tile krl-per' }, [big(Math.max(0, mxv)), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, gunAd(mx.day)), h('div', { 'class': 'krl-lbl' }, 'En yoğun gün')])
+			h('div', { 'class': 'krl-tile krl-per' }, [big(Math.max(0, mxv)), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, kovaAd(mx)), h('div', { 'class': 'krl-lbl' }, isM ? 'En yoğun ay' : 'En yoğun gün')])
 		]));
 	},
 
@@ -1529,8 +1537,9 @@ return view.extend({
 		cs.anim = false;
 		dom.content(this.elLegend, [h('span', {}, [h('i', { 'class': 'krc-sw ' + M.ca }), M.a]), h('span', {}, [h('i', { 'class': 'krc-sw ' + M.cb }), M.b])]);
 		dom.content(this.elChartInfo, [
-			h('b', {}, gunAd(x.day)),
-			h('span', { 'class': 'kr-sub' }, 'Toplam ' + fmtBytes(M.fa(x) + M.fb(x)))
+			h('b', {}, kovaAd(x)),
+			h('span', { 'class': 'kr-sub' }, 'Toplam ' + fmtBytes(M.fa(x) + M.fb(x))),
+			x.mo ? h('span', { 'class': 'kr-sub' }, 'günlük ort. ' + fmtBytes((M.fa(x) + M.fb(x)) / Math.max(1, x.nd || 1))) : ''
 		]);
 		Object.keys(this.segB).forEach(k => this.segB[k].classList.toggle('kr-act', k === cs.mode || k === String(cs.range)));
 	},
@@ -1552,7 +1561,7 @@ return view.extend({
 		const dl = x.vr + x.dr, ul = x.vt + x.dt, vpn = x.vr + x.vt, dir = x.dr + x.dt;
 		const row = (c, l, v) => h('div', {}, [h('i', { 'class': c }), l + ' ', h('b', {}, fmtBytes(v))]);
 		dom.content(this.elTip, [
-			h('div', { 'class': 'krc-tt' }, gunAd(x.day)),
+			h('div', { 'class': 'krc-tt' }, kovaAd(x)),
 			row('krc-dl', 'İndirme', dl), row('krc-ul', 'Yükleme', ul),
 			h('div', { 'class': 'krc-tsep' }),
 			row('krc-vpn', 'VPN', vpn), row('krc-dir', 'Direkt', dir),
@@ -1706,7 +1715,7 @@ return view.extend({
 			}));
 			const again = () => { cs.anim = true; this.chartSave(); this.renderChartSummary(); this.renderChartBody(); };
 			const modeSeg = segment([['io', 'İndirme / Yükleme'], ['vd', 'VPN / Direkt']], k => { cs.mode = k; again(); });
-			const rangeSeg = segment([[7, '7 gün'], [30, '30 gün']], k => { cs.range = +k; cs.sel = null; again(); });
+			const rangeSeg = segment([[7, '7 gün'], [30, '30 gün'], ['a', 'Aylar']], k => { cs.range = k === 'a' ? 'a' : +k; cs.sel = null; again(); });
 			this.secs = {
 				live: this.elLive,
 				periods: this.fold('t-periods', 'Toplam', h('div', {}, [this.buildPerSeg(), this.elPeriods])),
@@ -1739,10 +1748,10 @@ return view.extend({
 		this.renderDevTraffic(s.devices || [], s.t, s.others);
 
 		// grafik yalnızca veri ya da genişlik değişince yeniden çizilir (gezinme titremesin)
-		const sig = JSON.stringify(s.days) + '|' + (this.elChart.clientWidth || 0);
+		const sig = JSON.stringify(s.days) + JSON.stringify(s.months || []) + '|' + (this.elChart.clientWidth || 0);
 		if (sig !== this.chartSig) {
 			this.chartSig = sig;
-			this.days = s.days;
+			this.days = s.days; this.months = s.months || [];
 			this.renderChartSummary();
 			this.renderChartBody();
 		}
