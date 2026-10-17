@@ -1683,7 +1683,7 @@ return view.extend({
 				return bt;
 			}));
 			const again = () => { cs.anim = true; this.chartSave(); this.renderChartSummary(); this.renderChartBody(); };
-			const modeSeg = segment([['vd', 'VPN / Direkt'], ['io', 'İndirme / Yükleme']], k => { cs.mode = k; again(); });
+			const modeSeg = segment([['io', 'İndirme / Yükleme'], ['vd', 'VPN / Direkt']], k => { cs.mode = k; again(); });
 			const rangeSeg = segment([[7, '7 gün'], [30, '30 gün']], k => { cs.range = +k; cs.sel = null; again(); });
 			this.secs = {
 				live: this.elLive,
