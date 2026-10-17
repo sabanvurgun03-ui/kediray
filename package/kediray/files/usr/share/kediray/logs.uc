@@ -36,7 +36,7 @@ const HINTS = [
 	[/(pinnedPeerCertSha256|peer cert is unrecognized)/, 'Sunucunun sertifikası değişmiş',
 	 'Sabitlenen sertifika artık sunucuda değil (panel/sertifika yenilenmiş). KediRay bir sonraki başlatmada otomatik yeniden sabitler; hemen düzeltmek için panelde Bağlı sunucu → \"🔒 Sertifikayı sabitle\" (ya da: kediray pin)'],
 	[/(x509|certificate (is not valid|signed by unknown)|failed to verify certificate)/, 'Sunucunun sertifikası doğrulanamadı',
-	 'Sunucu kendinden imzalı ya da başka ada ait sertifika kullanıyor. Sunucuyu düzenle → "Sertifikayı doğrulama" işaretle; KediRay sertifikayı sabitler.'],
+	 'Sunucu kendinden imzalı ya da başka ada ait sertifika kullanıyor. Sunucuyu düzenle → "Sertifikayı otomatik sabitle" işaretle; KediRay sertifikayı sabitler.'],
 	[/(REALITY|reality).*(invalid|failed|verif)/, 'REALITY el sıkışması başarısız',
 	 'Public key / short id / SNI sunucuyla uyuşmuyor. Linki x-ui\'den yeniden kopyalayıp sunucuyu düzenle.'],
 	[/(bad handshake|unexpected (HTTP )?status|websocket: .*40[0-9])/, 'WebSocket el sıkışması reddedildi',

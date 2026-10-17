@@ -266,9 +266,9 @@ const FIELDS = [
 	['xhttp_mode', 'XHTTP modu', 'select', ['auto', 'packet-up', 'stream-up', 'stream-one'], f => notSS(f) && f.network === 'xhttp'],
 	['tls', 'Güvenlik', 'select', [['none', 'Yok'], ['tls', 'TLS'], ['reality', 'REALITY']], notSS],
 	['sni', 'SNI', 'text', null, isTLS],
-	['fp', 'Parmak izi (uTLS)', 'select', [['', 'Yok (v2rayNG varsayılanı)'], 'chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'], isTLS],
+	['fp', 'Parmak izi (uTLS)', 'select', [['', 'Yok'], 'chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'], isTLS],
 	['alpn', 'ALPN', 'text', null, f => notSS(f) && f.tls === 'tls'],
-	['insecure', 'Sertifikayı doğrulama (otomatik sabitlenir)', 'checkbox', null, f => notSS(f) && f.tls === 'tls'],
+	['insecure', 'Sertifikayı otomatik sabitle', 'checkbox', null, f => notSS(f) && f.tls === 'tls'],
 	['pbk', 'REALITY public key', 'text', null, f => notSS(f) && f.tls === 'reality'],
 	['sid', 'REALITY short id', 'text', null, f => notSS(f) && f.tls === 'reality'],
 	['spx', 'REALITY spiderX', 'text', null, f => notSS(f) && f.tls === 'reality']
@@ -862,7 +862,7 @@ return view.extend({
 			const cur = readForm();
 			FIELDS.forEach(([k, , , , vis]) => { rows[k].forEach(el => el.style.display = (!vis || vis(cur)) ? '' : 'none'); });
 			const ipTLS = /^\d+\.\d+\.\d+\.\d+$/.test(cur.address) && cur.tls === 'tls' && !cur.sni && !cur.insecure;
-			hint.textContent = ipTLS ? 'IP adresiyle TLS kullanıyorsan SNI alanına alan adını yaz ya da "Sertifikayı doğrulama"yı işaretle.' : '';
+			hint.textContent = ipTLS ? 'IP adresiyle TLS kullanıyorsan SNI alanına alan adını yaz ya da "Sertifikayı otomatik sabitle"yi işaretle.' : '';
 		};
 		const formGrid = h('div', { 'class': 'kr-form' });
 		FIELDS.forEach(([k, label, t, opts]) => {
