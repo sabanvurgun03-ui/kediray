@@ -1660,7 +1660,7 @@ return view.extend({
 		// halka görünümü: İndirme / Yükleme (varsayılan) ya da VPN / Direkt; seçim tarayıcıda saklanır
 		const rbtn = {};
 		const rpaint = () => Object.keys(rbtn).forEach(k => rbtn[k].classList.toggle('krl-on', k === this.ringMode()));
-		const rmk = (k, label) => rbtn[k] = h('span', { 'role': 'button', 'click': () => { try { localStorage.setItem('kediray-ring-mode', k); } catch (e) {} rpaint(); if (lb.ses) this.renderRing(); } }, label);
+		const rmk = (k, label) => rbtn[k] = h('span', { 'role': 'button', 'click': () => { this.rm = k; rpaint(); if (lb.ses) this.renderRing(); } }, label);
 		lb.rsw = h('div', { 'class': 'krl-rsw' }, [rmk('io', 'İndirme / Yükleme'), h('i', {}, '·'), rmk('vd', 'VPN / Direkt')]);
 		rpaint();
 		lb.pct = h('div', { 'class': 'krl-sub' }, 'Henüz veri yok');
@@ -1678,7 +1678,7 @@ return view.extend({
 		]);
 	},
 
-	ringMode() { let m = 'io'; try { m = localStorage.getItem('kediray-ring-mode') || 'io'; } catch (e) {} return m === 'vd' ? 'vd' : 'io'; },
+	ringMode() { return this.rm || 'io'; },   // her açılışta İndirme / Yükleme
 	/* Oturum halkası: İndirme/Yükleme ya da VPN/Direkt oranı (yalnızca sayılardan üretilen SVG; r=15.9 → çevre ≈ 100) */
 	renderRing() {
 		const lb = this.lb, ses = lb.ses, m = this.ringMode();

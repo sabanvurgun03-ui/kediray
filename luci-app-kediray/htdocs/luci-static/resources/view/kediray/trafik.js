@@ -1404,7 +1404,7 @@ return view.extend({
 		if (!this.cs) {
 			let c = null;
 			try { c = JSON.parse(localStorage.getItem('kediray-trafik-chart') || 'null'); } catch (e) {}
-			this.cs = { mode: c && c.mode === 'io' ? 'io' : 'vd', range: c && +c.range === 7 ? 7 : 30, sel: null, anim: true };
+			this.cs = { mode: 'io', range: c && +c.range === 7 ? 7 : 30, sel: null, anim: true };
 		}
 		return this.cs;
 	},
@@ -1605,11 +1605,11 @@ return view.extend({
 	},
 
 	/* Dönem kutuları (Bugün/Dün/Bu hafta/Bu ay/Toplam): VPN/Direkt ya da İndirme/Yükleme görünümü */
-	perMode() { let m = 'vd'; try { m = localStorage.getItem('kediray-per-mode') || 'vd'; } catch (e) {} return CH[m] ? m : 'vd'; },
+	perMode() { return this.pm || 'io'; },   // her açılışta İndirme / Yükleme
 	buildPerSeg() {
 		const btns = {};
 		const paint = () => Object.keys(btns).forEach(k => btns[k].classList.toggle('kr-act', k === this.perMode()));
-		const mk = (k, label) => btns[k] = h('button', { 'class': 'btn', 'click': () => { try { localStorage.setItem('kediray-per-mode', k); } catch (e) {} paint(); if (this.lastStats) this.renderPeriods(this.lastStats); } }, label);
+		const mk = (k, label) => btns[k] = h('button', { 'class': 'btn', 'click': () => { this.pm = k; paint(); if (this.lastStats) this.renderPeriods(this.lastStats); } }, label);
 		const el = h('div', { 'class': 'kr-seg kr-seg-sm', 'style': 'margin:0 0 6px' }, [mk('io', 'İndirme / Yükleme'), mk('vd', 'VPN / Direkt')]);
 		paint();
 		return el;
