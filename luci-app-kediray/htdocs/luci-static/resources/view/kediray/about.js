@@ -81,6 +81,34 @@ function krTheme() {
 				+ '.kr-traffic{--krc-vpn:' + ac + '!important}'
 				+ 'body .cbi-button-action{background:' + ac + '!important;border-color:' + ac + '!important;color:#fff!important}';
 		}
+		/* Yakınlaştırma / uzaklaştırma: % değeri tarayıcıda saklanır; sağ alttaki − % + düğmeleri her KediRay sayfasında görünür */
+		const zm = Math.min(160, Math.max(60, Math.round((+c.zoom || 100) / 10) * 10));
+		if (zm !== 100) css += 'body #maincontent{zoom:' + (zm / 100) + '}';
+		let zb = document.getElementById('kr-zoom');
+		if (!zb && document.body) {
+			zb = document.createElement('div'); zb.id = 'kr-zoom';
+			zb.setAttribute('style', 'position:fixed;right:12px;bottom:12px;z-index:9999;display:flex;align-items:center;gap:2px;padding:3px;border-radius:999px;background:rgba(30,34,41,.88);color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.35);font:600 13px system-ui,sans-serif;user-select:none');
+			const mk = (t, title, fn, w) => {
+				const b = document.createElement('button');
+				b.type = 'button'; b.textContent = t; b.title = title;
+				b.setAttribute('style', 'border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;height:28px;min-width:' + w + 'px;padding:0 6px;border-radius:999px');
+				b.addEventListener('click', ev => {
+					ev.preventDefault();
+					let cc = {}; try { cc = JSON.parse(localStorage.getItem('kediray-theme') || '{}') || {}; } catch (e) {}
+					const cur = Math.min(160, Math.max(60, Math.round((+cc.zoom || 100) / 10) * 10));
+					cc.zoom = fn(cur);
+					try { localStorage.setItem('kediray-theme', JSON.stringify(cc)); } catch (e) {}
+					krTheme();
+				});
+				zb.appendChild(b); return b;
+			};
+			mk('\u2212', 'Uzaklaştır', z => Math.max(60, z - 10), 28);
+			mk('100%', 'Sıfırla (%100)', () => 100, 52).id = 'kr-zoom-val';
+			mk('+', 'Yakınlaştır', z => Math.min(160, z + 10), 28);
+			document.body.appendChild(zb);
+		}
+		const zv = document.getElementById('kr-zoom-val');
+		if (zv) zv.textContent = zm + '%';
 		st.textContent = css;
 		document.documentElement.setAttribute('data-krt', mode);
 	} catch (e) {}
