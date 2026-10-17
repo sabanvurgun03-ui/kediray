@@ -1454,7 +1454,8 @@ return view.extend({
 		const step = ([1, 1.5, 2, 2.5, 3, 4, 5, 6, 7.5, 8, 10, 15, 20].map(m => m * mag).find(v => v * 4 >= mu * 1.02) || 20 * mag) * unit;
 		const top = step * 4;
 		const y = v => T + ph - (v / top) * ph;
-		const avg = tot.reduce((p, v) => p + v, 0) / n;
+		// ortalama: sayaç verisi olmayan baştaki (0) günler sayılmaz
+		const f0 = Math.max(0, tot.findIndex(v => v > 0)), avg = tot.reduce((p, v) => p + v, 0) / Math.max(1, n - f0);
 		let g = '';
 		for (let i = 0; i <= 4; i++) {
 			const v = top * i / 4, yy = y(v).toFixed(1);
@@ -1498,20 +1499,22 @@ return view.extend({
 	renderChartSummary() {
 		const cs = this.chartState(), M = CH[cs.mode], days = this.chartDays(), n = days.length;
 		if (!n) return;
-		const A = days.reduce((p, x) => p + M.fa(x), 0), Bv = days.reduce((p, x) => p + M.fb(x), 0), all = A + Bv, avg = all / n;
+		const A = days.reduce((p, x) => p + M.fa(x), 0), Bv = days.reduce((p, x) => p + M.fb(x), 0), all = A + Bv;
+		// ortalama: sayaç verisi olmayan baştaki (0) günler sayılmaz
+		const i0 = Math.max(0, days.findIndex(x => M.fa(x) + M.fb(x) > 0)), na = Math.max(1, n - i0), avg = all / na;
 		let mx = days[0], mxv = -1;
 		days.forEach(x => { const v = M.fa(x) + M.fb(x); if (v > mxv) { mxv = v; mx = x; } });
 		const last = days[n - 1], lv = M.fa(last) + M.fb(last);
 		const pv = all > 0 ? Math.round(A / all * 100) : 0;
 		const big = v => { const q = fmtParts(v); return h('div', { 'class': 'krl-val' }, [h('span', { 'class': 'krl-num' }, q[0]), h('span', { 'class': 'krl-unit' }, q[1])]); };
 		const dot = (cls, txt) => h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': cls }), txt]);
-		const aA = A / n, aB = Bv / n;
+		const aA = A / na, aB = Bv / na;
 		dom.content(this.elChartTiles, h('div', { 'class': 'krl-band' }, [
 			h('div', { 'class': 'krl-tile krl-per' }, [big(avg), dot(M.ca, M.a + ' ' + fmtBytes(aA)), dot(M.cb, M.b + ' ' + fmtBytes(aB)),
 				h('div', { 'class': 'krl-bar' }, [h('span', { 'class': M.ca, 'style': 'width:' + (all > 0 ? pv : 0) + '%' }), h('span', { 'class': M.cb, 'style': 'width:' + (all > 0 ? 100 - pv : 0) + '%' })]),
-				h('div', { 'class': 'krl-lbl' }, 'Günlük ortalama (' + n + ' gün)')]),
+				h('div', { 'class': 'krl-lbl' }, 'Günlük ortalama (' + na + ' gün)')]),
 			h('div', { 'class': 'krl-tile krl-per' }, [big(avg / 24), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'bugün günlük ortalamanın %' + (avg > 0 ? Math.round(lv / avg * 100) : 0) + '\'i'), h('div', { 'class': 'krl-lbl' }, 'Saatlik ortalama')]),
-			h('div', { 'class': 'krl-tile krl-per' }, [big(avg * 30), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'günlük ortalama × 30 gün'), h('div', { 'class': 'krl-lbl' }, 'Aylık ortalama')]),
+			h('div', { 'class': 'krl-tile krl-per' }, [big(avg * 30), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'günlük ortalama × 30 gün'), h('div', { 'class': 'krl-lbl' }, 'Aylık tahmin')]),
 			h('div', { 'class': 'krl-tile krl-per' }, [big(Math.max(0, mxv)), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, gunAd(mx.day)), h('div', { 'class': 'krl-lbl' }, 'En yoğun gün')])
 		]));
 	},
