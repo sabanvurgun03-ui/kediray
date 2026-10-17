@@ -1477,13 +1477,12 @@ return view.extend({
 		const pv = all > 0 ? Math.round(A / all * 100) : 0;
 		const big = v => { const q = fmtParts(v); return h('div', { 'class': 'krl-val' }, [h('span', { 'class': 'krl-num' }, q[0]), h('span', { 'class': 'krl-unit' }, q[1])]); };
 		const dot = (cls, txt) => h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': cls }), txt]);
+		const aA = A / n, aB = Bv / n;
 		dom.content(this.elChartTiles, h('div', { 'class': 'krl-band' }, [
-			h('div', { 'class': 'krl-tile krl-per' }, [big(all), dot(M.ca, M.a + ' ' + fmtBytes(A)), dot(M.cb, M.b + ' ' + fmtBytes(Bv)),
+			h('div', { 'class': 'krl-tile krl-per' }, [big(avg), dot(M.ca, M.a + ' ' + fmtBytes(aA)), dot(M.cb, M.b + ' ' + fmtBytes(aB)),
 				h('div', { 'class': 'krl-bar' }, [h('span', { 'class': M.ca, 'style': 'width:' + (all > 0 ? pv : 0) + '%' }), h('span', { 'class': M.cb, 'style': 'width:' + (all > 0 ? 100 - pv : 0) + '%' })]),
-				h('div', { 'class': 'krl-lbl' }, 'Son ' + n + ' gün toplam')]),
-			h('div', { 'class': 'krl-tile krl-per' }, [big(avg), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'bugün ortalamanın %' + (avg > 0 ? Math.round(lv / avg * 100) : 0) + '\'i'), h('div', { 'class': 'krl-lbl' }, 'Günlük ortalama')]),
-			h('div', { 'class': 'krl-tile krl-per' }, [big(Math.max(0, mxv)), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, gunAd(mx.day)), h('div', { 'class': 'krl-lbl' }, 'En yoğun gün')]),
-			h('div', { 'class': 'krl-tile krl-per' }, [big(lv), dot(M.ca, M.a + ' ' + fmtBytes(M.fa(last))), dot(M.cb, M.b + ' ' + fmtBytes(M.fb(last))), h('div', { 'class': 'krl-lbl' }, 'Bugün')])
+				h('div', { 'class': 'krl-lbl' }, 'Günlük ortalama (' + n + ' gün)')]),
+			h('div', { 'class': 'krl-tile krl-per' }, [big(avg / 24), h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, 'bugün günlük ortalamanın %' + (avg > 0 ? Math.round(lv / avg * 100) : 0) + '\'i'), h('div', { 'class': 'krl-lbl' }, 'Saatlik ortalama')])
 		]));
 	},
 
