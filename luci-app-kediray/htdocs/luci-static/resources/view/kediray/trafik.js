@@ -346,6 +346,9 @@ const CSS = `
 .krc-title{margin:14px 0 4px;font-weight:600;opacity:.85}
 .krc-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.9em;margin:2px 0 6px}
 .krc-wrap{position:relative;width:100%}
+.krc-tip{display:none;position:absolute;z-index:5;pointer-events:none;padding:7px 10px;border-radius:10px;border:1px solid rgba(128,128,128,.4);background:var(--krc-surface,#1a1a19);box-shadow:0 4px 14px rgba(0,0,0,.35);font-size:.78em;line-height:1.55;white-space:nowrap;font-variant-numeric:tabular-nums}
+.krc-tip i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.krc-tip b{font-weight:700}.krc-tt{font-weight:700;opacity:.9}.krc-ttot{margin-top:2px;opacity:.7;font-weight:600}.krc-tsep{height:1px;margin:3px 0;background:rgba(128,128,128,.3)}
 .krc-svg{display:block;max-width:100%}
 .krc-grid{stroke:rgba(128,128,128,.25);stroke-width:1}
 .krc-ax{fill:currentColor;opacity:.65;font-size:11px}
@@ -1505,9 +1508,32 @@ return view.extend({
 		const t = ev.target && ev.target.closest ? ev.target.closest('[data-i]') : null;
 		if (!t || !this.days) return;
 		const cs = this.chartState(), n = this.chartDays().length, i = +t.getAttribute('data-i');
+		this.chartTip(i, t);
 		if (i === this.chartSel(n)) return;
 		cs.sel = i;
 		this.renderChartBody();
+	},
+
+	/* Grafiğin üstüne gelince (ya da dokununca): o günün indirme, yükleme, VPN, Direkt ve toplamı */
+	chartTip(i, t) {
+		const x = this.chartDays()[i];
+		if (!x || !this.elTip) return;
+		const dl = x.vr + x.dr, ul = x.vt + x.dt, vpn = x.vr + x.vt, dir = x.dr + x.dt;
+		const row = (c, l, v) => h('div', {}, [h('i', { 'class': c }), l + ' ', h('b', {}, fmtBytes(v))]);
+		dom.content(this.elTip, [
+			h('div', { 'class': 'krc-tt' }, gunAd(x.day)),
+			row('krc-dl', 'İndirme', dl), row('krc-ul', 'Yükleme', ul),
+			h('div', { 'class': 'krc-tsep' }),
+			row('krc-vpn', 'VPN', vpn), row('krc-dir', 'Direkt', dir),
+			h('div', { 'class': 'krc-tt krc-ttot' }, 'Toplam ' + fmtBytes(dl + ul))
+		]);
+		const wr = this.elChart.getBoundingClientRect(), tr = t.getBoundingClientRect(), tip = this.elTip;
+		tip.style.display = 'block';
+		const w = tip.offsetWidth, cx = tr.left - wr.left + tr.width / 2;
+		let left = cx + 10;
+		if (left + w > wr.width) left = cx - w - 10;   // sağ kenara yakınsa barın soluna aç
+		tip.style.left = Math.max(0, left) + 'px';
+		tip.style.top = '4px';
 	},
 
 	/* Canlı şerit: anlık hız (çizgili) + VPN/Direkt ayrımı, toplam kutuları. Ana sayfadaki şeritle aynı tasarım. */
@@ -1641,6 +1667,9 @@ return view.extend({
 			this.elChart = h('div', { 'class': 'krc-wrap' });
 			this.elSvg = h('div', {});
 			this.elChart.appendChild(this.elSvg);
+			this.elTip = h('div', { 'class': 'krc-tip' });
+			this.elChart.appendChild(this.elTip);
+			this.elChart.addEventListener('mouseleave', () => { this.elTip.style.display = 'none'; });
 			this.elChart.addEventListener('mousemove', ev => this.chartPick(ev));
 			this.elChart.addEventListener('click', ev => this.chartPick(ev));
 			this.elChartTiles = h('div', {});
