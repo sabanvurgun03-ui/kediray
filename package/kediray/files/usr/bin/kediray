@@ -495,6 +495,13 @@ upd_sha() { # <dal ya da etiket> -> 40 haneli commit kimliği (GitHub API; anaht
 	url="https://api.github.com/repos/$r/commits/$1"
 	out=$(running && curl -fsSL --noproxy '' -m 8 -A "v2rayNG/1.10" -H "$hdr" -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" "$url" 2>/dev/null \
 		|| curl -fsSL --noproxy '' -m 8 -A "v2rayNG/1.10" -H "$hdr" "$url" 2>/dev/null)
+	if ! echo "$out" | grep -Eq '^[0-9a-f]{40}$'; then
+		# API sınırına takıldıysa (VPN çıkış adresi başkalarıyla ortak olabilir) sınırsız web akışından en son commit'i al
+		local atom="https://github.com/$r/commits/$1.atom"
+		out=$(running && curl -fsSL --noproxy '' -m 8 -A "v2rayNG/1.10" -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" "$atom" 2>/dev/null \
+			|| curl -fsSL --noproxy '' -m 8 -A "v2rayNG/1.10" "$atom" 2>/dev/null)
+		out=$(echo "$out" | sed -n 's#.*Grit::Commit/\([0-9a-f]\{40\}\).*#\1#p' | head -1)
+	fi
 	echo "$out" | grep -Eq '^[0-9a-f]{40}$' || return 1
 	echo "$out"
 }
