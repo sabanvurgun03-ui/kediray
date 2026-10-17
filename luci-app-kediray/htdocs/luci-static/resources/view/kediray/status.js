@@ -410,6 +410,12 @@ const CSS = `
 .krl-rrow{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:3px}
 .krl-ring svg{display:block}
 .krl-rd{stroke:#e8663a}.krl-rv{stroke:#3987e5}
+.krl-ring[data-m="io"] .krl-rv{stroke:var(--krl-g)}.krl-ring[data-m="io"] .krl-rd{stroke:var(--krl-b)}
+.krl-rsw{display:flex;justify-content:center;align-items:center;gap:2px;margin-top:3px;font-size:.7em;letter-spacing:.02em;user-select:none}
+.krl-rsw span{cursor:pointer;padding:2px 7px;opacity:.5;border-radius:6px;transition:opacity .2s,color .2s}
+.krl-rsw span:hover{opacity:.85}
+.krl-rsw span.krl-on{opacity:1;color:var(--kr-accent,#2a7de1);font-weight:600}
+.krl-rsw i{opacity:.3;font-style:normal}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-krt="light"]) .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}}
 :root[data-theme="dark"] .krl-band,:root[data-darkmode="true"] .krl-band,:root[data-krt="dark"] .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}
 .krl-tile{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;text-align:center;min-height:70px;padding:5px 8px 5px;border-radius:10px;border:1px solid rgba(128,128,128,.28);background:linear-gradient(160deg,rgba(128,128,128,.10),rgba(128,128,128,.02))}
@@ -1651,6 +1657,12 @@ return view.extend({
 		};
 		lb.up = h('span', { 'class': 'kr-live', 'data-base': '0', 'data-at': String(Date.now()) }, '—');
 		lb.ring = h('span', { 'class': 'krl-ring' });
+		// halka görünümü: İndirme / Yükleme (varsayılan) ya da VPN / Direkt; seçim tarayıcıda saklanır
+		const rbtn = {};
+		const rpaint = () => Object.keys(rbtn).forEach(k => rbtn[k].classList.toggle('krl-on', k === this.ringMode()));
+		const rmk = (k, label) => rbtn[k] = h('span', { 'role': 'button', 'click': () => { try { localStorage.setItem('kediray-ring-mode', k); } catch (e) {} rpaint(); if (lb.ses) this.renderRing(); } }, label);
+		lb.rsw = h('div', { 'class': 'krl-rsw' }, [rmk('io', 'İndirme / Yükleme'), h('i', {}, '·'), rmk('vd', 'VPN / Direkt')]);
+		rpaint();
 		lb.pct = h('div', { 'class': 'krl-sub' }, 'Henüz veri yok');
 		return h('div', { 'class': 'krl-band kr-traffic' }, [
 			speed('d', 'krl-down', 'İndirme'),
@@ -1660,9 +1672,22 @@ return view.extend({
 			h('div', { 'class': 'krl-tile krl-info' }, [
 				h('div', { 'class': 'krl-val' }, lb.up),
 				h('div', { 'class': 'krl-rrow' }, [lb.ring, lb.pct]),
+				lb.rsw,
 				h('div', { 'class': 'krl-lbl' }, 'Modem açık')
 			])
 		]);
+	},
+
+	ringMode() { let m = 'io'; try { m = localStorage.getItem('kediray-ring-mode') || 'io'; } catch (e) {} return m === 'vd' ? 'vd' : 'io'; },
+	/* Oturum halkası: İndirme/Yükleme ya da VPN/Direkt oranı (yalnızca sayılardan üretilen SVG; r=15.9 → çevre ≈ 100) */
+	renderRing() {
+		const lb = this.lb, ses = lb.ses, m = this.ringMode();
+		const a = m === 'io' ? ses.vr + ses.dr : ses.vr + ses.vt, b = m === 'io' ? ses.vt + ses.dt : ses.dr + ses.dt, all = a + b;
+		const pa = all > 0 ? Math.round(a / all * 100) : 0;
+		lb.ring.setAttribute('data-m', m);
+		lb.ring.innerHTML = '<svg viewBox="0 0 42 42" width="38" height="38"><circle cx="21" cy="21" r="15.9" fill="none" stroke-width="6" class="krl-rd"/>' +
+			(all > 0 ? '<circle cx="21" cy="21" r="15.9" fill="none" stroke-width="6" class="krl-rv" stroke-dasharray="' + pa + ' ' + (100 - pa) + '" transform="rotate(-90 21 21)"/>' : '') + '</svg>';
+		lb.pct.textContent = all > 0 ? (m === 'io' ? 'İndirme %' : 'VPN %') + pa + (m === 'io' ? ' · Yükleme %' : ' · Direkt %') + (100 - pa) : 'Henüz veri yok';
 	},
 
 	/* Hız birimi seçici: MB/s (bayt) ya da Mbps (bit). Seçim tarayıcıda saklanır. */
@@ -1711,12 +1736,8 @@ return view.extend({
 		};
 		tot('sd', ses.vr + ses.dr, ses.vr, ses.dr);
 		tot('su', ses.vt + ses.dt, ses.vt, ses.dt);
-		const vpn = ses.vr + ses.vt, dir = ses.dr + ses.dt, all = vpn + dir;
-		const pv = all > 0 ? Math.round(vpn / all * 100) : 0;
-		// VPN/Direkt halkası: yalnızca sayılardan üretilen SVG (r=15.9 → çevre ≈ 100)
-		lb.ring.innerHTML = '<svg viewBox="0 0 42 42" width="38" height="38"><circle cx="21" cy="21" r="15.9" fill="none" stroke-width="6" class="krl-rd"/>' +
-			(all > 0 ? '<circle cx="21" cy="21" r="15.9" fill="none" stroke-width="6" class="krl-rv" stroke-dasharray="' + pv + ' ' + (100 - pv) + '" transform="rotate(-90 21 21)"/>' : '') + '</svg>';
-		lb.pct.textContent = all > 0 ? 'VPN %' + pv + ' · Direkt %' + (100 - pv) : 'Henüz veri yok';
+		lb.ses = ses;
+		this.renderRing();
 		if (s.uptime > 0) {
 			lb.up.setAttribute('data-base', String(s.uptime));
 			lb.up.setAttribute('data-at', String(Date.now()));
