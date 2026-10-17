@@ -89,7 +89,7 @@ resolve4() {
 # procd, servis kayıtlı değilken (ilk kurulum, kapalıyken restart) stderr'e
 # "Command failed: Not found" yazar; hata değildir, kullanıcıyı korkutmasın diye süzülür.
 svc() { # <start|stop|restart|enable|disable|reload>
-	/etc/init.d/kediray "$1" 2>&1 | grep -v '^Command failed: Not found$' >&2
+	/etc/init.d/kediray "$1" 2>&1 | grep -v '^Command failed: .*Not found' >&2
 	return 0
 }
 

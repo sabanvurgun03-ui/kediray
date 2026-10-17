@@ -589,7 +589,7 @@ elif [ "$PREV_CONF" = 1 ] && [ "$PREV_ENABLED" != 1 ]; then
 elif uci show kediray 2>/dev/null | grep -q '=node$'; then
 	uci set kediray.main.enabled=1; uci commit kediray
 	# procd servis kayıtlı değilken zararsız bir "Command failed: Not found" yazar; süz
-	/etc/init.d/kediray restart 2>&1 | grep -v '^Command failed: Not found$'
+	/etc/init.d/kediray restart 2>&1 | grep -v '^Command failed: .*Not found'
 	sleep 4
 	if /usr/bin/kediray status --json | grep -q '"running": *true'; then
 		ok "VPN çalışıyor"
