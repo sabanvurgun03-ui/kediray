@@ -1441,6 +1441,15 @@ return view.extend({
 		try { localStorage.setItem('kediray-trafik-chart', JSON.stringify({ mode: cs.mode, range: cs.range })); } catch (e) {}
 	},
 
+	/* Bu ayın ortalaması: takvim ayının toplamı ÷ ayın başından son güne geçen gün sayısı (her gün yeniden hesaplanır; ay bitince o ayın ortalaması kalır) */
+	monthAvg(M) {
+		const all = this.days || [];
+		if (!all.length) return { tot: 0, day: 1, avg: 0 };
+		const last = all[all.length - 1], ym = last.day.slice(0, 7), day = Math.max(1, +last.day.slice(8, 10) || 1);
+		const tot = all.filter(x => x.day.slice(0, 7) === ym).reduce((p, x) => p + M.fa(x) + M.fb(x), 0);
+		return { tot: tot, day: day, avg: tot / day };
+	},
+
 	trafficChart(days, sel) {
 		const cs = this.chartState(), M = CH[cs.mode];
 		const W = Math.max(280, Math.min(1100, this.elChart.clientWidth || 700)), H = 190;
@@ -1454,8 +1463,7 @@ return view.extend({
 		const step = ([1, 1.5, 2, 2.5, 3, 4, 5, 6, 7.5, 8, 10, 15, 20].map(m => m * mag).find(v => v * 4 >= mu * 1.02) || 20 * mag) * unit;
 		const top = step * 4;
 		const y = v => T + ph - (v / top) * ph;
-		// ortalama: sayaç verisi olmayan baştaki (0) günler sayılmaz
-		const f0 = Math.max(0, tot.findIndex(v => v > 0)), avg = tot.reduce((p, v) => p + v, 0) / Math.max(1, n - f0);
+		const avg = this.monthAvg(M).avg;   // çizgi: bu ayın ortalaması (7 ve 30 günlük görünümde aynı)
 		let g = '';
 		for (let i = 0; i <= 4; i++) {
 			const v = top * i / 4, yy = y(v).toFixed(1);
@@ -1482,7 +1490,7 @@ return view.extend({
 		// günlük ortalama (kesikli çizgi)
 		const ya = y(avg).toFixed(1);
 		bars += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + ya + '" y2="' + ya + '" class="krc-avg"/>' +
-			'<text x="' + (W - R - 2) + '" y="' + (+ya - 4) + '" text-anchor="end" class="krc-avgt">ort. ' + fmtBytes(avg) + '</text>';
+			'<text x="' + (W - R - 2) + '" y="' + (+ya - 4) + '" text-anchor="end" class="krc-avgt">ay ort. ' + fmtBytes(avg) + '</text>';
 		return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" class="krc-svg' + (cs.anim ? ' krc-anim' : '') + '" role="img" aria-label="Günlük trafik (' + M.a + ' ve ' + M.b + ')">' + g + bars + '</svg>';
 	},
 
@@ -1509,9 +1517,7 @@ return view.extend({
 		const big = v => { const q = fmtParts(v); return h('div', { 'class': 'krl-val' }, [h('span', { 'class': 'krl-num' }, q[0]), h('span', { 'class': 'krl-unit' }, q[1])]); };
 		const dot = (cls, txt) => h('div', { 'class': 'krl-sub', 'style': 'margin-top:0' }, [h('i', { 'class': cls }), txt]);
 		const aA = A / na, aB = Bv / na;
-		// bu ayın toplamı (takvim ayı) ÷ ayın başından bugüne geçen gün sayısı
-		const ym = last.day.slice(0, 7), moDay = Math.max(1, +last.day.slice(8, 10) || 1);
-		const moTot = (this.days || []).filter(x => x.day.slice(0, 7) === ym).reduce((p, x) => p + M.fa(x) + M.fb(x), 0), moAvg = moTot / moDay;
+		const mo = this.monthAvg(M), moTot = mo.tot, moDay = mo.day, moAvg = mo.avg;
 		dom.content(this.elChartTiles, h('div', { 'class': 'krl-band' }, [
 			h('div', { 'class': 'krl-tile krl-per' }, [big(avg), dot(M.ca, M.a + ' ' + fmtBytes(aA)), dot(M.cb, M.b + ' ' + fmtBytes(aB)),
 				h('div', { 'class': 'krl-bar' }, [h('span', { 'class': M.ca, 'style': 'width:' + (all > 0 ? pv : 0) + '%' }), h('span', { 'class': M.cb, 'style': 'width:' + (all > 0 ? 100 - pv : 0) + '%' })]),
@@ -1534,7 +1540,8 @@ return view.extend({
 			h('b', {}, gunAd(x.day)),
 			h('span', {}, [h('i', { 'class': 'krc-sw ' + M.ca }), M.a + ' ' + fmtBytes(M.fa(x))]),
 			h('span', {}, [h('i', { 'class': 'krc-sw ' + M.cb }), M.b + ' ' + fmtBytes(M.fb(x))]),
-			h('span', { 'class': 'kr-sub' }, 'Toplam ' + fmtBytes(M.fa(x) + M.fb(x)))
+			h('span', { 'class': 'kr-sub' }, 'Toplam ' + fmtBytes(M.fa(x) + M.fb(x))),
+			h('span', { 'class': 'kr-sub', 'style': 'display:block;flex-basis:100%' }, 'Ay ortalaması ' + fmtBytes(this.monthAvg(M).avg) + ' / gün')
 		]);
 		Object.keys(this.segB).forEach(k => this.segB[k].classList.toggle('kr-act', k === cs.mode || k === String(cs.range)));
 	},
