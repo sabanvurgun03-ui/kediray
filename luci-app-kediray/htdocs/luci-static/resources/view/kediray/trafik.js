@@ -295,6 +295,8 @@ const CSS = `
 .kr-seg button.kr-blockbtn:hover{background:rgba(210,63,63,.15)}
 .kr-seg-sm button{padding:4px 10px;font-size:.92em}
 @media (max-width:700px){.kr-seg-sm{display:grid;grid-template-columns:1fr 1fr}.kr-seg-sm button{padding:6px 8px;border-top:1px solid rgba(128,128,128,.25)}.kr-seg-sm button:nth-child(-n+2){border-top:0}.kr-seg-sm button:nth-child(odd){border-right:1px solid rgba(128,128,128,.25)}}
+/* 7 gün | 30 gün | Aylar: telefonda da tek satırda kalsın */
+@media (max-width:700px){.kr-seg-sm.krc-rng{display:inline-flex}.kr-seg-sm.krc-rng button:nth-child(n){padding:6px 14px;border-top:0;border-right:0}.kr-seg-sm.krc-rng button+button{border-left:1px solid rgba(128,128,128,.25)}}
 .kr-warn{border:1px solid #e0a100;background:rgba(224,161,0,.12);border-radius:8px;padding:8px 10px;margin:0 0 10px;font-size:.92em}
 .kr-seg.kr-dim{opacity:.4}
 .kr-seg.kr-dim button.kr-act{background:transparent;color:inherit}
@@ -1708,14 +1710,14 @@ return view.extend({
 			this.elLegend = h('div', { 'class': 'krc-legend' });
 			const cs = this.chartState();
 			this.segB = {};
-			const segment = (defs, set) => h('div', { 'class': 'kr-seg kr-seg-sm' }, defs.map(d => {
+			const segment = (defs, set, cls) => h('div', { 'class': 'kr-seg kr-seg-sm' + (cls ? ' ' + cls : '') }, defs.map(d => {
 				const bt = h('button', { 'class': 'btn', 'click': () => set(d[0]) }, d[1]);
 				this.segB[String(d[0])] = bt;
 				return bt;
 			}));
 			const again = () => { cs.anim = true; this.chartSave(); this.renderChartSummary(); this.renderChartBody(); };
 			const modeSeg = segment([['io', 'İndirme / Yükleme'], ['vd', 'VPN / Direkt']], k => { cs.mode = k; again(); });
-			const rangeSeg = segment([[7, '7 gün'], [30, '30 gün'], ['a', 'Aylar']], k => { cs.range = k === 'a' ? 'a' : +k; cs.sel = null; again(); });
+			const rangeSeg = segment([[7, '7 gün'], [30, '30 gün'], ['a', 'Aylar']], k => { cs.range = k === 'a' ? 'a' : +k; cs.sel = null; again(); }, 'krc-rng');
 			this.secs = {
 				live: this.elLive,
 				periods: this.fold('t-periods', 'Toplam', h('div', {}, [this.buildPerSeg(), this.elPeriods])),
