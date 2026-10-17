@@ -114,14 +114,6 @@ function live(seconds, cls) {
 		'data-at': String(Date.now())
 	}, fmtDur(v));
 }
-function tickLive(root) {
-	const now = Date.now();
-	(root || document).querySelectorAll('.kr-live').forEach(e => {
-		const base = +e.getAttribute('data-base'), at = +e.getAttribute('data-at');
-		if (!isFinite(base) || !isFinite(at)) return;
-		e.textContent = fmtDur(base + (now - at) / 1000);
-	});
-}
 // üst köşeleri r kadar yuvarlak, tabanı düz çubuk yolu (SVG path)
 function roundTop(x, y, w, hgt, r) {
 	r = Math.max(0, Math.min(r, hgt, w / 2));
@@ -402,14 +394,14 @@ const CSS = `
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-krt="light"]) .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}}
 :root[data-theme="dark"] .krl-band,:root[data-darkmode="true"] .krl-band,:root[data-krt="dark"] .krl-band{--krl-g:#4ade80;--krl-b:#60a5fa}
 .krl-tile{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;text-align:center;min-height:70px;padding:5px 8px 5px;border-radius:10px;border:1px solid rgba(128,128,128,.28);background:linear-gradient(160deg,rgba(128,128,128,.10),rgba(128,128,128,.02))}
-.krl-down{--c:var(--krl-g)}.krl-up{--c:var(--krl-b)}.krl-tvpn{--c:var(--krc-vpn)}.krl-tdir{--c:var(--krc-dir)}
-.krl-down,.krl-up,.krl-tvpn,.krl-tdir{border-color:color-mix(in srgb,var(--c) 55%,transparent)}
+.krl-down{--c:var(--krl-g)}.krl-up{--c:var(--krl-b)}
+.krl-down,.krl-up{border-color:color-mix(in srgb,var(--c) 55%,transparent)}
 .krl-spark{position:absolute;left:0;right:0;top:3px;height:20px;opacity:.95;pointer-events:none}
 .krl-svg{width:100%;height:100%;display:block}
 .krl-line{fill:none;stroke:var(--c);stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .krl-area{fill:var(--c);opacity:.14}
 .krl-val{margin-top:27px;font-variant-numeric:tabular-nums;color:var(--c);line-height:1.1;white-space:nowrap}
-.krl-tvpn .krl-val,.krl-tdir .krl-val,.krl-per .krl-val{margin-top:4px}
+.krl-per .krl-val{margin-top:4px}
 .krl-num{font-size:1.2em;font-weight:700}
 .krl-unit{font-size:.88em;font-weight:600;margin-left:3px;opacity:.9}
 .krl-lbl{margin-top:3px;padding-top:3px;width:100%;border-top:1px solid rgba(128,128,128,.25);font-size:.62em;font-weight:600;letter-spacing:.09em;text-transform:uppercase;opacity:.75}
@@ -515,7 +507,7 @@ function collapsed(key) {
 })();
 /* Sunucu bilgilerini / bağlı sunucu IP'sini gizleme */
 (function () {
-	var KS = 'kr_hide_srv', KI = 'kr_hide_srvip', secrets = [], orig = new WeakMap(), pend = false;
+	var KS = 'kr_hide_srv', secrets = [], orig = new WeakMap(), pend = false;
 	var get = function (k) { try { return localStorage.getItem(k) === '1'; } catch (e) { return false; } };
 	var set = function (k, v) { try { localStorage.setItem(k, v ? '1' : '0'); } catch (e) {} };
 	var IPRE = /\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b/g;
@@ -1538,10 +1530,7 @@ return view.extend({
 		dom.content(this.elLegend, [h('span', {}, [h('i', { 'class': 'krc-sw ' + M.ca }), M.a]), h('span', {}, [h('i', { 'class': 'krc-sw ' + M.cb }), M.b])]);
 		dom.content(this.elChartInfo, [
 			h('b', {}, gunAd(x.day)),
-			h('span', {}, [h('i', { 'class': 'krc-sw ' + M.ca }), M.a + ' ' + fmtBytes(M.fa(x))]),
-			h('span', {}, [h('i', { 'class': 'krc-sw ' + M.cb }), M.b + ' ' + fmtBytes(M.fb(x))]),
-			h('span', { 'class': 'kr-sub' }, 'Toplam ' + fmtBytes(M.fa(x) + M.fb(x))),
-			h('span', { 'class': 'kr-sub', 'style': 'display:block;flex-basis:100%' }, 'Ay ortalaması ' + fmtBytes(this.monthAvg(M).avg) + ' / gün')
+			h('span', { 'class': 'kr-sub' }, 'Toplam ' + fmtBytes(M.fa(x) + M.fb(x)))
 		]);
 		Object.keys(this.segB).forEach(k => this.segB[k].classList.toggle('kr-act', k === cs.mode || k === String(cs.range)));
 	},
@@ -1596,15 +1585,9 @@ return view.extend({
 			lb[k + 'P'] = h('div', { 'class': 'krl-peak' }, 'Tepe: —');
 			return h('div', { 'class': 'krl-tile ' + cls }, [lb[k + 'S'], big(k), lb[k + 'P'], ...split(k, 'VPN', 'Direkt'), h('div', { 'class': 'krl-lbl' }, label)]);
 		};
-		const tot = (k, cls, label) => {
-			lb[k + 'T'] = h('div', { 'class': 'krl-sub', 'style': 'margin-top:3px' }, '—');
-			return h('div', { 'class': 'krl-tile ' + cls }, [big(k), lb[k + 'T'], h('div', { 'class': 'krl-lbl' }, label)]);
-		};
 		return h('div', { 'class': 'krl-band kr-traffic' }, [
 			speed('d', 'krl-down', 'İndirme'),
-			speed('u', 'krl-up', 'Yükleme'),
-			tot('tv', 'krl-tvpn', 'VPN toplam'),
-			tot('td', 'krl-tdir', 'Direkt toplam')
+			speed('u', 'krl-up', 'Yükleme')
 		]);
 	},
 
@@ -1641,9 +1624,6 @@ return view.extend({
 		lb.uP.textContent = 'Tepe: ' + (lb.pu > 0 ? fmtRate(lb.pu) : '—');
 		lb.dV.textContent = fmtRate(r.vd); lb.dD.textContent = fmtRate(r.dd);
 		lb.uV.textContent = fmtRate(r.vu); lb.uD.textContent = fmtRate(r.du);
-		const t = (k, b) => { const p = fmtParts(b.r + b.t); lb[k + 'N'].textContent = p[0]; lb[k + 'U'].textContent = p[1]; lb[k + 'T'].textContent = '↓ ' + fmtBytes(b.r) + ' · ↑ ' + fmtBytes(b.t); };
-		t('tv', { r: s.total.vr, t: s.total.vt });
-		t('td', { r: s.total.dr, t: s.total.dt });
 	},
 
 	/* Dönem kutuları (Bugün/Dün/Bu hafta/Bu ay/Toplam): VPN/Direkt ya da İndirme/Yükleme görünümü */

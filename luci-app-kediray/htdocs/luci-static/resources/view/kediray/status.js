@@ -502,7 +502,7 @@ function collapsed(key) {
 })();
 /* Sunucu bilgilerini / bağlı sunucu IP'sini gizleme */
 (function () {
-	var KS = 'kr_hide_srv', KI = 'kr_hide_srvip', secrets = [], orig = new WeakMap(), pend = false;
+	var KS = 'kr_hide_srv', secrets = [], orig = new WeakMap(), pend = false;
 	var get = function (k) { try { return localStorage.getItem(k) === '1'; } catch (e) { return false; } };
 	var set = function (k, v) { try { localStorage.setItem(k, v ? '1' : '0'); } catch (e) {} };
 	var IPRE = /\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b/g;
