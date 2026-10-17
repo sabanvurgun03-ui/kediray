@@ -498,11 +498,11 @@ upd_sha() { # <dal ya da etiket> -> 40 haneli commit kimliği (GitHub API; anaht
 	echo "$out" | grep -Eq '^[0-9a-f]{40}$' || return 1
 	echo "$out"
 }
-upd_rev() { # <kurulu sürüm> -> depoda kurulu koddan farklı commit varsa onun kimliğini yazar; yoksa ya da ölçülemezse hata
+upd_rev() { # <kurulu sürüm> -> depoda kurulu koddan farklı commit varsa onun kimliğini yazar. Çıkış: 0 = fark var, 1 = fark yok, 2 = GitHub API'ye ulaşılamadı
 	local head inst
-	head=$(upd_sha "$(upd_branch)") || return 1
+	head=$(upd_sha "$(upd_branch)") || return 2
 	inst=$(cat "$UPD_BUILD" 2>/dev/null)
-	[ -n "$inst" ] || inst=$(upd_sha "v$1") || return 1
+	[ -n "$inst" ] || inst=$(upd_sha "v$1") || return 2
 	[ "$head" != "$inst" ] || return 1
 	echo "$head"
 }
@@ -582,7 +582,15 @@ cmd_update() { # check [--json] | install | auto | cached
 		install)
 			if ! ver_gt "$latest" "$cur" && [ "$3" != force ] && [ "$2" != force ]; then
 				# sürüm aynı: depoda yeni commit varsa onu kur (Release yok; update main), yoksa güncelsin
-				upd_rev "$cur" >/dev/null && { cmd_update main; return $?; }
+				# Denetim az önce "değişiklik var" dediyse (RAM kaydındaki rev, kurulu build'den farklı) API'ye bir daha sormadan kur
+				local rv0 rc0
+				rv0=$(cut -d'|' -f4 "$UPD_LAST" 2>/dev/null)
+				if [ -n "$rv0" ] && [ "$rv0" != "$(cat "$UPD_BUILD" 2>/dev/null)" ]; then cmd_update main; return $?; fi
+				upd_rev "$cur" >/dev/null; rc0=$?
+				[ $rc0 = 0 ] && { cmd_update main; return $?; }
+				if [ $rc0 = 2 ]; then
+					echo "GitHub'a (api.github.com) ulaşılamadı; depoda yeni değişiklik olup olmadığı bilinemedi. Doğrudan kurmak için: kediray update main" >&2; return 1
+				fi
 				echo "Zaten güncel ($cur). Zorla kurmak için: kediray update install force"; return 0
 			fi
 			sum=$(upd_sum "$latest" kediray-install.sh) || { echo "Release'te sha256sums bulunamadı ya da kediray-install.sh satırı yok (v$latest); güvenlik için kurulmadı."; return 1; }
