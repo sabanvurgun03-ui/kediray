@@ -1584,7 +1584,7 @@ return view.extend({
 		const btns = {};
 		const paint = () => Object.keys(btns).forEach(k => btns[k].classList.toggle('kr-act', k === this.perMode()));
 		const mk = (k, label) => btns[k] = h('button', { 'class': 'btn', 'click': () => { try { localStorage.setItem('kediray-per-mode', k); } catch (e) {} paint(); if (this.lastStats) this.renderPeriods(this.lastStats); } }, label);
-		const el = h('div', { 'class': 'kr-seg kr-seg-sm', 'style': 'margin:0 0 6px' }, [mk('vd', 'VPN / Direkt'), mk('io', 'İndirme / Yükleme')]);
+		const el = h('div', { 'class': 'kr-seg kr-seg-sm', 'style': 'margin:0 0 6px' }, [mk('io', 'İndirme / Yükleme'), mk('vd', 'VPN / Direkt')]);
 		paint();
 		return el;
 	},
