@@ -246,6 +246,8 @@ function stream(n) {
 		let t = { serverName: n.sni || host || n.address };
 		if (n.fp && n.fp != 'none') t.fingerprint = n.fp;
 		if (n.alpn) t.alpn = L(n.alpn, /[ \t\r\n,]+/);
+		// ECH: abonelikten gelen echConfigList olduğu gibi Xray'e verilir (boşsa ECH kapalı; Xray ECH'i yalnızca bu alan doluysa açar)
+		if (n.ech) t.echConfigList = n.ech;
 		// sabitlenmiş sertifika varsa o; yoksa çekirdek destekliyorsa allowInsecure
 		if (n.pin) t.pinnedPeerCertSha256 = n.pin;
 		else if (n.insecure == '1' && CAP_INSECURE) t.allowInsecure = true;

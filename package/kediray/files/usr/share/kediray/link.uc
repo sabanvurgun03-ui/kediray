@@ -76,6 +76,7 @@ function transport(n, q) {
 	if (net == 'xhttp') n.xhttp_mode = q.mode;
 	if (net == 'tcp' && q.headerType == 'http') n.header_type = 'http';
 	n.alpn = q.alpn;
+	n.ech = q.ech;   // 3x-ui / Xray: tlsSettings.echConfigList (base64 ECHConfigList ya da [ad+]https://… DNS adresi)
 	n.fp = q.fp;
 	n.pbk = q.pbk;
 	n.sid = q.sid;
@@ -107,7 +108,7 @@ function p_vmess_obj(j) {
 	};
 	transport(n, {
 		type: j.net, security: j.tls, sni: j.sni, host: j.host, path: j.path,
-		alpn: j.alpn, fp: j.fp, headerType: j.type, serviceName: (j.net == 'grpc' ? j.path : null),
+		alpn: j.alpn, ech: j.ech, fp: j.fp, headerType: j.type, serviceName: (j.net == 'grpc' ? j.path : null),
 		mode: (j.net == 'grpc' && j.type == 'multi') ? 'multi' : j.mode, allowInsecure: j.allowInsecure
 	});
 	return n;

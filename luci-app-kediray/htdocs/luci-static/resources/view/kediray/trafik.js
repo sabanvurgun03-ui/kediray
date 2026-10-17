@@ -254,6 +254,7 @@ const FIELDS = [
 	['sni', 'SNI', 'text', null, isTLS],
 	['fp', 'Parmak izi (uTLS)', 'select', [['', 'Yok'], 'chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'], isTLS],
 	['alpn', 'ALPN', 'text', null, f => notSS(f) && f.tls === 'tls'],
+	['ech', 'ECH anahtarı (abonelikten otomatik)', 'readonly', null, f => notSS(f) && f.tls === 'tls'],
 	['insecure', 'Sertifikayı otomatik sabitle', 'checkbox', null, f => notSS(f) && f.tls === 'tls'],
 	['pbk', 'REALITY public key', 'text', null, f => notSS(f) && f.tls === 'reality'],
 	['sid', 'REALITY short id', 'text', null, f => notSS(f) && f.tls === 'reality'],
@@ -887,6 +888,8 @@ return view.extend({
 				}));
 			} else if (t === 'checkbox') {
 				el = h('input', { 'type': 'checkbox', 'checked': f[k] === '1' ? '' : null });
+			} else if (t === 'readonly') {   // otomatik gelen değer: gösterilir, değiştirilemez (kopyalanabilir)
+				el = h('textarea', { 'class': 'cbi-input-text', 'rows': '4', 'readonly': '', 'spellcheck': 'false', 'placeholder': 'Abonelikte ech yoksa boş kalır', 'style': 'width:100%;resize:vertical;opacity:.8;font-family:monospace;font-size:.85em;word-break:break-all' }, f[k] || '');
 			} else {
 				el = h('input', { 'type': 'text', 'class': 'cbi-input-text', 'value': f[k] || '', 'spellcheck': 'false', 'autocomplete': 'off' });
 			}

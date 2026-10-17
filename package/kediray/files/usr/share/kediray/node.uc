@@ -127,7 +127,7 @@ function xray_test(cfg) {
 
 const FORM_FIELDS = ['remarks', 'protocol', 'address', 'port', 'uuid', 'password', 'method', 'flow', 'encryption', 'cipher',
 	'network', 'path', 'host', 'service_name', 'grpc_mode', 'xhttp_mode', 'header_type',
-	'tls', 'sni', 'fp', 'alpn', 'insecure', 'pin', 'pbk', 'sid', 'spx', 'enabled'];
+	'tls', 'sni', 'fp', 'alpn', 'ech', 'insecure', 'pin', 'pbk', 'sid', 'spx', 'enabled'];
 
 function write_node(sec, kind, payload) {
 	let u = cur();
