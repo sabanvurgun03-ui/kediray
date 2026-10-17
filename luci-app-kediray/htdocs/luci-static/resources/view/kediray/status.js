@@ -1406,7 +1406,7 @@ return view.extend({
 			this.elChart.addEventListener('click', ev => this.trafficHover(ev));
 			this.card(this.elTraffic, 'traffic', 'Trafik', [
 				this.elLive,
-				this.fold('t-periods', 'Bugün / Dün / Bu hafta / Bu ay / Toplam', this.elPeriods),
+				this.fold('t-periods', 'Toplam', this.elPeriods),
 				this.fold('t-devs', 'Cihaz bazında trafik', this.elDevTr),
 				this.fold('t-chart', 'Son 30 gün (günlük)', h('div', {}, [
 					h('div', { 'class': 'krc-legend' }, [
