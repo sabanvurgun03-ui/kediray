@@ -319,7 +319,7 @@ const CSS = `
 .kr-tag{display:inline-block;padding:0 6px;border-radius:6px;background:rgba(42,125,225,.15);font-size:.8em;margin-left:6px}
 .kr-tag.kr-tag-red{background:rgba(210,63,63,.2);color:#e05252}
 .kr-table td,.kr-table th{padding:6px 8px!important;vertical-align:middle}
-.kr-mvc{width:1%;padding-right:0!important}.kr-mv{display:flex;flex-direction:column;gap:2px}.kr-mv .btn{padding:0 7px!important;min-width:28px;height:20px;line-height:18px;font-size:11px}.kr-mv .btn[disabled]{opacity:.3}
+.kr-mv{display:inline-flex;margin-right:8px;vertical-align:middle}.kr-mv .btn{padding:0 7px!important;min-width:30px;height:26px;line-height:24px;font-size:11px;background:none!important;border:0!important;box-shadow:none!important;opacity:.5}.kr-mv .btn:hover{opacity:1}.kr-mv .btn[disabled]{opacity:.15;cursor:default}
 .kr-active{background:rgba(42,125,225,.08)}
 .kr-tabs{display:flex;gap:4px;margin:8px 0}
 .kr-tabs button{border:1px solid rgba(128,128,128,.4);background:transparent;color:inherit;padding:5px 16px;border-radius:8px 8px 0 0;cursor:pointer}
@@ -1592,8 +1592,7 @@ return view.extend({
 			return b;
 		};
 		const rows = nodes.map((n, i) => h('tr', { 'class': 'tr' + (n.sec === act ? ' kr-active' : '') }, [
-			nodes.length > 1 ? h('td', { 'class': 'td kr-mvc' }, h('div', { 'class': 'kr-mv' }, [mv(n, i, 'up', '▲', 'Yukarı taşı'), mv(n, i, 'down', '▼', 'Aşağı taşı')])) : '',
-			h('td', { 'class': 'td' }, [h('b', {}, n.name), n.sec === act && st && st.enabled && !st.disconnected ? h('span', { 'class': 'kr-tag' }, 'BAĞLI') : '', n.json ? h('span', { 'class': 'kr-tag' }, 'JSON') : '', n.sub ? h('span', { 'class': 'kr-tag' }, 'abonelik') : '']),
+			h('td', { 'class': 'td' }, [nodes.length > 1 ? h('span', { 'class': 'kr-mv' }, [mv(n, i, 'up', '▲', 'Yukarı taşı'), mv(n, i, 'down', '▼', 'Aşağı taşı')]) : '', h('b', {}, n.name), n.sec === act && st && st.enabled && !st.disconnected ? h('span', { 'class': 'kr-tag' }, 'BAĞLI') : '', n.json ? h('span', { 'class': 'kr-tag' }, 'JSON') : '', n.sub ? h('span', { 'class': 'kr-tag' }, 'abonelik') : '']),
 			h('td', { 'class': 'td' }, [n.protocol, n.network, n.tls].filter(x => x && x !== 'none').join(' · ')),
 			h('td', { 'class': 'td kr-hide-sm' }, (n.address || '') + ':' + (n.port || '')),
 			h('td', { 'class': 'td' }, pingBadge(n.ping, n.rtt, n.warm)),
@@ -1615,7 +1614,6 @@ return view.extend({
 			]),
 			nodes.length ? h('table', { 'class': 'table kr-table' }, [
 				h('tr', { 'class': 'tr table-titles' }, [
-					nodes.length > 1 ? h('th', { 'class': 'th kr-mvc', 'title': 'Sıralama' }, '') : '',
 					h('th', { 'class': 'th' }, 'Ad'), h('th', { 'class': 'th' }, 'Tür'), h('th', { 'class': 'th kr-hide-sm' }, 'Adres'),
 					h('th', { 'class': 'th', 'title': 'Ping = sunucuya ağ gecikmesi · tünel = açık bağlantıdaki istek (parantez içi: sıfırdan bağlanma)' }, 'Ping'), h('th', { 'class': 'th' }, '')
 				]),
