@@ -1328,7 +1328,7 @@ return view.extend({
 	   Kaynak: `kediray stats` = { t, counters:{vr,vt,wr,wt}, today, yesterday, week, month, total, since, days:[{day,vr,vt,dr,dt}] }
 	   vr/vt = VPN indirme/yükleme (tünelin dış baytları), dr/dt = Direkt = WAN toplamı − VPN. */
 	/* Düzen: hangi bölüm görünsün, hangi sırada, hangi dönem satırları. Tarayıcıda saklanır. */
-	secTitles: { live: 'Şu an + toplamlar', periods: 'Toplam', devs: 'Cihaz bazında trafik', chart: 'Trafik geçmişi' },
+	secTitles: { live: 'Şu an + toplamlar', periods: 'Toplam', devs: 'Cihaz bazında trafik', chart: 'Ortalama' },
 	rowTitles: { today: 'Bugün', yesterday: 'Dün', week: 'Bu hafta', month: 'Bu ay', total: 'Toplam' },
 	loadLayout() {
 		const def = { order: ['live', 'periods', 'devs', 'chart'], hide: {}, hideRows: {} };
@@ -1690,7 +1690,7 @@ return view.extend({
 				live: this.elLive,
 				periods: this.fold('t-periods', 'Toplam', h('div', {}, [this.buildPerSeg(), this.elPeriods])),
 				devs: this.fold('t-devs', 'Cihaz bazında trafik', this.elDevTr),
-				chart: this.fold('t-chart', 'Trafik geçmişi', h('div', {}, [
+				chart: this.fold('t-chart', 'Ortalama', h('div', {}, [
 					this.elChartTiles,
 					h('div', { 'class': 'krc-ctl' }, [modeSeg, rangeSeg]),
 					this.elLegend,
