@@ -981,8 +981,8 @@ function mkSwitch() {
 	w.setAttribute('data-i18n-skip', '1');
 	w.setAttribute('style', 'display:inline-flex;align-items:center;gap:2px;padding:2px;margin-left:auto;border-radius:999px;border:1px solid rgba(128,128,128,.4);background:rgba(128,128,128,.08);font:600 12px/1 system-ui,sans-serif;white-space:nowrap');
 	const g = document.createElement('span');
-	g.textContent = '🌐';
-	g.setAttribute('style', 'padding:0 4px 0 6px;font-size:13px;line-height:1');
+	g.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1.6" style="display:block"><circle cx="12" cy="12" r="9.5"/><ellipse cx="12" cy="12" rx="4.2" ry="9.5"/><path d="M12 2.5v19M2.5 12h19"/></svg>';   // sabit SVG
+	g.setAttribute('style', 'padding:0 4px 0 6px;line-height:0');
 	if (window.innerWidth >= 480) w.appendChild(g);
 	LANGS.forEach(l => {
 		const b = document.createElement('button');
