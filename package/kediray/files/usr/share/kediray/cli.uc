@@ -74,6 +74,9 @@ if (CMD == 'status') {
 		fw: getenv('KR_FW') == 'up',
 		core: getenv('KR_CORE') || '',
 		engine: getenv('KR_ENGINE') || 'Xray',
+		// mihomo / sing-box + kendi yapılandırma modu: sunucu/uygulama/cihaz ayarları kullanılmaz
+		own: (m.core == 'mihomo' || m.core == 'sing-box') && m.own_config == '1',
+		own_file: ((m.core == 'mihomo' || m.core == 'sing-box') && m.own_config == '1') ? (m['own_cfg_' + replace(m.core, '-', '')] || null) : null,
 		uptime: int(getenv('KR_UPTIME') || 0),
 		mode: (m.mode == 'list') ? 'list' : 'global',
 		auto: !sn && sel != 'none',

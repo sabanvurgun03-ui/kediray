@@ -950,17 +950,38 @@ cmd_core_install() { # <sing-box|mihomo> [dosya]
 	esac
 }
 
-cmd_core_use() { # <xray|sing-box|mihomo>  etkin çekirdeği değiştirir
-	local id="$1" b tags prev i ok
+# Clash/sing-box çekirdeği seçilince Neko gibi tam kendi yapılandırma modu: seçili dosya yoksa sunucu listesinden üretilir ve seçilir
+own_autoprep() { # <çekirdek>  0 = seçili geçerli dosya var
+	local core="$1" n ext
+	own_path "$core" >/dev/null || {
+		case "$core" in mihomo) ext=yaml ;; *) ext=json ;; esac
+		n="kediray-sunucular.$ext"
+		[ -f "$OWN_DIR/$core/$n" ] || cmd_own_template "$core" "$n" >/dev/null 2>&1 || return 1
+		cmd_own_select "$core" "$n" >/dev/null 2>&1 || return 1
+	}
+	cmd_own_check "$core" "$(own_sel "$core")" >/dev/null 2>&1
+}
+cmd_core_use() { # <xray|sing-box|mihomo>  etkin çekirdeği değiştirir (mihomo/sing-box: kendi yapılandırma modu da açılır)
+	local id="$1" b tags prev i ok prev_own own_new
+
 	case "$id" in xray|sing-box|mihomo) ;; *) echo "kullanım: kediray core-use <xray|sing-box|mihomo>" >&2; return 1 ;; esac
 	b=$(core_find "$id") || { echo "$id kurulu değil (önce Çekirdekler sayfasından kurun)" >&2; return 1; }
-	[ "$(engine)" = "$id" ] && { echo "$id zaten etkin"; return 0; }
-	prev=$(engine)
+	if [ "$(engine)" = "$id" ]; then
+		if [ "$id" != xray ] && ! own_on && own_autoprep "$id"; then echo "$id zaten etkin; kendi yapılandırma moduna geçiliyor"; cmd_core_own on; return $?; fi
+		echo "$id zaten etkin"; return 0
+	fi
+	prev=$(engine); prev_own=$(uget main.own_config); prev_own=${prev_own:-0}
 	if [ "$id" = sing-box ]; then
 		tags=$("$b" version 2>/dev/null | awk -F: '/^Tags/{print $2}')
 		case "$tags" in *clash_api*) ;; *) say "uyarı: bu sing-box derlemesinde with_clash_api yok; canlı sunucu seçimi çalışmaz (seçim değişince çekirdek yeniden başlar)" ;; esac
 	fi
-	uci set "$CONF.main.core=$id" && uci commit "$CONF"
+	uci set "$CONF.main.core=$id"
+	own_new=0
+	if [ "$id" != xray ]; then
+		if own_autoprep "$id"; then own_new=1; echo "kendi yapılandırma modu açıldı: $(own_sel "$id") (Çekirdek ayarı sayfasında düzenlenir)"
+		else say "uyarı: $id için yapılandırma dosyası hazırlanamadı; KediRay sunucu listesiyle çalışılacak"; fi
+	fi
+	uci set "$CONF.main.own_config=$own_new" && uci commit "$CONF"
 	rm -f /etc/kediray.tested "$RUN/core.ver" "$RUN/core.ver.sz"
 	echo "etkin çekirdek: $id"
 	if [ "$(uget main.enabled)" = 1 ]; then
@@ -972,7 +993,7 @@ cmd_core_use() { # <xray|sing-box|mihomo>  etkin çekirdeği değiştirir
 		done
 		if [ $ok = 0 ]; then
 			sayerr "$id çekirdeği başlamadı; önceki çekirdeğe ($prev) dönülüyor: $(sed -n '1,3p' "$RUN/last_error" 2>/dev/null | tr '\n' ' ')"
-			uci set "$CONF.main.core=$prev" && uci commit "$CONF"
+			uci set "$CONF.main.core=$prev"; uci set "$CONF.main.own_config=$prev_own"; uci commit "$CONF"
 			rm -f /etc/kediray.tested "$RUN/core.ver" "$RUN/core.ver.sz"
 			/etc/init.d/kediray restart >/dev/null 2>&1
 			echo "$id başlatılamadı, $prev'e dönüldü" >&2
@@ -1189,7 +1210,11 @@ cmd_dash() { # on|off|info  — MetaCubeXD dashboard (mihomo / sing-box)
 			[ "$1" = on ] && v=1 || v=0
 			if [ "$v" = 1 ]; then
 				[ "$(engine)" != xray ] || { echo "dashboard için önce mihomo ya da sing-box'u etkin yapın" >&2; return 1; }
-				[ -n "$(uget main.dash_secret)" ] || uci set "$CONF.main.dash_secret=$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+				if [ -z "$(uget main.dash_secret)" ]; then
+					s=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c 16 2>/dev/null)
+					[ ${#s} -ge 8 ] || { echo "parola üretilemedi" >&2; return 1; }
+					uci set "$CONF.main.dash_secret=$s"
+				fi
 			fi
 			uci set "$CONF.main.dashboard=$v" && uci commit "$CONF"
 			rm -f /etc/kediray.tested
@@ -1217,7 +1242,8 @@ cmd_core_own() { # on|off  — kendi yapılandırma modu
 	core=$(engine)
 	if [ "$v" = 1 ]; then
 		[ "$core" != xray ] || { echo "kendi yapılandırma modu için önce mihomo ya da sing-box'u etkin yapın (kediray core-use)" >&2; return 1; }
-		own_path "$core" >/dev/null || { echo "$core için yapılandırma dosyası seçilmemiş" >&2; return 1; }
+		own_path "$core" >/dev/null || own_autoprep "$core" >/dev/null 2>&1 || true
+		own_path "$core" >/dev/null || { echo "$core için yapılandırma dosyası seçilmemiş ve sunucu listesinden üretilemedi" >&2; return 1; }
 		cmd_own_check "$core" "$(own_sel "$core")" >/dev/null || { echo "seçili dosya geçersiz; önce düzeltin (kediray own-check $core $(own_sel "$core"))" >&2; return 1; }
 	fi
 	prev=$(uget main.own_config); prev=${prev:-0}

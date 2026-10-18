@@ -170,8 +170,8 @@ function fmtSize(n) {
 const KIND = { kediray: 'KediRay klasörü', system: 'Sistem paketi' };
 const NOTES = {
 	'xray': 'Varsayılan çekirdek. En çok özellik bunda: WARP, TLS parçalama, reklam engelleme, ECH, sertifika sabitleme, xhttp.',
-	'sing-box': 'Etkin yapılırsa VPN sing-box ile çalışır. xhttp aktarımı, WARP, TLS parçalama, reklam/geosite listeleri ve sertifika sabitleme yok; bu sunucular/özellikler atlanır. Modemin paket deposundan kurulur (apk ya da opkg). Paketin kendi servisi kapalı tutulur.',
-	'mihomo': 'Etkin yapılırsa VPN mihomo ile çalışır. xhttp, WARP ve TLS parçalama yok. Reklam engelleme ve geosite/geoip kuralları için önce kediray update-geo ile listeleri indir. İstersen "Yerel mod" ile mihomo kendi TUN\'unu kullanır. GitHub\'daki MetaCubeX/mihomo son sürümünden indirilir (arm64 ve armv7). İndirme sağlama toplamıyla doğrulanmaz; güvenmiyorsan kendin indirip "Dosya yükle…" ile yükle.'
+	'sing-box': 'Etkin yapılırsa VPN sing-box ile çalışır ve kendi yapılandırma modu otomatik açılır: sunucuları sing-box JSON dosyası belirler (ilk seferde KediRay sunucularından üretilir), Xray ayarları kullanılmaz. Dosya Çekirdek ayarı sayfasında düzenlenir. xhttp aktarımı, WARP, TLS parçalama ve sertifika sabitleme yok. Modemin paket deposundan kurulur (apk ya da opkg). Paketin kendi servisi kapalı tutulur.',
+	'mihomo': 'Etkin yapılırsa VPN mihomo (Clash) ile çalışır ve kendi yapılandırma modu otomatik açılır: sunucuları Clash YAML dosyası belirler (ilk seferde KediRay sunucularından üretilir), Xray ayarları kullanılmaz. Dosya Çekirdek ayarı sayfasında düzenlenir. xhttp, WARP ve TLS parçalama yok. Reklam engelleme ve geosite/geoip kuralları için önce kediray update-geo ile listeleri indir. İstersen "Yerel mod" ile mihomo kendi TUN\'unu kullanır. GitHub\'daki MetaCubeX/mihomo son sürümünden indirilir (arm64 ve armv7). İndirme sağlama toplamıyla doğrulanmaz; güvenmiyorsan kendin indirip "Dosya yükle…" ile yükle.'
 };
 
 return view.extend({

@@ -399,6 +399,16 @@ function krSmartBand() {
 	document.head.appendChild(st);
 })();
 
+/* Çekirdek ayarı modu açıksa (mihomo / sing-box kendi dosyasıyla çalışıyor) bu sayfadaki KediRay ayarları kullanılmaz: uyar ve soluklaştır */
+function ownNote(box, pos, dim) {
+	fs.exec('/usr/bin/kediray', ['dash', 'info']).then(r => {
+		let d = null; try { d = JSON.parse(r.stdout || 'null'); } catch (e) {}
+		if (!d || !d.own) return;
+		box.insertBefore(E('div', { 'style': 'border:1px solid rgba(224,168,46,.5);border-left:4px solid #e0a82e;border-radius:8px;padding:10px 14px;margin:0 0 14px;background:rgba(224,168,46,.07);max-width:900px;line-height:1.5' },
+			[E('b', {}, 'Çekirdek ayarı modu açık (' + d.engine + '). '), 'Bu sayfadaki sunucu, uygulama ve cihaz ayarları kullanılmıyor; VPN kendi yapılandırma dosyasıyla çalışıyor. Değiştirmek için "Çekirdek ayarı" sayfasını kullan.']), box.children[pos] || null);
+		(dim || []).forEach(el => { if (el) { el.style.opacity = '.45'; el.style.pointerEvents = 'none'; } });
+	}).catch(() => {});
+}
 return view.extend({
 	load() {
 		return Promise.all([uci.load('kediray'), L.resolveDefault(callHostHints(), {})]);
@@ -692,7 +702,7 @@ return view.extend({
 			return root;
 		};
 
-		return m.render().then(n => { const w = document.createElement('div'); w.appendChild(krLicBanner()); w.appendChild(n); return w; });
+		return m.render().then(n => { const w = document.createElement('div'); w.appendChild(krLicBanner()); w.appendChild(n); ownNote(w, 1, []); return w; });
 	},
 
 	handleSave: function () {

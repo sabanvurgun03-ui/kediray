@@ -1123,8 +1123,15 @@ return view.extend({
 	},
 
 	/* ---------- çizim ---------- */
+	/* mihomo / sing-box + kendi yapılandırma modu: Xray'e ait sunucu/uygulama/cihaz kartları gizlenir */
+	ownHide(el) { el.style.display = this.own ? 'none' : ''; return !!this.own; },
+
 	renderStatus(st) {
 		st = st || {};
+		if (this.ownPrev !== undefined && this.ownPrev !== !!st.own) { location.reload(); return; }
+		this.ownPrev = !!st.own;
+		this.own = !!st.own;
+		[this.elApps, this.elNodes, this.elDevs].forEach(el => { if (el) el.style.display = this.own ? 'none' : ''; });
 		const dot = st.running ? 'kr-on' : (st.enabled ? 'kr-err' : 'kr-off');
 		const txt = st.running ? 'Çalışıyor' : (st.enabled ? 'Durdu — Günlük sekmesine bak' : 'Kapalı');
 		const modes = { rule: 'Tümü VPN', global: 'Tümü VPN', list: 'Sadece liste VPN' };
@@ -1132,8 +1139,8 @@ return view.extend({
 		this.card(this.elStatus, 'status', 'Durum', [
 			h('div', { 'class': 'kr-big' }, [h('span', { 'class': 'kr-dot ' + dot }), txt]),
 			h('div', { 'class': 'kr-sub' }, [
-				(st.engine || 'Xray') + ' ', st.core || '?', ' · Mod: ', modes[st.mode] || st.mode || '-',
-				' · Yakalama: ', ({ mixed: 'Mixed (TCP çekirdek + UDP hev)', tun: 'TUN (hepsi hev-socks5-tunnel)', tproxy: 'TPROXY', redirect: 'Redirect (sadece TCP)' })[st.capture] || st.capture || '-',
+				(st.engine || 'Xray') + ' ', st.core || '?', st.own ? ' · Kendi yapılandırma: ' + (st.own_file || '-') : [' · Mod: ', modes[st.mode] || st.mode || '-'],
+				' · Yakalama: ', ({ mixed: 'Mixed (TCP çekirdek + UDP hev)', tun: 'TUN (hepsi hev-socks5-tunnel)', tproxy: 'TPROXY', redirect: 'Redirect (sadece TCP)', own: 'Dosyadaki TUN / redirect girişi', native: 'mihomo yerel mod (TUN)' })[st.capture] || st.capture || '-',
 				st.running ? [' · Açık: ', live(st.uptime)] : '',
 				st.direct_dead ? ' · Direkt çıkış yok: "direkt" uygulamalar da VPN\'den çıkıyor' : ''
 			]),
@@ -1161,9 +1168,19 @@ return view.extend({
 				btn.call(this, '🐢 Sayfa gecikmesi', '', () => this.doWebtest(), 'Sayfa neden geç açılıyor: DNS mi, tünel mi?'),
 				btn.call(this, '🔎 Takılma avı', '', () => this.doHunt(), 'Tarayıcıda takılan adresleri arka arkaya dener: takılma DNS\'te mi bağlantıda mı?'),
 				btn.call(this, '🤝 Sunucu el sıkışması', '', () => this.doDial(), 'Sunucu bağlantıyı kaç kez düşürüyor (günlükteki EOF hatası)'),
-				btn.call(this, '{ } Xray yapılandırması', '', () => this.showConfig(), 'Üretilen tam config.json')
+				btn.call(this, '{ } ' + (st.engine || 'Xray') + ' yapılandırması', '', () => this.showConfig(), 'Üretilen tam config.json')
 			])
 		]);
+		if (st.own) {
+			this.card(this.elNode, 'node', 'Çekirdek yapılandırması', [
+				h('div', { 'class': 'kr-big' }, st.own_file || '—'),
+				h('div', { 'class': 'kr-sub' }, [h('span', { 'class': 'kr-tag' }, (st.engine || '') + ' · KENDİ DOSYASI'), ' Sunucular, uygulama ve cihaz kuralları bu dosyadan gelir; KediRay\'in Xray sunucu listesi kullanılmaz.']),
+				h('div', { 'class': 'kr-row', 'style': 'margin-top:10px' }, [
+					h('a', { 'class': 'cbi-button cbi-button-action', 'href': L.url('admin/vpn/kediray/own') }, 'Çekirdek ayarını aç (sunucu seç, düzenle)')
+				])
+			]);
+			return;
+		}
 		const a = st.active;
 		// Kullanıcı açılır listeyi kullanırken periyodik yenileme listeyi bozmasın
 		if (this.elNode.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;
@@ -1588,6 +1605,7 @@ return view.extend({
 	},
 
 	renderApps(apps) {
+		if (this.ownHide(this.elApps)) return;
 		const rows = apps.filter(a => a.enabled).map(a => h('div', { 'class': 'kr-app' }, [
 			h('div', {}, [h('b', {}, a.name), h('div', { 'class': 'kr-sub' }, [a.ports ? 'port ' + a.ports : '', a.ips ? ' · ' + a.ips + ' IP bloğu' : '', a.domains ? ' · ' + a.domains + ' alan adı' : ''])]),
 			h('div', { 'class': 'kr-seg' }, [
@@ -1602,6 +1620,7 @@ return view.extend({
 	},
 
 	renderNodes(nodes, st) {
+		if (this.ownHide(this.elNodes)) return;
 		const act = st && st.active ? st.active.sec : null;
 		const mv = (n, i, dir, label, tip) => {
 			const b = btn.call(this, label, '', () => this.doMove(n.sec, dir), tip);
@@ -1640,6 +1659,7 @@ return view.extend({
 	},
 
 	renderDevices(devs) {
+		if (this.ownHide(this.elDevs)) return;
 		const on = devs.filter(d => d.online).length;
 		// Yön: dört buton — Varsayılan / VPN / Direkt / Engelle (engelli kırmızı)
 		const MODES = [

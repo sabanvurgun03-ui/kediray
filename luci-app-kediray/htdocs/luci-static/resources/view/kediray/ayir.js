@@ -47,6 +47,17 @@ function run(args) {
 function runJson(args) {
 	return run(args).then(r => { try { return JSON.parse(r.stdout || 'null'); } catch (e) { return null; } });
 }
+
+/* Çekirdek ayarı modu açıksa (mihomo / sing-box kendi dosyasıyla çalışıyor) bu sayfadaki KediRay ayarları kullanılmaz: uyar ve soluklaştır */
+function ownNote(box, pos, dim) {
+	fs.exec(CLI, ['dash', 'info']).then(r => {
+		let d = null; try { d = JSON.parse(r.stdout || 'null'); } catch (e) {}
+		if (!d || !d.own) return;
+		box.insertBefore(E('div', { 'style': 'border:1px solid rgba(224,168,46,.5);border-left:4px solid #e0a82e;border-radius:8px;padding:10px 14px;margin:0 0 14px;background:rgba(224,168,46,.07);max-width:900px;line-height:1.5' },
+			[E('b', {}, 'Çekirdek ayarı modu açık (' + d.engine + '). '), 'Bu sayfadaki sunucu, uygulama ve cihaz ayarları kullanılmıyor; VPN kendi yapılandırma dosyasıyla çalışıyor. Değiştirmek için "Çekirdek ayarı" sayfasını kullan.']), box.children[pos] || null);
+		(dim || []).forEach(el => { if (el) { el.style.opacity = '.45'; el.style.pointerEvents = 'none'; } });
+	}).catch(() => {});
+}
 function outOf(r) { return ((r.stdout || '') + (r.stderr || '')).trim(); }
 
 const PRESETS = [
@@ -221,6 +232,7 @@ return view.extend({
 			h('p', { 'class': 'ka-sub' }, 'Hangi VPN motorunun çalışacağını seç ve hangi uygulamaların VPN\'den, hangilerinin direkt gideceğini belirle.'),
 			this.elEng, this.elWarp, this.elApps, this.buildAdd()
 		]);
+		ownNote(root, 3, [this.elApps, this.elWarp]);
 		this.fill(data[0], data[1], data[2]);
 		poll.add(() => this.refresh(), 6);
 		return root;
