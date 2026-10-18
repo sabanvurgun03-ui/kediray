@@ -271,7 +271,7 @@ return view.extend({
 			h('style', {}, CSS),
 			h('h2', {}, [h('img', { 'src': '/luci-static/kedi-logo.svg', 'style': 'height:1.3em;vertical-align:-0.25em;margin-right:8px;border-radius:6px' }), 'Çekirdekler']),
 			h('p', { 'class': 'kc-desc' }, 'VPN motorlarını buradan yönetirsin: kur, dosyadan yükle, kaldır ve hangisiyle çalışacağını seç. Sunucuların, uygulama kuralların ve DNS ayarların her çekirdekte aynı kalır; çekirdeğin desteklemediği parçalar atlanır ve günlüğe uyarı yazılır.'),
-			h('div', { 'class': 'kc-warn' }, 'İndirmeler onlarca MB tutar; mobil veride kotandan düşer. Çevrimdışıysan çekirdeğin arşivini kendi sayfasından indirip "Dosya yükle…" ile yükle.'),
+			h('div', { 'class': 'kc-warn' }, 'Çevrimdışıysan çekirdeğin arşivini kendi sayfasından indirip "Dosya yükle…" ile yükle.'),
 			h('div', { 'class': 'kc-grid' }, list.map(c => this.card(c)))
 		]);
 	},
