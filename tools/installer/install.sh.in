@@ -251,6 +251,7 @@ write_files() {
 @@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/about.js@@
 @@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/ayir.js@@
 @@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/i18n.js@@
+@@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/cores.js@@
 @@KR_FILE luci-app-kediray/root/usr/share/luci/menu.d/luci-app-kediray.json@@
 @@KR_FILE luci-app-kediray/root/usr/share/rpcd/acl.d/luci-app-kediray.json@@
 @@KR_FILE luci-app-kediray/htdocs/luci-static/kedi-logo.svg@@
@@ -275,7 +276,7 @@ KR_VD=/www/luci-static/resources/view/kediray
 rm -f "$KR_VD"/*-r[0-9]*.js "$KR_VD"/i18n_r*.js 2>/dev/null
 # Dil modülü (i18n.js) tüm sayfalarca ortak kullanılır: o da sürüm etiketli adla yayınlanır, sayfaların kopyaları bu adı kullanır
 [ -f "$KR_VD/i18n.js" ] && cp "$KR_VD/i18n.js" "$KR_VD/i18n_r$KR_TAG.js"
-for v in status trafik ayir settings log about; do
+for v in status trafik ayir settings log about cores; do
 	[ -f "$KR_VD/$v.js" ] || continue
 	cp "$KR_VD/$v.js" "$KR_VD/$v-r$KR_TAG.js" && \
 		sed -i "s#\"path\": \"kediray/$v[^\"]*\"#\"path\": \"kediray/$v-r$KR_TAG\"#" /usr/share/luci/menu.d/luci-app-kediray.json

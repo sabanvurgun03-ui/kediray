@@ -33,14 +33,19 @@
 		"order": 4,
 		"action": { "type": "view", "path": "kediray/settings" }
 	},
+	"admin/vpn/kediray/cores": {
+		"title": "Çekirdekler",
+		"order": 5,
+		"action": { "type": "view", "path": "kediray/cores" }
+	},
 	"admin/vpn/kediray/log": {
 		"title": "Günlük",
-		"order": 5,
+		"order": 6,
 		"action": { "type": "view", "path": "kediray/log" }
 	},
 	"admin/vpn/kediray/about": {
 		"title": "Hakkında",
-		"order": 6,
+		"order": 7,
 		"action": { "type": "view", "path": "kediray/about" }
 	}
 }

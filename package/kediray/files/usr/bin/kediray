@@ -754,6 +754,176 @@ cmd_restore() { # <dosya>
 	echo "Yedek geri yüklendi: $nn sunucu, $na uygulama kuralı. (Önceki ayarlar: /etc/kediray.pre-restore)"
 	return 0
 }
+# ---------- Çekirdekler: Xray dışındaki motor ikilileri (sing-box, mihomo) ----------
+# Bu adım yalnızca ikilileri yönetir (kur / dosyadan yükle / kaldır). VPN'i Xray çalıştırmaya devam eder.
+CORE_LOG=/tmp/kediray-core.log
+CORE_RC=/tmp/kediray-core.rc
+CORE_UP=/tmp/kediray-core-upload
+
+core_find() { # <ad> → ikilinin yolu
+	local c
+	case "$1" in
+		xray) corebin; return $? ;;
+		sing-box) for c in "$(uget main.singbox_bin)" "$SHARE/bin/sing-box" /usr/bin/sing-box; do [ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return 0; }; done ;;
+		mihomo) for c in "$(uget main.mihomo_bin)" "$SHARE/bin/mihomo" /usr/bin/mihomo; do [ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return 0; }; done ;;
+	esac
+	return 1
+}
+
+core_ver_of() { # <ad> <ikili> → sürüm
+	case "$1" in
+		xray) core_ver ;;
+		sing-box) "$2" version 2>/dev/null | awk 'NR==1{print $3}' ;;
+		mihomo) "$2" -v 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if ($i ~ /^v?[0-9]+\.[0-9]+/) {sub(/^v/,"",$i); print $i; exit}}' ;;
+	esac
+}
+
+cmd_cores() { # JSON: çekirdek ikilileri
+	local id name bin ver sz src first=1 used inst
+	printf '['
+	for id in xray sing-box mihomo; do
+		case "$id" in xray) name=Xray; used=true ;; sing-box) name=sing-box; used=false ;; *) name=mihomo; used=false ;; esac
+		bin=$(core_find "$id") || bin=""
+		ver=""; sz=0; src=""; inst=false
+		if [ -n "$bin" ]; then
+			inst=true
+			ver=$(core_ver_of "$id" "$bin")
+			sz=$(wc -c < "$bin" 2>/dev/null | tr -d ' ')
+			case "$bin" in "$SHARE"/bin/*) src=kediray ;; *) src=system ;; esac
+		fi
+		[ $first = 1 ] || printf ','
+		first=0
+		printf '{"id":"%s","name":"%s","installed":%s,"version":"%s","size":%s,"path":"%s","source":"%s","used":%s}' \
+			"$id" "$name" "$inst" "$ver" "${sz:-0}" "$bin" "$src" "$used"
+	done
+	printf ']\n'
+}
+
+pm_install() { # <paket>
+	if command -v apk >/dev/null 2>&1; then apk update >/dev/null 2>&1; apk add "$1"
+	elif command -v opkg >/dev/null 2>&1; then opkg update >/dev/null 2>&1; opkg install "$1"
+	else echo "apk ya da opkg bulunamadı" >&2; return 1; fi
+}
+
+pm_remove() { # <paket>
+	if command -v apk >/dev/null 2>&1; then apk info -e "$1" >/dev/null 2>&1 && apk del "$1"
+	elif command -v opkg >/dev/null 2>&1; then opkg list-installed "$1" 2>/dev/null | grep -q "^$1 " && opkg remove "$1"
+	else return 0; fi
+}
+
+core_put() { # <ad> <kaynak ikili>  — çalıştığını doğrulayıp yerine koy
+	local new="$SHARE/bin/$1.new" v
+	mkdir -p "$SHARE/bin"
+	cp "$2" "$new" || { echo "kopyalanamadı (yer yok mu?)" >&2; rm -f "$new"; return 1; }
+	chmod 755 "$new"
+	v=$(core_ver_of "$1" "$new")
+	[ -n "$v" ] || { rm -f "$new"; echo "$1: dosya çalışmadı ya da sürüm okunamadı (mimari uyuşmuyor olabilir)" >&2; return 1; }
+	mv -f "$new" "$SHARE/bin/$1"
+	echo "$1 $v kuruldu: $SHARE/bin/$1"
+}
+
+core_install_file() { # <ad> <dosya>: .tar.gz, .gz ya da düz ikili
+	local id="$1" f="$2" d=/tmp/kediray-core-x src rc
+	[ -s "$f" ] || { echo "dosya yok ya da boş: $f" >&2; return 1; }
+	rm -rf "$d"; mkdir -p "$d"
+	if gzip -t "$f" 2>/dev/null; then
+		# içi tar mı (ustar işareti 257. bayttan başlar), yoksa tek dosyalık .gz mi
+		if [ "$(gzip -dc "$f" 2>/dev/null | dd bs=1 skip=257 count=5 2>/dev/null)" = ustar ]; then
+			tar -xzf "$f" -C "$d" 2>/dev/null
+			src=$(find "$d" -type f -name "$id" | head -n1)
+			[ -n "$src" ] || { echo "arşivde '$id' dosyası bulunamadı" >&2; rm -rf "$d"; return 1; }
+			core_put "$id" "$src"; rc=$?
+		else
+			gzip -dc "$f" > "$d/$id" 2>/dev/null
+			core_put "$id" "$d/$id"; rc=$?
+		fi
+	else
+		core_put "$id" "$f"; rc=$?
+	fi
+	rm -rf "$d"
+	return $rc
+}
+
+core_install_mihomo() { # GitHub'dan (MetaCubeX/mihomo) son sürüm; yalnızca arm64 ve armv7 için hazır dosya adı doğrulandı
+	local a tag url tmp=/tmp/kediray-core-dl.gz
+	case "$(uname -m)" in
+		aarch64|arm64) a=arm64 ;;
+		armv7*) a=armv7 ;;
+		*) echo "Bu mimari ($(uname -m)) için hazır indirme tanımlı değil; 'Dosya yükle' ile kur." >&2; return 1 ;;
+	esac
+	tag=$(curl -sI -m 25 https://github.com/MetaCubeX/mihomo/releases/latest 2>/dev/null | tr -d '\r' | awk -F/ 'tolower($1) ~ /^location:/ {print $NF}')
+	case "$tag" in v[0-9]*) ;; *) echo "mihomo'nun son sürümü öğrenilemedi (GitHub'a ulaşılamıyor olabilir)" >&2; return 1 ;; esac
+	url="https://github.com/MetaCubeX/mihomo/releases/download/$tag/mihomo-linux-$a-$tag.gz"
+	echo "mihomo $tag indiriliyor (~20 MB)…"
+	rm -f "$tmp"
+	curl -fL -m 900 -o "$tmp" "$url" || { echo "indirilemedi: $url" >&2; rm -f "$tmp"; return 1; }
+	core_install_file mihomo "$tmp"
+	local rc=$?
+	rm -f "$tmp"
+	return $rc
+}
+
+cmd_core_install() { # <sing-box|mihomo> [dosya]
+	local id="$1" f="$2" was=0
+	case "$id" in
+		sing-box|mihomo) ;;
+		xray) echo "Xray ana çekirdektir; güncelleme için: kediray update-core" >&2; return 1 ;;
+		*) echo "bilinmeyen çekirdek: $id" >&2; return 1 ;;
+	esac
+	if [ -n "$f" ]; then core_install_file "$id" "$f"; return $?; fi
+	case "$id" in
+		sing-box)
+			echo "sing-box paketi kuruluyor…"
+			svc_running sing-box && was=1
+			pm_install sing-box || return 1
+			# Paketin kendi servisi açılıp çalışan VPN ile çakışmasın
+			[ "$was" = 1 ] || { [ -x /etc/init.d/sing-box ] && { /etc/init.d/sing-box stop; /etc/init.d/sing-box disable; } >/dev/null 2>&1; }
+			core_find sing-box >/dev/null || { echo "paket kuruldu ama sing-box ikilisi bulunamadı" >&2; return 1; }
+			echo "sing-box $(core_ver_of sing-box "$(core_find sing-box)") kuruldu"
+			;;
+		mihomo) core_install_mihomo ;;
+	esac
+}
+
+cmd_core_remove() { # <sing-box|mihomo>
+	local id="$1" did=0
+	case "$id" in
+		sing-box|mihomo) ;;
+		xray) echo "Xray ana çekirdektir, kaldırılamaz" >&2; return 1 ;;
+		*) echo "bilinmeyen çekirdek: $id" >&2; return 1 ;;
+	esac
+	core_find "$id" >/dev/null || { echo "$id zaten kurulu değil"; return 0; }
+	# Başka bir VPN (kendi servisiyle) bu ikiliyi kullanıyorsa dokunma
+	if svc_running "$id"; then echo "$id servisi çalışıyor (başka bir VPN kullanıyor olabilir); önce onu durdur" >&2; return 1; fi
+	[ -e "$SHARE/bin/$id" ] && { rm -f "$SHARE/bin/$id"; did=1; echo "$SHARE/bin/$id silindi"; }
+	if [ "$id" = sing-box ] && { [ -x /usr/bin/sing-box ] || [ -x /usr/bin/sing-box-tiny ]; }; then
+		pm_remove sing-box && did=1
+		pm_remove sing-box-tiny && did=1
+	fi
+	core_find "$id" >/dev/null && { echo "$id hâlâ duruyor: $(core_find "$id") (elle kurulmuş olabilir)" >&2; return 1; }
+	[ $did = 1 ] && echo "$id kaldırıldı"
+	return 0
+}
+
+cmd_core_bg() { # install|remove <ad> [dosya] — arka planda çalıştırır (panel isteği zaman aşımına uğramasın)
+	case "$1" in install|remove) ;; *) echo "install|remove olmalı" >&2; return 1 ;; esac
+	case "$2" in ''|*[!a-z0-9-]*) echo "geçersiz ad" >&2; return 1 ;; esac
+	case "$3" in ''|"$CORE_UP") ;; *) echo "geçersiz dosya" >&2; return 1 ;; esac
+	rm -f "$CORE_RC"
+	: > "$CORE_LOG"
+	( $(command -v setsid) sh -c "/usr/bin/kediray core-$1 $2 $3; echo \$? > $CORE_RC" >"$CORE_LOG" 2>&1 </dev/null & )
+	echo "başlatıldı"
+	return 0
+}
+
+cmd_core_log() {
+	if [ -f "$CORE_RC" ]; then echo "DONE $(cat "$CORE_RC")"
+	elif [ -f "$CORE_LOG" ]; then echo RUNNING
+	else echo "DONE 1"; fi
+	tail -n 60 "$CORE_LOG" 2>/dev/null
+	return 0
+}
+
 cmd_engines() { # JSON: KediRay + kurulu diğer VPN motorları ve çalışma durumu
 	local s name first=1 r
 	printf '['
@@ -3438,6 +3608,9 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray autodirect on|off          Direkt çıkış yokken "direkt" seçilenleri otomatik VPN'e çevir (on) ya da seçime hep uy (off)
   kediray engines                    VPN motorları ve durumları (JSON)
   kediray engine <ad> start|stop     Motoru başlat/durdur (aynı anda yalnızca biri çalışır)
+  kediray cores                      Çekirdek ikilileri: Xray, sing-box, mihomo (JSON)
+  kediray core-install <sing-box|mihomo> [dosya]   Çekirdeği kur (dosya: .tar.gz, .gz ya da ikili)
+  kediray core-remove <sing-box|mihomo>            Çekirdeği kaldır
   kediray app-add <ad> <vpn|direct> <portlar> <alan adları> <IP'ler>   Uygulama kuralı ekle
   kediray app-del <app>              Uygulama kuralını sil
   kediray selfupdate <dosya>         Kurulum dosyasıyla güncelle (panel: Hakkında > Güncelle)
@@ -3503,6 +3676,11 @@ case "$cmd" in
 	engine) cmd_engine "$@" ;;
 	engine-bg) cmd_engine_bg "$@" ;;
 	engine-log) cmd_engine_log ;;
+	cores) cmd_cores ;;
+	core-install) cmd_core_install "$@" ;;
+	core-remove) cmd_core_remove "$@" ;;
+	core-bg) cmd_core_bg "$@" ;;
+	core-log) cmd_core_log ;;
 	device) cmd_device "$@" ;;
 	nodes) ucode "$SHARE/cli.uc" nodes ;;
 	node-move) ucode "$SHARE/cli.uc" node-move "$@" ;;

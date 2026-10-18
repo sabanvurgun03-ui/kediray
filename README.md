@@ -16,6 +16,7 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 - Trafik sayfası: bugün / bu hafta / bu ay kullanımı, kartları gizle ve sırala. VPN'siz, sade karşılığı ayrı bir uygulama olarak da var: [KediStat](https://github.com/sabanvurgun03-ui/kedistat)
 - Bant sekmesi: modem bant taraması ve akıllı bant seçimi (QModem gerekir)
 - Görünüm: açık/koyu ve renk temaları
+- **Çekirdekler:** Xray'in yanında sing-box ve mihomo ikililerini panelden kur, dosyadan yükle ya da kaldır (şimdilik yalnızca ikili yönetimi; VPN hâlâ Xray ile çalışır)
 - **Dil:** Türkçe, English, Français; sayfa başlığının sağındaki TR | EN | FR seçicisiyle değişir (seçim tarayıcıda saklanır)
 - **Yedekle / geri yükle:** sunucular, uygulama kuralları ve ayarlar tek dosyada (modemi sıfırlayınca geri getir)
 - GitHub Release'ten güncelleme (sha256sums doğrulamalı)
@@ -111,6 +112,7 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 - Traffic page: today / this week / this month usage, hide and reorder cards. A plain, VPN-free version is also available as a separate app: [KediStat](https://github.com/sabanvurgun03-ui/kedistat)
 - Band tab: modem band scan and smart band selection (needs QModem)
 - Appearance: light/dark and color themes
+- **Cores:** install, upload from a file or remove the sing-box and mihomo binaries next to Xray from the panel (binary management only for now; the VPN still runs on Xray)
 - **Languages:** Türkçe, English, Français; switch with the TR | EN | FR selector at the right of the page title (the choice is saved in the browser)
 - **Backup / restore:** servers, app rules and settings in one file (bring them back after a router reset)
 - Update from GitHub Releases (sha256sums verified)

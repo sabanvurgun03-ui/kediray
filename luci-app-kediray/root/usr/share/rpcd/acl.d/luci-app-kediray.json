@@ -16,7 +16,8 @@
 			"cgi-io": [ "upload" ],
 			"file": {
 				"/tmp/kediray-update.sh": [ "write" ],
-				"/tmp/kediray-restore.conf": [ "write" ]
+				"/tmp/kediray-restore.conf": [ "write" ],
+				"/tmp/kediray-core-upload": [ "write" ]
 			},
 			"uci": [ "kediray" ]
 		}
