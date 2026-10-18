@@ -1454,8 +1454,8 @@ return view.extend({
 	trafficChart(days, sel) {
 		const cs = this.chartState(), M = CH[cs.mode];
 		const W = Math.max(280, Math.min(1100, this.elChart.clientWidth || 700)), H = 190;
-		const L = 46, R = 8, T = 12, B = 24, pw = W - L - R, ph = H - T - B;
-		const n = days.length, slot = pw / n, bw = Math.min(24, Math.max(4, slot - 4));
+		const R = 8, T = 12, B = 24, ph = H - T - B;
+		const n = days.length;
 		const tot = days.map(x => M.fa(x) + M.fb(x));
 		const max = Math.max(1, ...tot);
 		// "güzel" üst sınır: 4 eşit aralık, adım güzel bir sayı (etiketler 1024 tabanlı birimde: 6, 12, 18, 24 GB gibi)
@@ -1463,6 +1463,9 @@ return view.extend({
 		const mag = Math.pow(10, Math.floor(Math.log10(mu / 4)));
 		const step = ([1, 1.5, 2, 2.5, 3, 4, 5, 6, 7.5, 8, 10, 15, 20].map(m => m * mag).find(v => v * 4 >= mu * 1.02) || 20 * mag) * unit;
 		const top = step * 4;
+		// sol boşluk en uzun eksen etiketine göre: "160.0 GB" gibi üç haneli değerler kesilmesin
+		let lw = 0; for (let i = 1; i <= 4; i++) lw = Math.max(lw, fmtBytes(top * i / 4).length);
+		const L = Math.max(46, Math.ceil(lw * 6.6) + 12), pw = W - L - R, slot = pw / n, bw = Math.min(24, Math.max(4, slot - 4));
 		const y = v => T + ph - (v / top) * ph;
 		// çizgi: günlük görünümde bu ayın günlük ortalaması; aylık görünümde verisi olan ayların ortalaması
 		const act = tot.filter(v => v > 0), avg = cs.range === 'a' ? (act.length ? act.reduce((p, v) => p + v, 0) / act.length : 0) : this.monthAvg(M).avg;
