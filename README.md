@@ -22,9 +22,13 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 
 ## Ekran görüntüleri
 
-<p align="center"><img src="docs/ekranlar.jpg" alt="AW1K Panel ekranları"></p>
+<p align="center"><img src="docs/ana-panel.png" alt="KediRay ana panel" width="560"></p>
 
-*AW1K Panel Android uygulaması: ana sayfa, VPN, Wi-Fi, ağ ve cihazlar.*
+*KediRay VPN ana paneli (örnek verilerle): canlı hız, durum, bağlı sunucu, uygulama/cihaz yönü (VPN / Direkt) ve sunucu listesi.*
+
+<p align="center"><img src="docs/vpn-ayirma.png" alt="KediRay VPN Ayırma" width="560"></p>
+
+*VPN Ayırma: VPN motoru, Cloudflare WARP ve uygulama bazında VPN / Direkt / Parçala / WARP seçimi.*
 
 ## Sistem gereksinimleri
 
@@ -112,9 +116,13 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 
 ### Screenshots
 
-<p align="center"><img src="docs/ekranlar.jpg" alt="AW1K Panel screens"></p>
+<p align="center"><img src="docs/ana-panel.png" alt="KediRay main panel" width="560"></p>
 
-*AW1K Panel Android app: home, VPN, Wi-Fi, network and devices.*
+*KediRay VPN main panel (sample data): live speed, status, connected server, per-app/device route (VPN / Direct) and server list.*
+
+<p align="center"><img src="docs/vpn-ayirma.png" alt="KediRay VPN split" width="560"></p>
+
+*VPN split: VPN engine, Cloudflare WARP and per-app VPN / Direct / Fragment / WARP choice.*
 
 ### System requirements
 
