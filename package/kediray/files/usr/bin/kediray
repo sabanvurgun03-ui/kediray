@@ -70,6 +70,19 @@ engine_ver() { local e b; e=$(engine); b=$(core_find "$e") || return 1; core_ver
 engine_gen() { case "$(engine)" in sing-box) echo singbox ;; mihomo) echo mihomo ;; *) echo xray ;; esac; }   # gen.uc komutu
 engine_gen_test() { case "$(engine)" in sing-box) echo singbox-test ;; mihomo) echo mihomo-test ;; *) echo test ;; esac; }
 geo_ok() { local d; d=$(assetdir); [ -s "$d/geoip.dat" ] && [ -s "$d/geosite.dat" ]; }
+# mihomo çökünce ya da öldürülünce kendi nftables tablosunu ("mihomo"), yönlendirme kurallarını (tablo 2022) ve TUN aygıtını
+# silmeyebilir; sonraki başlatma "auto redirect: netlink receive: file exists" ile TUN'u açamaz ve internet gider.
+# Çalışan bir mihomo varsa (ping/test örneği dahil) dokunmaz.
+mh_clean() {
+	local i=0 d
+	pidof mihomo >/dev/null 2>&1 && return 0
+	nft delete table inet mihomo >/dev/null 2>&1
+	while [ $i -lt 20 ] && ip rule del table 2022 >/dev/null 2>&1; do i=$((i + 1)); done
+	ip route flush table 2022 >/dev/null 2>&1
+	d=$(sed -n 's/^tun://p' "$RUN/own.type" 2>/dev/null | head -n1)
+	for d in "$TUN_DEV" kediray0 $d; do [ -n "$d" ] && ip link del "$d" >/dev/null 2>&1; done
+	return 0
+}
 mh_prep() { # <dizin> → mihomo ev dizini; geo dosyaları ve provider klasörleri bağlanır
 	mkdir -p "$1" "$OWN_DIR/mihomo/proxy_provider" "$OWN_DIR/mihomo/rule_provider"
 	ln -sfn /usr/share/kediray/ui "$1/ui"
@@ -4101,6 +4114,7 @@ case "$cmd" in
 	own-api) cmd_own_api "$@" ;;
 	own-apply) cmd_own_apply "$@" ;;
 	mh-prep) mh_prep "$@" ;;
+	mh-clean) mh_clean ;;
 	core-bg) cmd_core_bg "$@" ;;
 	core-log) cmd_core_log ;;
 	device) cmd_device "$@" ;;

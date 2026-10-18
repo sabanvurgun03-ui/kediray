@@ -23,6 +23,8 @@ const HINTS = [
 	 'Operatör ya da ağ, VPN sunucusuna açılan bağlantıyı kesti. Ara sıra olursa normaldir (mobil hatlarda sık görülür). Sık tekrarlanıyorsa sunucunun IP/SNI\'si engelleniyor olabilir: farklı port, SNI ya da sunucu dene. Oyun/arama bu anlarda koparsa o uygulamayı "Direkt" yap.'],
 	[/(i\/o timeout|dial tcp [^ ]+: .*timeout|connect: connection timed out)/, 'Sunucuya ulaşılamadı (zaman aşımı)',
 	 'Sunucu kapalı, IP\'si değişmiş ya da hat bu adresi engelliyor olabilir. Kontrol Paneli\'nden "Ping" ile ölç; çalışmıyorsa aboneliği güncelle ya da başka sunucu seç.'],
+	[/Start TUN listening error.*file exists/, 'mihomo TUN\'u açamadı: eski yönlendirme tablosu kalmış',
+	 'Önceki mihomo çalışması nftables tablosunu ("mihomo") temizlemeden kapanmış. Yeni sürümde KediRay her başlatmada bunu kendisi siler: VPN\'i Durdur → Başlat yap. Hâlâ olursa SSH\'ta "kediray mh-clean" yaz.'],
 	[/connection refused/, 'Sunucu bağlantıyı reddetti',
 	 'Sunucu açık ama o portta dinleyen yok. x-ui\'de inbound\'un açık ve portun doğru olduğunu kontrol et.'],
 	[/app\/dns.*Post "https:.*(context deadline exceeded|timeout)/, 'Direkt DNS (DoH) yanıt vermedi',
