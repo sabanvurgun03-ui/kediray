@@ -1235,6 +1235,18 @@ cmd_own_diag() {
 	code=$(curl -s -m 6 -o /dev/null -w '%{http_code}' --noproxy '*' http://www.gstatic.com/generate_204 2>/dev/null)
 	echo "modemin kendi isteği: ${code:-hata}"
 	echo "DNS (modem): $(nslookup www.gstatic.com 127.0.0.1 2>&1 | awk '/^Address/ && !/127.0.0.1/{print $NF; exit}')"
+	# Modemin kendi trafiği (arayüz/opkg/NTP gibi) neden çıkmıyor: yönlendirme ve curl ayrıntısı
+	echo "--- modemin kendi çıkışı ---"
+	echo "ip rule:"; ip rule 2>/dev/null | head -n 12
+	echo "varsayılan rota: $(ip route show default 2>/dev/null | head -n 2 | tr '\n' ';')"
+	echo "tablo 2022: $(ip route show table 2022 2>/dev/null | head -n 3 | tr '\n' ';')"
+	echo "142.250.74.131 için rota: $(ip route get 142.250.74.131 2>&1 | head -n 1)"
+	code=$(curl -s -m 6 -o /dev/null -w '%{http_code}' --noproxy '*' http://142.250.74.131/generate_204 2>/dev/null)
+	echo "modemin IP ile isteği (DNS'siz): ${code:-hata}"
+	echo "curl ayrıntısı:"; curl -sv -m 6 -o /dev/null --noproxy '*' http://www.gstatic.com/generate_204 2>&1 | grep -E '^\* (Trying|Connected|Could not|Failed|Connection|Operation|Resolving)|^< HTTP|curl:' | head -n 8
+	echo "nft (mihomo) kural sayısı: $(nft list table inet mihomo 2>/dev/null | grep -c .)"
+	nft list table inet mihomo 2>/dev/null | grep -E 'chain|output|local|oifname|redirect|mark' | head -n 14
+	echo "dosyadaki tun bölümü:"; awk '/^tun:/{p=1;print;next} p&&/^[^ \t#]/{p=0} p{print}' "$f" 2>/dev/null | head -n 24
 	echo "--- son mihomo/KediRay günlüğü ---"
 	logread 2>/dev/null | grep -iE 'mihomo|kediray|xray' | tail -n 15 | cut -c1-220
 }
