@@ -1059,7 +1059,7 @@ own_path() { local n; n=$(own_sel "$1"); [ -n "$n" ] && [ -f "$OWN_DIR/$1/$n" ] 
 # Dosyadan yakalama türünü ve API bilgisini oku: OWN_TYPE (tun|redir|none), OWN_VAL, OWN_API (host:port), OWN_SECRET
 own_probe() { # <çekirdek> <dosya>
 	local core="$1" f="$2" v
-	OWN_TYPE=none; OWN_VAL=""; OWN_API=""; OWN_SECRET=""
+	OWN_TYPE=none; OWN_VAL=""; OWN_API=""; OWN_API_RAW=""; OWN_SECRET=""
 	if [ "$core" = mihomo ]; then
 		if awk '/^tun:/{t=1;next} t&&/^[^ \t#]/{t=0} t&&/^[ \t]+enable:[ \t]*true/{f=1} END{exit !f}' "$f" 2>/dev/null; then
 			OWN_TYPE=tun
@@ -1080,6 +1080,7 @@ own_probe() { # <çekirdek> <dosya>
 		OWN_API=$(jsonfilter -i "$f" -e '@.experimental.clash_api.external_controller' 2>/dev/null)
 		OWN_SECRET=$(jsonfilter -i "$f" -e '@.experimental.clash_api.secret' 2>/dev/null)
 	fi
+	OWN_API_RAW=$OWN_API   # dosyadaki ham adres (LAN'dan erişilebilir mi diye bakmak için)
 	case "$OWN_API" in :*) OWN_API="127.0.0.1$OWN_API" ;; 0.0.0.0:*) OWN_API="127.0.0.1:${OWN_API#0.0.0.0:}" ;; esac
 	return 0
 }
@@ -1283,7 +1284,7 @@ cmd_dash() { # on|off|info  — MetaCubeXD dashboard (mihomo / sing-box)
 			if own_on; then
 				own_probe "$(engine)" "$(own_path "$(engine)")"
 				port=${OWN_API##*:}; s=$OWN_SECRET; on=false; [ -n "$OWN_API" ] && on=true
-				case "$OWN_API" in 127.*|localhost*) lan=false ;; esac
+				case "$OWN_API_RAW" in 127.*|localhost*) lan=false ;; esac   # ":9090" ve "0.0.0.0:9090" tüm arayüzlerde dinler
 			fi
 			printf '{"on":%s,"installed":%s,"port":"%s","secret":"%s","engine":"%s","lan":%s,"own":%s}\n' \
 				"$on" "$([ -d /usr/share/kediray/ui ] && echo true || echo false)" "$port" "$s" "$(engine)" "$lan" "$(own_on && echo true || echo false)" ;;
