@@ -1148,7 +1148,8 @@ function sb_dnssrv(addr, tag, remote) {
 const LOGLV = { debug: 'debug', info: 'info', warning: 'warn', error: 'error', none: 'panic' };
 
 // Dashboard (MetaCubeXD): açıksa çekirdeğin API'si LAN'a açılır (aynı port, parola zorunlu) ve /ui sunulur
-function dash_on() { return on(opt('dashboard'), false) && length(opt('dash_secret', '')) > 0; }
+function dash_secret() { return opt('dash_secret', '') || getenv('KR_DASH_SECRET') || ''; }
+function dash_on() { return (on(opt('dashboard'), false) || getenv('KR_DASH_FORCE') == '1') && length(dash_secret()) > 0; }
 
 function singbox() {
 	if (!length(NODES))
@@ -1253,7 +1254,7 @@ function singbox() {
 	};
 	// DNS kapalıyken bile sunucu alan adlarını çözecek bir sunucu gerekir (çıkışlar alan adıyla dial edebilir)
 	if (!DNS_ON) cfg.dns = { servers: filter([sb_dnssrv(direct, 'direct-dns', false)], x => x), strategy: 'ipv4_only' };
-	if (dash_on()) cfg.experimental.clash_api = { external_controller: '0.0.0.0:' + api_port, secret: opt('dash_secret'), external_ui: 'ui' };
+	if (dash_on()) cfg.experimental.clash_api = { external_controller: '0.0.0.0:' + api_port, secret: dash_secret(), external_ui: 'ui' };
 	print(sprintf('%.J\n', cfg));
 }
 
@@ -1519,7 +1520,7 @@ function mihomo() {
 		'proxy-groups': [DISC ? { name: 'proxy', type: 'select', proxies: ['DIRECT'] } : { name: 'proxy', type: 'select', proxies: names }],
 		rules: R
 	};
-	if (dash_on()) { cfg['external-controller'] = '0.0.0.0:' + api_port; cfg.secret = opt('dash_secret'); cfg['external-ui'] = 'ui'; }
+	if (dash_on()) { cfg['external-controller'] = '0.0.0.0:' + api_port; cfg.secret = dash_secret(); cfg['external-ui'] = 'ui'; }
 	if (KA > 0) { cfg['keep-alive-interval'] = 15; cfg['keep-alive-idle'] = KA; }
 	if (GEO) { cfg['geodata-mode'] = true; cfg['geo-auto-update'] = false; }
 	if (NATIVE) {

@@ -1151,7 +1151,7 @@ cmd_own_check() { # <çekirdek> <ad>
 }
 # Sunucu listesinden başlangıç yapılandırması üret (sonra elle düzenlenir)
 cmd_own_template() { # <çekirdek> <ad>
-	local core="$1" name="$2" what cap=native out
+	local core="$1" name="$2" what cap=native out dsec
 	own_core_ok "$core" || return 1; own_name_ok "$core" "$name" || { echo "geçersiz dosya adı" >&2; return 1; }
 	[ -e "$OWN_DIR/$core/$name" ] && { echo "$name zaten var; başka ad seçin" >&2; return 1; }
 	mkdir -p "$OWN_DIR/$core" "$RUN"
@@ -1159,7 +1159,9 @@ cmd_own_template() { # <çekirdek> <ad>
 	if [ "$core" = mihomo ]; then what=mihomo-yaml; else what=singbox; cap=redirect; fi
 	if [ "$core" = mihomo ] && geo_ok; then export KR_GEO=1; else export KR_GEO=0; fi
 	out="$RUN/own.template.$$"
-	if ! KR_CAPTURE=$cap KR_RESOLVE="$(cat "$RUN/resolve" 2>/dev/null)" ucode "$SHARE/gen.uc" "$what" > "$out" 2>"$RUN/gen.err"; then
+	# Şablona dashboard ayarları hazır girer (external-controller 0.0.0.0, secret, external-ui: ui); elle eklemeye gerek kalmaz
+	dsec=$(tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c 16 2>/dev/null)
+	if ! KR_DASH_FORCE=1 KR_DASH_SECRET=$dsec KR_CAPTURE=$cap KR_RESOLVE="$(cat "$RUN/resolve" 2>/dev/null)" ucode "$SHARE/gen.uc" "$what" > "$out" 2>"$RUN/gen.err"; then
 		cat "$RUN/gen.err" >&2; return 1
 	fi
 	mv "$out" "$OWN_DIR/$core/$name"
