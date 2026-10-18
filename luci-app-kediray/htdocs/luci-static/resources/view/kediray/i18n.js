@@ -1036,21 +1036,17 @@ function start() {
 			document.documentElement.setAttribute('lang', LANG);
 			document.title = trs(document.title);
 			walk(document.body);
-			let q = new Set(), tm = null;
-			const flush = () => {
-				tm = null;
-				const items = Array.from(q); q = new Set();
-				items.forEach(n => { if (n.isConnected !== false) walk(n); });
-				if (document.title) { const t = trs(document.title); if (t !== document.title) document.title = t; }
-			};
-			new MutationObserver(ms => {
+			/* Çeviri MutationObserver geri çağrısında, eşzamanlı yapılır (mikro görev: tarayıcı boyamadan önce).
+			   Gecikmeli (setTimeout) çeviri canlı güncellenen metinlerde Türkçe'nin bir an görünüp titremesine yol açıyordu. */
+			const obs = new MutationObserver(ms => {
 				ms.forEach(m => {
-					if (m.type === 'childList') m.addedNodes.forEach(n => q.add(n));
-					else if (m.type === 'characterData') q.add(m.target);
-					else if (m.type === 'attributes') q.add(m.target);
+					if (m.type === 'childList') m.addedNodes.forEach(n => { if (n.isConnected !== false) walk(n); });
+					else if (m.type === 'characterData') { if (m.target.isConnected !== false) doText(m.target); }
+					else if (m.type === 'attributes') doAttrs(m.target);
 				});
-				if (!tm) tm = setTimeout(flush, 30);
-			}).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTRS.concat([ 'value' ]) });
+				if (document.title) { const t = trs(document.title); if (t !== document.title) document.title = t; }
+			});
+			obs.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTRS.concat([ 'value' ]) });
 		}
 		mount();
 		setInterval(mount, 400);
