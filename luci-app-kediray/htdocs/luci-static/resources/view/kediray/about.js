@@ -171,6 +171,7 @@ return view.extend({
 		d = d || {};
 		setTimeout(() => this.showCachedUpdate(), 400);
 		setTimeout(() => this.showLicense(), 300);
+		setTimeout(() => this.showRepoStats(), 600);
 		const row = (k, v) => [h('div', { 'class': 'ka-k' }, k), h('div', { 'class': 'ka-v' }, v || '—')];
 		return h('div', {}, [
 			h('style', {}, CSS),
@@ -181,6 +182,8 @@ return view.extend({
 				h('div', { 'class': 'ka-rows' }, [
 					row('Sürüm', d.version),
 					row('Proxy çekirdeği', d.core ? 'Xray ' + d.core : 'Xray —'),
+					h('div', { 'class': 'ka-k' }, 'GitHub yıldızı'), h('div', { 'class': 'ka-v', 'id': 'ka-gh-stars' }, '…'),
+					h('div', { 'class': 'ka-k' }, 'İndirme'), h('div', { 'class': 'ka-v', 'id': 'ka-gh-dl' }, '…'),
 					h('div', { 'class': 'ka-sep' }),
 					h('div', { 'class': 'ka-dev' }, [h('span', { 'class': 'ka-k' }, 'Geliştirici: '), h('b', {}, 'Şaban Vurgun'), ' · 2026'])
 				])
@@ -234,6 +237,24 @@ return view.extend({
 			]),
 			h('div', { 'class': 'ka-note' }, 'Çekirdeği güncellemek için SSH: kediray update-core · Coğrafi veriler: kediray update-geo')
 		]);
+	},
+
+	/* GitHub yıldız ve indirme sayısı: modem GitHub API'sinden okur (6 saat önbellekli); ulaşılamazsa "—" gösterir */
+	showRepoStats() {
+		const st = document.getElementById('ka-gh-stars'), dl = document.getElementById('ka-gh-dl');
+		if (!st || !dl) return Promise.resolve();
+		const none = why => { st.textContent = '—'; dl.textContent = '—'; st.title = dl.title = why; };
+		return fs.exec(CLI, ['repostats', '--json']).then(r => {
+			let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
+			if (!j || !j.ok) return none('GitHub\'a ulaşılamadı');
+			const d = new Date(j.ts * 1000), p = n => String(n).padStart(2, '0');
+			const when = p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+			const tip = 'Son güncelleme: ' + when + (j.stale ? ' (GitHub\'a ulaşılamadı, son kayıtlı değer)' : '');
+			st.textContent = '★ ' + j.stars;
+			dl.textContent = j.releases ? '⬇ ' + j.downloads : '—';
+			st.title = tip;
+			dl.title = 'GitHub Releases\'teki kurulum dosyasının (kediray-install.sh) indirme sayısı. ' + tip;
+		}).catch(() => none('Panel yanıt vermedi'));
 	},
 
 	showLicense() {

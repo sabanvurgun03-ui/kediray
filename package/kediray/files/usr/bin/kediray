@@ -520,6 +520,7 @@ cmd_update() { # check [--json] | install | auto | cached
 		auto) # cron: günde bir kez sessizce denetle (update_check=0 ise yapmaz); sonuç önbelleğe yazılır
 			cmd_count ping || true   # yalnızca kullanıcı izin verdiyse bir şey gönderir
 			[ "$(uget main.update_check)" = 0 ] && { rm -f "$UPD_CACHE"; return 0; }
+			cmd_repostats refresh >/dev/null 2>&1 || true   # yıldız/indirme sayıları günde bir tazelenir; panel açılınca hazır olur
 			KR_UPD_SRC=auto cmd_update check --json > "$UPD_CACHE.$$" 2>/dev/null && mv "$UPD_CACHE.$$" "$UPD_CACHE" || { rm -f "$UPD_CACHE.$$"; return 0; }
 			# "Otomatik kur" işaretliyse ve yeni sürüm varsa kur (indirme SHA256 ile doğrulanır; hata olursa mevcut sürüm kalır)
 			if [ "$(uget main.update_auto_install)" = 1 ] && grep -q '"newer":true' "$UPD_CACHE"; then
@@ -611,6 +612,60 @@ cmd_update() { # check [--json] | install | auto | cached
 			return $? ;;
 		*) echo "kullanım: kediray update check [--json] | install [force] | main | auto | cached" >&2; return 1 ;;
 	esac
+}
+
+# ---- GitHub deposu sayaçları: kediray repostats [--json] [refresh] ----------------------------------------
+# Yıldız sayısı ve Release'teki kurulum dosyasının (kediray-install.sh) indirme sayısı. Anahtarsız GitHub API (saatte 60 istek/IP).
+# Sonuç RAM'de 6 saat saklanır; GitHub'a ulaşılamazsa son değer "stale" olarak döner. sha256sums ve tar.gz sayılmaz:
+# her güncelleme denetimi sha256sums'ı indirir, o sayıyı şişirirdi.
+GHS_CACHE=/tmp/kediray.ghstats    # "epoch|yıldız|indirme|release sayısı|depo"
+GHS_TTL=21600
+GHS_ASSET="kediray-install.sh"
+ghget() { # <url> -> gövdeyi yazar (VPN çalışıyorsa önce tünelden)
+	running && curl -fsSL --noproxy '' -m 6 -A "v2rayNG/1.10" -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" "$1" 2>/dev/null && return 0
+	curl -fsSL --noproxy '' -m 6 -A "v2rayNG/1.10" "$1" 2>/dev/null
+}
+ghs_out() { # epoch yıldız indirme release depo stale(true|false) json(0|1)
+	if [ "$7" = 1 ]; then
+		printf '{"ok":true,"stars":%s,"downloads":%s,"releases":%s,"repo":"%s","ts":%s,"stale":%s}\n' "$2" "$3" "$4" "$5" "$1" "$6"
+	else
+		echo "Yıldız: $2 · İndirme: $3 ($4 release) · $5"
+		[ "$6" = true ] && echo "(GitHub'a ulaşılamadı; son kayıtlı değer)"
+	fi
+}
+cmd_repostats() { # [--json] [refresh]
+	local js=0 refresh=0 a repo now ts st dl rel ns nd=0 nr=0 ok=1 body page=1 c d
+	for a in "$@"; do case "$a" in --json) js=1 ;; refresh) refresh=1 ;; esac; done
+	now=$(date +%s)
+	[ -s "$GHS_CACHE" ] && IFS='|' read -r ts st dl rel repo < "$GHS_CACHE"
+	case "$ts" in ''|*[!0-9]*) ts="" ;; esac
+	if [ $refresh = 0 ] && [ -n "$ts" ] && [ $((now - ts)) -lt $GHS_TTL ]; then
+		ghs_out "$ts" "$st" "$dl" "$rel" "$repo" false $js; return 0
+	fi
+	repo=$(uget main.update_repo); repo=${repo:-$UPD_REPO_DEF}
+	body=$(ghget "https://api.github.com/repos/$repo") || ok=0
+	ns=$(echo "$body" | grep -oE '"stargazers_count": *[0-9]+' | head -n1 | tr -cd '0-9')
+	[ -n "$ns" ] || ok=0
+	if [ $ok = 1 ]; then
+		while [ $page -le 3 ]; do
+			body=$(ghget "https://api.github.com/repos/$repo/releases?per_page=100&page=$page") || { ok=0; break; }
+			c=$(echo "$body" | grep -oE '"tag_name": *"' | wc -l | tr -d ' ')
+			d=$(echo "$body" | grep -oE '"name": *"[^"]*"|"download_count": *[0-9]+' | awk -v want="$GHS_ASSET" '
+				/^"name"/ { n = $0; sub(/^"name": *"/, "", n); sub(/"$/, "", n); last = n; next }
+				{ v = $0; gsub(/[^0-9]/, "", v); if (last == want) s += v }
+				END { print s + 0 }')
+			nd=$((nd + d)); nr=$((nr + c))
+			[ "$c" -lt 100 ] && break
+			page=$((page + 1))
+		done
+	fi
+	if [ $ok = 1 ]; then
+		printf '%s|%s|%s|%s|%s\n' "$now" "$ns" "$nd" "$nr" "$repo" > "$GHS_CACHE" 2>/dev/null
+		ghs_out "$now" "$ns" "$nd" "$nr" "$repo" false $js; return 0
+	fi
+	if [ -n "$ts" ]; then ghs_out "$ts" "$st" "$dl" "$rel" "$repo" true $js; return 0; fi
+	[ $js = 1 ] && echo '{"ok":false}' || echo "GitHub'a ulaşılamadı"
+	return 1
 }
 
 # ---- Sürüm artırmadan kurulum: kediray update main | reinstall [--purge] [--release] ------------------------
@@ -3391,6 +3446,7 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray update main                Sürümü artırmadan depodaki son kodu kur (Release gerekmez, SHA256 doğrulaması yok)
   kediray reinstall [--purge] [--release]  Aynı sürümü baştan kur (--purge: ayarlar yedeklenip silinir; --release: Release dosyasından)
   kediray count [status|on|off|show] Anonim kullanım sayısı (izne bağlı; show = ne gönderileceğini gösterir)
+  kediray repostats [--json] [refresh]  GitHub yıldız ve indirme sayısı (6 saat önbellekli)
   kediray license status|id|activate <anahtar>|remove   Lisans (modem IMEI'si: kediray license id)
   kediray backup [dosya]             Sunucu ve ayarları yedekle (UUID içerir, paylaşma)
   kediray restore <dosya>            Yedeği geri yükle (önce denenir, bozuksa dokunmaz)
@@ -3468,6 +3524,7 @@ case "$cmd" in
 	selfupdate) cmd_selfupdate "$@" ;;
 	update) cmd_update "$@" ;;
 	count) cmd_count "$@" ;;
+	repostats) cmd_repostats "$@" ;;
 	backup) cmd_backup "$@" ;;
 	restore) cmd_restore "$@" ;;
 	hunt) cmd_hunt "$@" ;;
