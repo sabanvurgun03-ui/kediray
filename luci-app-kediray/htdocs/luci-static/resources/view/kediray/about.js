@@ -21,7 +21,7 @@ function updMsg(msg, kind, text) {
 	const ok = kind === 'ok';
 	const w = h('span', { 'style': 'display:inline-flex;align-items:center;gap:8px;color:' + (ok ? '#3fb950' : '#e0a82e') });
 	w.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><circle cx="12" cy="12" r="10"/>'
-		+ (ok ? '<path d="M7.5 12.5l3 3 6-6.5"/>' : '<path d="M12 11v5.5"/><circle cx="12" cy="7.8" r="0.6" fill="currentColor"/>') + '</svg>';
+		+ (ok ? '<path d="M7.5 12.5l3 3 6-6.5"/>' : '<path d="M12 11v6"/><circle cx="12" cy="7.4" r="1.3" fill="currentColor" stroke="none"/>') + '</svg>';
 	w.appendChild(document.createTextNode(text));
 	msg.textContent = ''; msg.appendChild(w);
 }
