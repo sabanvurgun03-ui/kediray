@@ -507,6 +507,8 @@ const DICT = {
 	"yanıt alınamadı": ["no response received", "aucune réponse reçue"],
 	"yanıt yok": ["no response", "pas de réponse"],
 	"yıldız": ["stars", "étoiles"],
+	"indirme": ["downloads", "téléchargements"],
+	"manuel": ["manual", "manuel"],
 	"{ } Xray yapılandırması": ["{ } Xray configuration", "{ } Configuration Xray"],
 	"Çalışan diğer VPN motorları durdurulur ve ": ["Other running VPN engines will be stopped and ", "Les autres moteurs VPN en cours seront arrêtés et "],
 	"Çalıştırılamadı: ": ["Could not run: ", "Exécution impossible : "],
