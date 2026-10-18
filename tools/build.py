@@ -18,6 +18,7 @@ Aynı girdiden her çalıştırmada birebir aynı dosyalar çıkar (sıralı, sa
 Üretimden sonra kendini doğrular; bir şey tutmazsa hata koduyla çıkar.
 """
 import argparse
+import base64
 import gzip
 import hashlib
 import io
@@ -33,6 +34,7 @@ from pathlib import Path
 
 MARK = re.compile(r'^@@KR_FILE (.+)@@$')
 HEREDOC = re.compile(r"^cat > '([^']+)' <<'(KEDIRAY_EOF_\d+)'$")
+UI_ARCHIVE = 'dashboard/metacubexd.tgz'   # MetaCubeXD hazır derlemesi (MIT); kurulum betiğine base64 gömülür
 ASSETS = ('kediray-install.sh', 'kediray-all.tar.gz', 'kediray-src.tar.gz')
 
 # Ağaçtaki klasör → modemdeki yol. (Kurulum betiği bunların hepsini yazar; EXTRA yalnızca pakette olur.)
@@ -132,6 +134,10 @@ def generate_installer(root, ver, rows):
     if left:
         die('tools/installer/files.map\'te olup iskelette işareti olmayan dosya: ' + ', '.join(left))
     text = '\n'.join(out)
+    if '@@KR_UI@@' in text:
+        raw = (root / UI_ARCHIVE).read_bytes()
+        b64 = base64.encodebytes(raw).decode('ascii')
+        text = text.replace('@@KR_UI@@', b64 + 'KEDIRAY_UI_B64')
     if '@@KR_FILE' in text:
         die('üretilen kurulum betiğinde çözülmemiş işaret kaldı')
     return text
@@ -232,6 +238,7 @@ def build_all(root, ver, tf):
         body = kit_body(kp, rd(root / rel))
         add('%s/files%s' % (top, kp), body.encode('utf-8'), mode_of(kp))
     add(top + '/files/usr/share/kediray/version', (ver + '\n').encode('utf-8'), 0o644)
+    add(top + '/files/usr/share/kediray/ui.tgz', (root / UI_ARCHIVE).read_bytes(), 0o644)
     tpl = root / 'tools' / 'pkg-all'
     for name in ('README.md', 'NOTICE', 'packages.txt'):
         add('%s/%s' % (top, name), rd(tpl / name).replace('@VERSION@', ver).encode('utf-8'), 0o644)
@@ -290,6 +297,8 @@ def verify(root, out, ver, installer, rows, tf):
     hd = {(p, d): body for p, d, body in heredocs(gen)}
     bad = [s for s, p, d in rows if hd.get((p, d)) != rd(root / s)]
     check(len(hd) == len(rows) and not bad, '%d gömülü dosya ağaçtakiyle birebir aynı%s' % (len(rows), (': ' + ', '.join(bad)) if bad else ''))
+
+    check(gen.count('KEDIRAY_UI_B64') == 2 and base64.b64decode(gen.split("<<'KEDIRAY_UI_B64'", 1)[1].split('\n', 1)[1].split('KEDIRAY_UI_B64', 1)[0]) == (root / UI_ARCHIVE).read_bytes(), 'dashboard arşivi kurulum betiğinde birebir gömülü')
 
     # 3) kediray-all
     top = 'kediray-all-' + ver

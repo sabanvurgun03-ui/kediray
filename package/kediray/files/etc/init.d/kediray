@@ -80,7 +80,7 @@ _start_service() {
 	# Örnek adı hep "xray": durum, pid ve izleme kodu çekirdekten bağımsız kalır
 	procd_open_instance xray
 	case "$eng" in
-		sing-box) mkdir -p "$RUN/sb"; procd_set_param command "$bin" run -c "$RUN/config.json" -D "$RUN/sb" ;;
+		sing-box) mkdir -p "$RUN/sb"; ln -sfn /usr/share/kediray/ui "$RUN/sb/ui"; procd_set_param command "$bin" run -c "$RUN/config.json" -D "$RUN/sb" ;;
 		mihomo) $PROG mh-prep "$RUN/mh"; procd_set_param command "$bin" -d "$RUN/mh" -f "$RUN/config.json" ;;
 		*) procd_set_param command "$bin" run -c "$RUN/config.json"
 		   procd_set_param env XRAY_LOCATION_ASSET="$asset" ;;

@@ -17,6 +17,7 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 - Bant sekmesi: modem bant taraması ve akıllı bant seçimi (QModem gerekir)
 - Görünüm: açık/koyu ve renk temaları
 - **Çekirdekler:** Xray'in yanında sing-box ve mihomo ikililerini panelden kur, dosyadan yükle ya da kaldır ve VPN'i hangi çekirdekle çalıştıracağını seç (Xray varsayılan; xhttp, WARP, TLS parçalama ve sertifika sabitleme yalnızca Xray'de). mihomo için isteğe bağlı "Yerel mod": mihomo kendi TUN'u, DNS yakalaması ve cihaz listesiyle çalışır; reklam engelleme ve geosite/geoip kuralları için `kediray update-geo` ile listeler indirilir
+- **Çekirdek ayarı:** mihomo için Clash YAML, sing-box için JSON yapılandırma dosyasını panelden yükle/düzenle/doğrula/seç ve çekirdeği tamamen kendi ayarıyla çalıştır (Neko tarzı; KediRay yalnızca başlatır/durdurur). Dosyada TUN ya da redirect girişi gerekir. Sayfadaki canlı kontrolle mod ve sunucu grubu seçilir. **Dashboard:** MetaCubeXD (MIT) kurulum dosyasına gömülüdür; tek tuşla açılır, çekirdeğin API'si LAN'a parolayla açılır
 - **Dil:** Türkçe, English, Français; sayfa başlığının sağındaki TR | EN | FR seçicisiyle değişir (seçim tarayıcıda saklanır)
 - **Yedekle / geri yükle:** sunucular, uygulama kuralları ve ayarlar tek dosyada (modemi sıfırlayınca geri getir)
 - GitHub Release'ten güncelleme (sha256sums doğrulamalı)
@@ -113,6 +114,7 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 - Band tab: modem band scan and smart band selection (needs QModem)
 - Appearance: light/dark and color themes
 - **Cores:** install, upload from a file or remove the sing-box and mihomo binaries next to Xray from the panel and choose which core runs the VPN (Xray is the default; xhttp, WARP, TLS fragmentation and certificate pinning are Xray-only). mihomo also has an optional "Native mode": it runs on its own TUN, DNS capture and device list, and ad blocking / geosite / geoip rules work once the lists are downloaded with `kediray update-geo`
+- **Core config:** upload/edit/validate/select a Clash YAML (mihomo) or JSON (sing-box) file in the panel and run the core entirely on its own config (Neko-style; KediRay only starts/stops it). The file needs a TUN or redirect inbound. Live control on the page switches mode and proxy group. **Dashboard:** MetaCubeXD (MIT) ships inside the installer; one switch turns it on and opens the core's API to the LAN behind a password
 - **Languages:** Türkçe, English, Français; switch with the TR | EN | FR selector at the right of the page title (the choice is saved in the browser)
 - **Backup / restore:** servers, app rules and settings in one file (bring them back after a router reset)
 - Update from GitHub Releases (sha256sums verified)

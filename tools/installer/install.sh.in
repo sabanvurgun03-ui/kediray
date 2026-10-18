@@ -261,8 +261,21 @@ mkdir -p /usr/libexec/rpcd
 @@KR_FILE package/aw1k-panel/files/usr/libexec/rpcd/aw1k@@
 @@KR_FILE package/aw1k-panel/files/usr/share/rpcd/acl.d/aw1k-panel.json@@
 }
+# Dashboard (MetaCubeXD, MIT): gömülü arşiv /usr/share/kediray/ui altına açılır. Çözücü yoksa atlanır (VPN etkilenmez).
+write_ui() {
+	UI_D=/usr/share/kediray/ui
+	if command -v base64 >/dev/null 2>&1; then UI_DEC="base64 -d"
+	elif command -v openssl >/dev/null 2>&1; then UI_DEC="openssl base64 -d"
+	else warn "base64 çözücü yok: dashboard kurulmadı (VPN çalışır)"; return 0; fi
+	rm -rf "$UI_D.new"; mkdir -p "$UI_D.new"
+	$UI_DEC <<'KEDIRAY_UI_B64' | tar -xzf - -C "$UI_D.new" 2>/dev/null
+@@KR_UI@@
+	if [ -f "$UI_D.new/index.html" ]; then rm -rf "$UI_D"; mv "$UI_D.new" "$UI_D"; chmod -R a+rX "$UI_D"
+	else rm -rf "$UI_D.new"; warn "dashboard arşivi açılamadı (VPN çalışır)"; fi
+}
 AW_OLD=$(md5sum /usr/libexec/rpcd/aw1k 2>/dev/null)
 write_files
+write_ui
 chmod 755 /usr/bin/aw1k-usage /usr/libexec/rpcd/aw1k 2>/dev/null
 [ "$AW_OLD" != "$(md5sum /usr/libexec/rpcd/aw1k 2>/dev/null)" ] && AW_RESTART=1
 chmod 755 /usr/bin/kediray /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray /etc/hotplug.d/firewall/99-kediray

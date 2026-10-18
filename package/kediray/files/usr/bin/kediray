@@ -22,6 +22,7 @@ log() { logger -t kediray -p daemon.info "$*"; }
 say() { echo "$*" >&2; logger -t kediray -p daemon.warn "$*"; }      # uyarı
 sayerr() { echo "$*" >&2; logger -t kediray -p daemon.err "$*"; }    # hata
 
+api_hdr() { local s; [ "$(uget main.dashboard)" = 1 ] && s=$(uget main.dash_secret) && [ -n "$s" ] && echo "Authorization: Bearer $s"; }
 api_addr() { echo "127.0.0.1:$(uget main.api_port || echo 10085)"; }
 tp_port() { uget main.tproxy_port || echo 12345; }
 
@@ -71,6 +72,7 @@ engine_gen_test() { case "$(engine)" in sing-box) echo singbox-test ;; mihomo) e
 geo_ok() { local d; d=$(assetdir); [ -s "$d/geoip.dat" ] && [ -s "$d/geosite.dat" ]; }
 mh_prep() { # <dizin> → mihomo ev dizini; geo dosyaları ve provider klasörleri bağlanır
 	mkdir -p "$1" "$OWN_DIR/mihomo/proxy_provider" "$OWN_DIR/mihomo/rule_provider"
+	ln -sfn /usr/share/kediray/ui "$1/ui"
 	ln -sfn "$OWN_DIR/mihomo/proxy_provider" "$1/proxy_provider"; ln -sfn "$OWN_DIR/mihomo/rule_provider" "$1/rule_provider"
 	if geo_ok; then
 		ln -sf "$(assetdir)/geoip.dat" "$1/GeoIP.dat"; ln -sf "$(assetdir)/geosite.dat" "$1/GeoSite.dat"
@@ -97,7 +99,7 @@ core_test() { # <çekirdek> <yapılandırma> → 0: geçerli
 engine_test() { core_test "$(engine)" "$1"; }
 # Canlı sunucu seçimi (sing-box clash_api / mihomo REST): PUT /proxies/proxy
 engine_api_select() { # <etiket>
-	curl -s -m 4 --noproxy '' -o /dev/null -w '%{http_code}' -X PUT -H 'Content-Type: application/json' \
+	curl -s -m 4 --noproxy '' -o /dev/null -w '%{http_code}' -X PUT -H 'Content-Type: application/json' -H "$(api_hdr)" \
 		-d "{\"name\":\"$1\"}" "http://$(api_addr)/proxies/proxy" 2>/dev/null | grep -q '^204$'
 }
 
@@ -1169,6 +1171,36 @@ restart_check() { # VPN'i yeniden başlat; hazır olunca 0
 	done
 	return 1
 }
+cmd_dash() { # on|off|info  — MetaCubeXD dashboard (mihomo / sing-box)
+	local v s port lan on
+	case "$1" in
+		on|off)
+			[ -d /usr/share/kediray/ui ] || { echo "dashboard dosyaları yok (kediray reinstall)" >&2; return 1; }
+			[ "$1" = on ] && v=1 || v=0
+			if [ "$v" = 1 ]; then
+				[ "$(engine)" != xray ] || { echo "dashboard için önce mihomo ya da sing-box'u etkin yapın" >&2; return 1; }
+				[ -n "$(uget main.dash_secret)" ] || uci set "$CONF.main.dash_secret=$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+			fi
+			uci set "$CONF.main.dashboard=$v" && uci commit "$CONF"
+			rm -f /etc/kediray.tested
+			echo "dashboard: $1"
+			[ "$(uget main.enabled)" = 1 ] && ! own_on && { restart_check || { sayerr "başlamadı"; return 1; }; }
+			own_on && [ "$(uget main.enabled)" = 1 ] && echo "kendi yapılandırma modunda dosyanıza 'external-controller: 0.0.0.0:PORT', 'secret' ve 'external-ui: ui' ekleyin" ;;
+		info|"")
+			s=$(uget main.dash_secret)
+			port=$(uget main.api_port || echo 10085)
+			lan=true; on=$([ "$(uget main.dashboard)" = 1 ] && echo true || echo false)
+			if own_on; then
+				own_probe "$(engine)" "$(own_path "$(engine)")"
+				port=${OWN_API##*:}; s=$OWN_SECRET; on=false; [ -n "$OWN_API" ] && on=true
+				case "$OWN_API" in 127.*|localhost*) lan=false ;; esac
+			fi
+			printf '{"on":%s,"installed":%s,"port":"%s","secret":"%s","engine":"%s","lan":%s,"own":%s}\n' \
+				"$on" "$([ -d /usr/share/kediray/ui ] && echo true || echo false)" "$port" "$s" "$(engine)" "$lan" "$(own_on && echo true || echo false)" ;;
+		*) echo "kullanım: kediray dash on|off|info" >&2; return 1 ;;
+	esac
+}
+
 cmd_core_own() { # on|off  — kendi yapılandırma modu
 	local v prev core
 	case "$1" in on) v=1 ;; off) v=0 ;; *) echo "kullanım: kediray core-own on|off" >&2; return 1 ;; esac
@@ -1906,7 +1938,7 @@ apply_changes() {
 active_tag() {
 	own_on && return 0
 	if [ "$(engine)" != xray ]; then
-		curl -s -m 3 --noproxy '' "http://$(api_addr)/proxies/proxy" 2>/dev/null | jsonfilter -e '@.now' 2>/dev/null
+		curl -s -m 3 --noproxy '' -H "$(api_hdr)" "http://$(api_addr)/proxies/proxy" 2>/dev/null | jsonfilter -e '@.now' 2>/dev/null
 		return
 	fi
 	xr api bi -s "$(api_addr)" proxy 2>/dev/null | awk '
@@ -4019,6 +4051,7 @@ case "$cmd" in
 	core-remove) cmd_core_remove "$@" ;;
 	core-use) cmd_core_use "$@" ;;
 	core-native) cmd_core_native "$@" ;;
+	dash) cmd_dash "$@" ;;
 	core-own) cmd_core_own "$@" ;;
 	own-list) cmd_own_list "$@" ;;
 	own-get) cmd_own_get "$@" ;;

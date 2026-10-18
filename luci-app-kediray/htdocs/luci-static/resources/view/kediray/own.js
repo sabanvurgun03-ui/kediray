@@ -172,10 +172,10 @@ function toast(msg, bad) { ui.addNotification(null, h('p', { 'style': 'white-spa
 return view.extend({
 	load() {
 		return Promise.all([
-			run(['own-list', 'mihomo']), run(['own-list', 'sing-box']), run(['cores']), run(['core-active'])
+			run(['own-list', 'mihomo']), run(['own-list', 'sing-box']), run(['cores']), run(['core-active']), run(['dash', 'info'])
 		]).then(a => {
 			const j = (r, d) => { try { return JSON.parse(r.out); } catch (e) { return d; } };
-			return { lists: { 'mihomo': j(a[0], { files: [] }), 'sing-box': j(a[1], { files: [] }) }, cores: j(a[2], []), active: a[3].out || 'xray' };
+			return { lists: { 'mihomo': j(a[0], { files: [] }), 'sing-box': j(a[1], { files: [] }) }, cores: j(a[2], []), active: a[3].out || 'xray', dash: j(a[4], {}) };
 		});
 	},
 
@@ -196,11 +196,43 @@ return view.extend({
 		root.appendChild(h('style', {}, CSS));
 		root.appendChild(h('h2', {}, [h('img', { 'src': '/luci-static/kedi-logo.svg', 'style': 'height:1.3em;vertical-align:-0.25em;margin-right:8px;border-radius:6px' }), 'Çekirdek ayarı']));
 		root.appendChild(h('p', { 'class': 'ko-desc' }, 'Seçtiğin çekirdeğin kendi yapılandırma dosyasıyla çalış: mihomo için Clash YAML, sing-box için JSON. Dosyayı buradan düzenler, doğrular ve seçersin. Bu modda KediRay\'in sunucu, uygulama ve cihaz ayarları kullanılmaz; trafiği dosyadaki TUN ya da redirect girişi yakalar.'));
+		root.appendChild(this.dashCard());
 		root.appendChild(h('div', { 'class': 'ko-tabs' }, CORES.map(c => h('button', {
 			'class': 'ko-tab' + (this.tab === c[0] ? ' on' : ''), 'type': 'button',
 			'click': () => { this.tab = c[0]; this.draw(); }
 		}, c[1]))));
 		root.appendChild(this.panel(this.tab));
+	},
+
+	/* Dashboard (MetaCubeXD): çekirdeğin kendi web arayüzü, LAN'dan açılır */
+	dashCard() {
+		const D = this.d.dash || {}, out = h('pre', { 'class': 'ko-out', 'style': 'display:none' });
+		const say = (t, bad) => { out.style.display = t ? '' : 'none'; out.textContent = t || ''; out.style.borderLeft = bad ? '4px solid #d23f3f' : '4px solid #22a355'; };
+		const host = location.hostname, port = D.port || '10085';
+		const url = 'http://' + host + ':' + port + '/ui/#/setup?http=1&hostname=' + encodeURIComponent(host) + '&port=' + encodeURIComponent(port) + '&secret=' + encodeURIComponent(D.secret || '');
+		const row = [h('b', {}, 'Dashboard (MetaCubeXD)'), h('span', { 'class': 'ko-badge' + (D.on ? ' on' : '') }, D.on ? 'Açık' : 'Kapalı')];
+		const card = h('div', { 'class': 'ko-card' }, [h('div', { 'class': 'ko-row' }, row)]);
+		if (!D.installed) {
+			card.appendChild(h('div', { 'class': 'ko-note' }, 'Dashboard dosyaları kurulu değil. Kurulum dosyasını yeniden çalıştır (kediray reinstall).'));
+			return card;
+		}
+		if (D.engine === 'xray') {
+			card.appendChild(h('div', { 'class': 'ko-note' }, 'Dashboard mihomo ve sing-box için çalışır. Önce Çekirdekler sayfasından birini etkin yap.'));
+			return card;
+		}
+		const btns = h('div', { 'class': 'ko-row' });
+		if (!D.own) btns.appendChild(h('button', { 'class': 'cbi-button ' + (D.on ? 'cbi-button-negative' : 'cbi-button-positive'), 'type': 'button', 'click': ev => {
+			ev.target.disabled = true; say('Uygulanıyor…');
+			return run(['dash', D.on ? 'off' : 'on']).then(r => { say(r.out, r.code !== 0); return run(['dash', 'info']).then(x => { try { this.d.dash = JSON.parse(x.out); } catch (e) {} if (r.code === 0) this.draw(); else ev.target.disabled = false; }); });
+		} }, D.on ? 'Dashboard\'u kapat' : 'Dashboard\'u aç'));
+		if (D.on) btns.appendChild(h('a', { 'class': 'cbi-button cbi-button-action', 'href': url, 'target': '_blank', 'rel': 'noopener' }, 'Dashboard\'u aç \u2197'));
+		card.appendChild(btns);
+		if (D.on) card.appendChild(h('div', { 'class': 'ko-note' }, 'Adres: http://' + host + ':' + port + '/ui/   Parola: ' + (D.secret || '(yok)')));
+		if (D.own && D.on && !D.lan) card.appendChild(h('div', { 'class': 'ko-warn' }, 'Dosyandaki external-controller yalnızca 127.0.0.1\'de dinliyor; LAN\'dan açılmaz. 0.0.0.0:PORT yap ve external-ui: ui satırını ekle.'));
+		else if (D.own) card.appendChild(h('div', { 'class': 'ko-note' }, 'Kendi yapılandırma modunda dashboard, dosyandaki external-controller / secret / external-ui: ui ayarlarıyla çalışır (yukarıdaki adres dosyadan okunur).'));
+		else card.appendChild(h('div', { 'class': 'ko-note' }, 'Açıkken çekirdeğin API\'si LAN\'a parolayla açılır. İnternete açma.'));
+		card.appendChild(out);
+		return card;
 	},
 
 	panel(id) {
