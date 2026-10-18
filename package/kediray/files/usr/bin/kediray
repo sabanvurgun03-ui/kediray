@@ -1098,6 +1098,10 @@ own_gen() {
 	else
 		cp "$f" "$RUN/config.new.json" || return 1
 	fi
+	# Dashboard: dosyada API var ama external-ui yoksa (dashboard "404 page not found" verir) çalıştırılan kopyaya eklenir
+	if [ "$core" = mihomo ] && [ -d /usr/share/kediray/ui ] && grep -q '^external-controller:' "$RUN/config.new.json" && ! grep -q '^external-ui:' "$RUN/config.new.json"; then
+		printf '\nexternal-ui: ui\n' >> "$RUN/config.new.json"
+	fi
 	if ! core_test "$core" "$RUN/config.new.json" > "$RUN/test.log" 2>&1; then
 		{ echo "$(engine_name) yapılandırma testi başarısız ($(basename "$f")):"; grep -iE 'fail|error|invalid|fatal' "$RUN/test.log" | tail -n 3; } > "$RUN/last_error"
 		sayerr "$(head -n1 "$RUN/last_error")"; rm -f "$RUN/config.new.json"; return 1
@@ -1195,6 +1199,36 @@ own_api() { # <GET|PUT|PATCH> <yol> [gövde]
 	[ -n "$OWN_SECRET" ] && auth="Authorization: Bearer $OWN_SECRET"
 	if [ -n "$3" ]; then curl -s -m 5 --noproxy '' -X "$1" -H 'Content-Type: application/json' ${auth:+-H "$auth"} -d "$3" -w '%{http_code}' "http://$OWN_API$2"
 	else curl -s -m 5 --noproxy '' -X "$1" ${auth:+-H "$auth"} "http://$OWN_API$2"; fi
+}
+# Teşhis: "internet yok" için tek bakışta durum (panel: Çekirdek ayarı → Teşhis)
+cmd_own_diag() {
+	local f n d code sp
+	echo "çekirdek: $(engine) · kendi yapılandırma modu: $(own_on && echo açık || echo kapalı) · KediRay çalışıyor: $(running && echo evet || echo hayır)"
+	f=$(own_path "$(engine)") && echo "dosya: $(basename "$f")" || echo "dosya: seçili değil"
+	if [ -n "$f" ]; then
+		own_probe "$(engine)" "$f"; echo "dosyadaki yakalama: $OWN_TYPE $OWN_VAL · API: ${OWN_API:-yok}"
+	fi
+	if ip link show "$TUN_DEV" >/dev/null 2>&1; then echo "TUN ($TUN_DEV): VAR"; else echo "TUN ($TUN_DEV): YOK"; fi
+	nft list table inet mihomo >/dev/null 2>&1 && echo "nftables tablosu (mihomo): var" || echo "nftables tablosu (mihomo): yok"
+	echo "yönlendirme kuralı (tablo 2022): $(ip rule 2>/dev/null | grep -c 2022)"
+	if [ -n "$OWN_API" ]; then
+		d=$(own_api GET /version 2>/dev/null); echo "API /version: ${d:-CEVAP YOK}"
+		n=$(own_api GET /proxies 2>/dev/null | jsonfilter -e '@.proxies.proxy.now' 2>/dev/null)
+		[ -n "$n" ] || n=$(own_api GET /proxies 2>/dev/null | jsonfilter -e '@.proxies.GLOBAL.now' 2>/dev/null)
+		echo "seçili sunucu: ${n:-bilinmiyor}"
+		if [ -n "$n" ]; then
+			d=$(own_api GET "/proxies/$(printf '%s' "$n" | sed 's/ /%20/g')/delay?url=http%3A%2F%2Fwww.gstatic.com%2Fgenerate_204&timeout=6000" 2>/dev/null)
+			echo "sunucu gecikme testi: ${d:-CEVAP YOK}"
+		fi
+	fi
+	sp=$(uget main.socks_port || echo 10808)
+	code=$(curl -s -m 8 -o /dev/null -w '%{http_code}' --noproxy '' -x "socks5h://127.0.0.1:$sp" http://www.gstatic.com/generate_204 2>/dev/null)
+	echo "tünelden istek (SOCKS $sp): ${code:-hata} (204 = çalışıyor)"
+	code=$(curl -s -m 6 -o /dev/null -w '%{http_code}' --noproxy '*' http://www.gstatic.com/generate_204 2>/dev/null)
+	echo "modemin kendi isteği: ${code:-hata}"
+	echo "DNS (modem): $(nslookup www.gstatic.com 127.0.0.1 2>&1 | awk '/^Address/ && !/127.0.0.1/{print $NF; exit}')"
+	echo "--- son mihomo/KediRay günlüğü ---"
+	logread 2>/dev/null | grep -iE 'mihomo|kediray|xray' | tail -n 15 | cut -c1-220
 }
 cmd_own_api() { # groups | mode <rule|global|direct> | select <grup> <ad>
 	own_on || { echo "kendi yapılandırma modu kapalı" >&2; return 1; }
@@ -4119,6 +4153,7 @@ case "$cmd" in
 	own-template) cmd_own_template "$@" ;;
 	own-api) cmd_own_api "$@" ;;
 	own-apply) cmd_own_apply "$@" ;;
+	own-diag) cmd_own_diag ;;
 	mh-prep) mh_prep "$@" ;;
 	mh-clean) mh_clean ;;
 	core-bg) cmd_core_bg "$@" ;;

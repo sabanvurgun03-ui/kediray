@@ -197,11 +197,24 @@ return view.extend({
 		root.appendChild(h('h2', {}, [h('img', { 'src': '/luci-static/kedi-logo.svg', 'style': 'height:1.3em;vertical-align:-0.25em;margin-right:8px;border-radius:6px' }), 'Çekirdek ayarı']));
 		root.appendChild(h('p', { 'class': 'ko-desc' }, 'Seçtiğin çekirdeğin kendi yapılandırma dosyasıyla çalış: mihomo için Clash YAML, sing-box için JSON. Dosyayı buradan düzenler, doğrular ve seçersin. Bu modda KediRay\'in sunucu, uygulama ve cihaz ayarları kullanılmaz; trafiği dosyadaki TUN ya da redirect girişi yakalar.'));
 		root.appendChild(this.dashCard());
+		root.appendChild(this.diagCard());
 		root.appendChild(h('div', { 'class': 'ko-tabs' }, CORES.map(c => h('button', {
 			'class': 'ko-tab' + (this.tab === c[0] ? ' on' : ''), 'type': 'button',
 			'click': () => { this.tab = c[0]; this.draw(); }
 		}, c[1]))));
 		root.appendChild(this.panel(this.tab));
+	},
+
+	/* Teşhis: internet gitmişse tek tuşla durum raporu (TUN, tablo, API, sunucu gecikmesi, tünelden istek, günlük) */
+	diagCard() {
+		const D = this.d.dash || {};
+		if (D.engine === 'xray') return h('div', {});
+		const out = h('pre', { 'class': 'ko-out', 'style': 'display:none' });
+		const btn = h('button', { 'class': 'cbi-button cbi-button-action', 'type': 'button', 'click': ev => {
+			btn.disabled = true; out.style.display = ''; out.textContent = 'Teşhis çalışıyor (15-30 sn)…';
+			return run(['own-diag']).then(r => { out.textContent = r.out || '(çıktı yok)'; btn.disabled = false; });
+		} }, 'Teşhis (internet yok mu?)');
+		return h('div', { 'class': 'ko-card' }, [h('div', { 'class': 'ko-row' }, [h('b', {}, 'Teşhis'), btn]), h('div', { 'class': 'ko-note' }, 'İnternet gitmişse buna bas, çıkan metni olduğu gibi gönder.'), out]);
 	},
 
 	/* Dashboard (MetaCubeXD): çekirdeğin kendi web arayüzü, LAN'dan açılır */
