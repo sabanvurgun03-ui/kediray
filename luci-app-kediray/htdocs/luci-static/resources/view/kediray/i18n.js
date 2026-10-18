@@ -978,12 +978,12 @@ function mkSwitch() {
 	const g = document.createElement('span');
 	g.textContent = '🌐';
 	g.setAttribute('style', 'padding:0 4px 0 6px;font-size:13px;line-height:1');
-	w.appendChild(g);
+	if (window.innerWidth >= 480) w.appendChild(g);
 	LANGS.forEach(l => {
 		const b = document.createElement('button');
 		b.type = 'button'; b.textContent = l[1]; b.title = l[2];
 		b.setAttribute('aria-pressed', l[0] === LANG ? 'true' : 'false');
-		b.setAttribute('style', 'border:0;cursor:pointer;font:inherit;padding:5px 9px;border-radius:999px;color:' + (l[0] === LANG ? '#fff' : 'inherit')
+		b.setAttribute('style', 'border:0;cursor:pointer;font:inherit;padding:5px 8px;border-radius:999px;color:' + (l[0] === LANG ? '#fff' : 'inherit')
 			+ ';background:' + (l[0] === LANG ? 'var(--kr-accent,#2a7de1)' : 'transparent'));
 		b.addEventListener('click', ev => { ev.preventDefault(); ev.stopPropagation(); setLang(l[0]); });
 		w.appendChild(b);
@@ -991,24 +991,30 @@ function mkSwitch() {
 	return w;
 }
 
+/* LuCI sayfa içeriğini yeniden çizince (ör. "Görünüm yükleniyor…" → asıl sayfa) seçici silinebilir: sayfa açık kaldığı sürece
+ * düzenli kontrol edilir, yoksa yeniden konur; başlık (h2) sonradan gelirse seçici oraya taşınır. */
 function mount() {
-	if (document.querySelector('.kr-lang')) return true;
 	const root = document.getElementById('maincontent') || document.body;
 	const h2 = root.querySelector('h2');
+	let sw = document.querySelector('.kr-lang');
 	if (h2 && h2.parentNode) {
+		if (sw && sw.parentNode === h2) return;
+		const old = sw && sw.parentNode && sw.parentNode !== h2 && sw.parentNode.classList && sw.parentNode.classList.contains('kr-lang-bar') ? sw.parentNode : null;
+		if (!sw) sw = mkSwitch();
 		h2.style.display = 'flex'; h2.style.alignItems = 'center'; h2.style.flexWrap = 'wrap'; h2.style.gap = '8px';
-		h2.appendChild(mkSwitch());
-		return true;
+		h2.appendChild(sw);
+		if (old && old.parentNode) old.parentNode.removeChild(old);
+		return;
 	}
+	if (sw && sw.isConnected) return;
 	const v = document.getElementById('view') || root.querySelector('.cbi-map, [data-page], .ka-card');
-	if (v && v.parentNode && v.firstChild) {
+	if (v && v.parentNode) {
 		const bar = document.createElement('div');
+		bar.className = 'kr-lang-bar';
 		bar.setAttribute('style', 'display:flex;justify-content:flex-end;margin:0 0 8px');
 		bar.appendChild(mkSwitch());
 		(v.classList && v.classList.contains('ka-card') ? v.parentNode : v).insertBefore(bar, (v.classList && v.classList.contains('ka-card') ? v : v.firstChild));
-		return true;
 	}
-	return false;
 }
 
 function setLang(l) {
@@ -1046,10 +1052,8 @@ function start() {
 				if (!tm) tm = setTimeout(flush, 30);
 			}).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTRS.concat([ 'value' ]) });
 		}
-		let tries = 0;
-		const iv = setInterval(() => {
-			if (mount() || ++tries > 40) clearInterval(iv);
-		}, 250);
+		mount();
+		setInterval(mount, 400);
 	};
 	if (document.body) go(); else document.addEventListener('DOMContentLoaded', go);
 }
