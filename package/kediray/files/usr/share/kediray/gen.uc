@@ -1380,6 +1380,7 @@ function devices() {
 const MH_YAML = (WHAT == 'mihomo-yaml');
 function ys(v) { return v === null ? 'null' : (type(v) == 'string' ? sprintf('%J', v) : '' + v); }
 function ykey(k) { return match(k, /^[A-Za-z0-9_.-]+$/) ? k : sprintf('%J', k); }
+let yls;   // ucode işlevleri yukarı taşımaz: yml() aşağıdaki yls()'yi çağırdığı için önceden bildirilir
 function yml(v, sp, out) {
 	for (let k in keys(v)) {
 		let x = v[k], kk = ykey(k);
@@ -1394,7 +1395,7 @@ function yml(v, sp, out) {
 		else push(out, sp + kk + ': ' + ys(x));
 	}
 }
-function yls(a, sp, out) {
+yls = function(a, sp, out) {
 	for (let x in a) {
 		if (type(x) == 'object' && length(keys(x))) {
 			let sub = [];
@@ -1405,7 +1406,7 @@ function yls(a, sp, out) {
 		else if (type(x) == 'object') push(out, sp + '- {}');
 		else push(out, sp + '- ' + ys(x));
 	}
-}
+};
 function mih_out(cfg) {
 	if (!MH_YAML) { print(sprintf('%.J\n', cfg)); return; }
 	let out = ['# KediRay şablonu: sunucu listesinden üretildi. Düzenleyip "Seç" ile çalıştırabilirsiniz.'];
