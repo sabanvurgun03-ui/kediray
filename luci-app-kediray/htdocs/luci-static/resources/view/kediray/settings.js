@@ -1,5 +1,6 @@
 'use strict';
 'require view';
+'require view.kediray.i18n as i18n';
 'require ui';
 'require form';
 'require uci';
@@ -111,7 +112,7 @@ function krTheme() {
 			mk('+', 'Yakınlaştır', z => Math.min(160, z + 10), 28);
 			(() => {
 				const tb = document.createElement('button');
-				const lab = m => { tb.textContent = m === 'dark' ? '🌙' : (m === 'light' ? '☀️' : '◐'); tb.title = 'Tema: ' + (m === 'dark' ? 'Koyu' : (m === 'light' ? 'Açık' : 'Otomatik')) + ' (değiştirmek için tıkla)'; };
+				const lab = m => { tb.textContent = m === 'dark' ? '🌙' : (m === 'light' ? '☀️' : '◐'); tb.title = 'Tema: ' + (m === 'dark' ? 'Koyu' : (m === 'light' ? 'Açık\u200b' : 'Otomatik')) + ' (değiştirmek için tıkla)'; };
 				const cur = () => { let cc = {}; try { cc = JSON.parse(localStorage.getItem('kediray-theme') || '{}') || {}; } catch (e) {} return (cc.mode === 'dark' || cc.mode === 'light') ? cc.mode : 'auto'; };
 				tb.type = 'button';
 				tb.setAttribute('style', 'border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;height:28px;min-width:28px;padding:0 6px;border-radius:999px');
@@ -679,7 +680,7 @@ return view.extend({
 				pick.addEventListener('change', () => put(Object.assign({}, get(), { accent: pick.value })));
 				dom.content(root, [
 					E('div', { 'style': 'margin-bottom:6px' }, E('b', {}, 'Mod')),
-					E('div', { 'style': 'margin-bottom:14px' }, [seg('auto', 'Otomatik'), seg('light', 'Açık'), seg('dark', 'Koyu')]),
+					E('div', { 'style': 'margin-bottom:14px' }, [seg('auto', 'Otomatik'), seg('light', 'Açık\u200b'), seg('dark', 'Koyu')]),
 					E('div', { 'style': 'margin-bottom:6px' }, E('b', {}, 'Vurgu rengi')),
 					E('div', { 'style': 'margin-bottom:8px' }, sw),
 					E('div', { 'style': 'margin-bottom:14px' }, [E('span', {}, 'Kendi rengin: '), pick, ' ',

@@ -1,5 +1,6 @@
 'use strict';
 'require view';
+'require view.kediray.i18n as i18n';
 'require fs';
 'require ui';
 'require poll';
@@ -38,12 +39,12 @@ const CH = {   // grafik görünümleri: a = alttaki, b = üstteki parça
 	vd: { a: 'VPN', b: 'Direkt', ca: 'krc-vpn', cb: 'krc-dir', fa: x => x.vr + x.vt, fb: x => x.dr + x.dt },
 	io: { a: 'İndirme', b: 'Yükleme', ca: 'krc-dl', cb: 'krc-ul', fa: x => x.vr + x.dr, fb: x => x.vt + x.dt }
 };
-const GUN = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
+const GUN = i18n.days();
 function gunAd(day) { const d = new Date(day + 'T12:00:00'); return (isNaN(d) ? '' : GUN[d.getDay()] + ' ') + day.slice(8) + '.' + day.slice(5, 7); }
-const AY = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+const AY = i18n.months(), AYK = i18n.monthsShort();
 // grafik kovasının adı: gün ("Cmt 17.10") ya da ay ("Ekim 2026")
 function kovaAd(x) { return x.mo ? (AY[+x.day.slice(5, 7) - 1] || '') + ' ' + x.day.slice(0, 4) : gunAd(x.day); }
-function kovaKisa(x) { return x.mo ? (AY[+x.day.slice(5, 7) - 1] || '').slice(0, 3) : x.day.slice(8) + '.' + x.day.slice(5, 7); }
+function kovaKisa(x) { return x.mo ? (AYK[+x.day.slice(5, 7) - 1] || '') : x.day.slice(8) + '.' + x.day.slice(5, 7); }
 const LIVE_N = 60;   // canlı hız çizgisinde tutulan örnek sayısı (2 sn aralıkla ≈ 2 dk)
 // büyük sayı + küçük birim olarak ayrı verir: 12.81 · GB
 function fmtParts(b) {
@@ -655,7 +656,7 @@ function krTheme() {
 			mk('+', 'Yakınlaştır', z => Math.min(160, z + 10), 28);
 			(() => {
 				const tb = document.createElement('button');
-				const lab = m => { tb.textContent = m === 'dark' ? '🌙' : (m === 'light' ? '☀️' : '◐'); tb.title = 'Tema: ' + (m === 'dark' ? 'Koyu' : (m === 'light' ? 'Açık' : 'Otomatik')) + ' (değiştirmek için tıkla)'; };
+				const lab = m => { tb.textContent = m === 'dark' ? '🌙' : (m === 'light' ? '☀️' : '◐'); tb.title = 'Tema: ' + (m === 'dark' ? 'Koyu' : (m === 'light' ? 'Açık\u200b' : 'Otomatik')) + ' (değiştirmek için tıkla)'; };
 				const cur = () => { let cc = {}; try { cc = JSON.parse(localStorage.getItem('kediray-theme') || '{}') || {}; } catch (e) {} return (cc.mode === 'dark' || cc.mode === 'light') ? cc.mode : 'auto'; };
 				tb.type = 'button';
 				tb.setAttribute('style', 'border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;height:28px;min-width:28px;padding:0 6px;border-radius:999px');

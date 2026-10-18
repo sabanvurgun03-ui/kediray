@@ -250,6 +250,7 @@ write_files() {
 @@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/log.js@@
 @@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/about.js@@
 @@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/ayir.js@@
+@@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/i18n.js@@
 @@KR_FILE luci-app-kediray/root/usr/share/luci/menu.d/luci-app-kediray.json@@
 @@KR_FILE luci-app-kediray/root/usr/share/rpcd/acl.d/luci-app-kediray.json@@
 @@KR_FILE luci-app-kediray/htdocs/luci-static/kedi-logo.svg@@
@@ -271,11 +272,14 @@ chmod 644 /www/luci-static/resources/view/kediray/*.js /www/luci-static/kedi-log
 # KR_DEV=1 (kediray update main / reinstall): sürüm aynı kalsa da tarayıcı önbelleği yeni adla aşılır
 KR_TAG=$(echo "$KR_VERSION${KR_DEV:+_d$(date +%s)}" | tr . _)
 KR_VD=/www/luci-static/resources/view/kediray
-rm -f "$KR_VD"/*-r[0-9]*.js 2>/dev/null
+rm -f "$KR_VD"/*-r[0-9]*.js "$KR_VD"/i18n_r*.js 2>/dev/null
+# Dil modülü (i18n.js) tüm sayfalarca ortak kullanılır: o da sürüm etiketli adla yayınlanır, sayfaların kopyaları bu adı kullanır
+[ -f "$KR_VD/i18n.js" ] && cp "$KR_VD/i18n.js" "$KR_VD/i18n_r$KR_TAG.js"
 for v in status trafik ayir settings log about; do
 	[ -f "$KR_VD/$v.js" ] || continue
 	cp "$KR_VD/$v.js" "$KR_VD/$v-r$KR_TAG.js" && \
 		sed -i "s#\"path\": \"kediray/$v[^\"]*\"#\"path\": \"kediray/$v-r$KR_TAG\"#" /usr/share/luci/menu.d/luci-app-kediray.json
+	[ -f "$KR_VD/i18n_r$KR_TAG.js" ] && sed -i "s#view\.kediray\.i18n as i18n#view.kediray.i18n_r$KR_TAG as i18n#" "$KR_VD/$v-r$KR_TAG.js"
 done
 chmod 644 "$KR_VD"/*.js 2>/dev/null
 chmod 755 /usr/share/kediray 2>/dev/null; chmod 644 /usr/share/kediray/*.uc 2>/dev/null

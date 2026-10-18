@@ -18,6 +18,7 @@ luci-app-kediray/htdocs/luci-static/resources/view/kediray/settings.js	/www/luci
 luci-app-kediray/htdocs/luci-static/resources/view/kediray/log.js	/www/luci-static/resources/view/kediray/log.js	KEDIRAY_EOF_15
 luci-app-kediray/htdocs/luci-static/resources/view/kediray/about.js	/www/luci-static/resources/view/kediray/about.js	KEDIRAY_EOF_16
 luci-app-kediray/htdocs/luci-static/resources/view/kediray/ayir.js	/www/luci-static/resources/view/kediray/ayir.js	KEDIRAY_EOF_23
+luci-app-kediray/htdocs/luci-static/resources/view/kediray/i18n.js	/www/luci-static/resources/view/kediray/i18n.js	KEDIRAY_EOF_25
 luci-app-kediray/root/usr/share/luci/menu.d/luci-app-kediray.json	/usr/share/luci/menu.d/luci-app-kediray.json	KEDIRAY_EOF_17
 luci-app-kediray/root/usr/share/rpcd/acl.d/luci-app-kediray.json	/usr/share/rpcd/acl.d/luci-app-kediray.json	KEDIRAY_EOF_18
 luci-app-kediray/htdocs/luci-static/kedi-logo.svg	/www/luci-static/kedi-logo.svg	KEDIRAY_EOF_19

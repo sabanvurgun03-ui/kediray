@@ -1,5 +1,6 @@
 'use strict';
 'require view';
+'require view.kediray.i18n as i18n';
 'require fs';
 'require ui';
 
@@ -125,7 +126,7 @@ function krTheme() {
 			mk('+', 'Yakınlaştır', z => Math.min(160, z + 10), 28);
 			(() => {
 				const tb = document.createElement('button');
-				const lab = m => { tb.textContent = m === 'dark' ? '🌙' : (m === 'light' ? '☀️' : '◐'); tb.title = 'Tema: ' + (m === 'dark' ? 'Koyu' : (m === 'light' ? 'Açık' : 'Otomatik')) + ' (değiştirmek için tıkla)'; };
+				const lab = m => { tb.textContent = m === 'dark' ? '🌙' : (m === 'light' ? '☀️' : '◐'); tb.title = 'Tema: ' + (m === 'dark' ? 'Koyu' : (m === 'light' ? 'Açık\u200b' : 'Otomatik')) + ' (değiştirmek için tıkla)'; };
 				const cur = () => { let cc = {}; try { cc = JSON.parse(localStorage.getItem('kediray-theme') || '{}') || {}; } catch (e) {} return (cc.mode === 'dark' || cc.mode === 'light') ? cc.mode : 'auto'; };
 				tb.type = 'button';
 				tb.setAttribute('style', 'border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;height:28px;min-width:28px;padding:0 6px;border-radius:999px');

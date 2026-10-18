@@ -1,5 +1,6 @@
 'use strict';
 'require view';
+'require view.kediray.i18n as i18n';
 'require ui';
 'require fs';
 'require poll';
@@ -67,8 +68,8 @@ const CSS = `
 function fmtTime(t, ts) {
 	if (t == null) return ts || '';
 	const d = new Date(t), n = new Date();
-	const hm = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-	return d.toDateString() === n.toDateString() ? hm : d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' }) + ' ' + hm;
+	const hm = d.toLocaleTimeString(i18n.locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+	return d.toDateString() === n.toDateString() ? hm : d.toLocaleDateString(i18n.locale(), { day: '2-digit', month: '2-digit' }) + ' ' + hm;
 }
 
 /* Tema (Ayarlar → Görünüm): mod ve vurgu rengi tarayıcıda saklanır, tüm KediRay sayfalarında uygulanır.
@@ -132,7 +133,7 @@ function krTheme() {
 			mk('+', 'Yakınlaştır', z => Math.min(160, z + 10), 28);
 			(() => {
 				const tb = document.createElement('button');
-				const lab = m => { tb.textContent = m === 'dark' ? '🌙' : (m === 'light' ? '☀️' : '◐'); tb.title = 'Tema: ' + (m === 'dark' ? 'Koyu' : (m === 'light' ? 'Açık' : 'Otomatik')) + ' (değiştirmek için tıkla)'; };
+				const lab = m => { tb.textContent = m === 'dark' ? '🌙' : (m === 'light' ? '☀️' : '◐'); tb.title = 'Tema: ' + (m === 'dark' ? 'Koyu' : (m === 'light' ? 'Açık\u200b' : 'Otomatik')) + ' (değiştirmek için tıkla)'; };
 				const cur = () => { let cc = {}; try { cc = JSON.parse(localStorage.getItem('kediray-theme') || '{}') || {}; } catch (e) {} return (cc.mode === 'dark' || cc.mode === 'light') ? cc.mode : 'auto'; };
 				tb.type = 'button';
 				tb.setAttribute('style', 'border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;height:28px;min-width:28px;padding:0 6px;border-radius:999px');
