@@ -344,7 +344,12 @@ return view.extend({
 			this.setLast(j);
 			if (!j || !j.ok) msg.textContent = 'Denetlenemedi: ' + ((j && j.error) || 'GitHub\'a ulaşılamadı') + '.';
 			else if (j.newer) { msg.textContent = j.rev ? 'Aynı sürümde (' + j.current + ') depoda yeni değişiklikler var.' : 'Yeni sürüm var: ' + j.current + ' → ' + j.latest; if (go) go.style.display = ''; }
-			else msg.textContent = 'Güncelsin (' + j.current + ').';
+			else {
+				const w = h('span', { 'style': 'display:inline-flex;align-items:center;gap:8px;color:#3fb950' });
+				w.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>';
+				w.appendChild(document.createTextNode('Güncelsin (' + j.current + ')'));
+				msg.textContent = ''; msg.appendChild(w);
+			}
 		}).catch(() => { if (msg) msg.textContent = 'Denetlenemedi: panel yanıt vermedi.'; });
 	},
 
