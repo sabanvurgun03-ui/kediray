@@ -1179,7 +1179,7 @@ return view.extend({
 		this.card(this.elStatus, 'status', 'Durum', [
 			h('div', { 'class': 'kr-big' }, [h('span', { 'class': 'kr-dot ' + dot }), txt]),
 			h('div', { 'class': 'kr-sub' }, [
-				'Xray ', st.core || '?', ' · Mod: ', modes[st.mode] || st.mode || '-',
+				(st.engine || 'Xray') + ' ', st.core || '?', ' · Mod: ', modes[st.mode] || st.mode || '-',
 				' · Yakalama: ', ({ mixed: 'Mixed (TCP çekirdek + UDP hev)', tun: 'TUN (hepsi hev-socks5-tunnel)', tproxy: 'TPROXY', redirect: 'Redirect (sadece TCP)' })[st.capture] || st.capture || '-',
 				st.running ? [' · Açık: ', live(st.uptime)] : '',
 				st.direct_dead ? ' · Direkt çıkış yok: "direkt" uygulamalar da VPN\'den çıkıyor' : ''

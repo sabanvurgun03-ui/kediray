@@ -964,7 +964,507 @@ function one_outbound(n) {
 	exit(length(errs) ? 3 : 0);
 }
 
+// ---------- Diğer çekirdekler: sing-box ve mihomo ----------
+// Aynı sunucu / uygulama / DNS modelinden, çekirdeğe göre ayrı yapılandırma üretir (Xray'in yaptığının karşılığı).
+// Çekirdeğin desteklemediği bir şey (ör. sing-box'ta xhttp) uyarı olarak yazılır ve o parça atlanır.
+function cwarn(msg) { warn('kediray: ' + msg + '\n'); }
+function aslist(v) { return v == null ? [] : (type(v) == 'array' ? v : [v]); }
+
+// Sunucuyu çekirdekten bağımsız bir tanıma çevir (form alanları ya da Xray outbound JSON'u).
+function spec(n) {
+	let j = n._json, s = { tag: n._tag, name: n.remarks || n['.name'] };
+	if (j) {
+		let st = j.settings || {}, tg = st.vnext?.[0] || st.servers?.[0] || st, u = st.vnext?.[0]?.users?.[0] || {};
+		let ss = j.streamSettings || {}, ts = ss.tlsSettings || {}, rs = ss.realitySettings || {};
+		s.proto = j.protocol; s.addr = tg.address; s.port = int(tg.port);
+		s.uuid = u.id; s.flow = u.flow; s.cipher = u.security;
+		s.password = tg.password; s.method = tg.method;
+		s.net = ss.network || 'tcp';
+		if (s.net == 'raw') s.net = 'tcp';
+		if (s.net == 'websocket') s.net = 'ws';
+		s.tls = ss.security || 'none';
+		let rl = (s.tls == 'reality');
+		s.sni = rl ? rs.serverName : ts.serverName;
+		s.fp = rl ? rs.fingerprint : ts.fingerprint;
+		s.alpn = aslist(ts.alpn);
+		s.insecure = (ts.allowInsecure === true);
+		s.pin = n.pin || ts.pinnedPeerCertSha256;
+		s.pbk = rs.publicKey; s.sid = rs.shortId;
+		if (s.net == 'ws') { s.path = ss.wsSettings?.path; s.host = ss.wsSettings?.host || ss.wsSettings?.headers?.Host; }
+		else if (s.net == 'httpupgrade') { s.path = ss.httpupgradeSettings?.path; s.host = ss.httpupgradeSettings?.host; }
+		else if (s.net == 'xhttp') { s.path = ss.xhttpSettings?.path; s.host = ss.xhttpSettings?.host; s.mode = ss.xhttpSettings?.mode; }
+		else if (s.net == 'grpc') s.svc = ss.grpcSettings?.serviceName;
+		else if (s.net == 'tcp' && ss.tcpSettings?.header?.type == 'http') s.htype = 'http';
+	} else {
+		s.proto = n.protocol; s.addr = n.address; s.port = int(n.port);
+		s.uuid = n.uuid; s.flow = n.flow; s.cipher = n.cipher; s.password = n.password; s.method = n.method;
+		s.net = n.network || 'tcp';
+		if (s.net == 'raw') s.net = 'tcp';
+		s.tls = n.tls || 'none';
+		s.sni = n.sni; s.fp = n.fp; s.alpn = L(n.alpn, /[ \t\r\n,]+/);
+		s.insecure = (n.insecure == '1'); s.pin = n.pin;
+		s.pbk = n.pbk; s.sid = n.sid;
+		s.path = n.path; s.host = n.host; s.svc = n.service_name; s.mode = n.xhttp_mode;
+		if (n.header_type == 'http') s.htype = 'http';
+	}
+	if (s.ech || n.ech) cwarn('ECH bu çekirdekte desteklenmiyor, ECH olmadan bağlanılıyor: ' + s.name);
+	// IP ile bağlan (alan adı SNI/Host olarak kalır): Xray ile aynı kural
+	let ip = by_ip(s.addr);
+	s.server = ip || s.addr;
+	if (!s.host && ip && s.net != 'grpc') s.host = s.addr;
+	if (s.tls != 'none' && !s.sni) s.sni = s.host || s.addr;
+	return s;
+}
+
+// Xray tarzı alan adı girdisini (domain:/full:/keyword:/regexp:) çekirdek anahtarlarına ayır
+function dsplit(lst) {
+	let r = { domain: [], domain_suffix: [], domain_keyword: [], domain_regex: [] };
+	for (let d in lst) {
+		let m = match(d, /^([a-z]+):(.*)$/);
+		if (!m) { push(r.domain_suffix, d); continue; }
+		if (m[1] == 'domain') push(r.domain_suffix, m[2]);
+		else if (m[1] == 'full') push(r.domain, m[2]);
+		else if (m[1] == 'keyword') push(r.domain_keyword, m[2]);
+		else if (m[1] == 'regexp') push(r.domain_regex, m[2]);
+		else cwarn('bu çekirdekte desteklenmeyen alan adı biçimi atlandı: ' + d);
+	}
+	return r;
+}
+// IP girdileri: CIDR'ler kalır (maskesiz IP /32 olur); geoip:/ext: bu çekirdeklerde yok, atlanır
+function cidrs(lst) {
+	let out = [];
+	for (let x0 in lst) {
+		let x = ipn(x0);
+		if (!x) continue;
+		if (match(x, /^(geoip|ext):/)) { cwarn('bu çekirdekte desteklenmeyen IP listesi atlandı: ' + x); continue; }
+		push(out, index(x, '/') >= 0 ? x : (is_v4(x) ? x + '/32' : x + '/128'));
+	}
+	return out;
+}
+// Uzak/direkt DNS adresini ayrıştır: tcp://8.8.8.8, https://1.1.1.1/dns-query, https+local://..., düz IP
+function dsrv(addr) {
+	let a = trim('' + addr), m = match(a, /^([A-Za-z0-9+-]+):\/\/(\[[0-9a-fA-F:]+\]|[^\/:]+)(:([0-9]+))?(\/[^ ]*)?$/);
+	let r = { sch: null, host: null, port: null, path: null, local: false };
+	if (m) { r.sch = lc(m[1]); r.host = m[2]; r.port = m[4]; r.path = m[5]; }
+	else if (is_v4(a)) { r.sch = 'udp'; r.host = a; }
+	else return null;
+	if (match(r.sch, /\+local$/)) { r.local = true; r.sch = replace(r.sch, '+local', ''); }
+	if (r.sch == 'h2') r.sch = 'https';
+	if (r.sch == 'tcp-tls') r.sch = 'tls';
+	if (!({ tcp: 1, udp: 1, https: 1, tls: 1, quic: 1 })[r.sch]) return null;
+	return r;
+}
+
+const SB_NET = { tcp: 1, ws: 1, grpc: 1, httpupgrade: 1 };
+function sb_out(s) {
+	if (s.htype == 'http') { cwarn('TCP HTTP başlığı sing-box ile desteklenmiyor, sunucu atlandı: ' + s.name); return null; }
+	if (!SB_NET[s.net]) { cwarn('"' + s.net + '" aktarımı sing-box ile desteklenmiyor, sunucu atlandı: ' + s.name); return null; }
+	if (!PROTOS[s.proto]) return null;
+	let o = { type: s.proto, tag: s.tag, server: s.server, server_port: s.port };
+	if (s.proto == 'vless') { o.uuid = s.uuid; if (s.flow) o.flow = s.flow; o.packet_encoding = 'xudp'; }
+	else if (s.proto == 'vmess') { o.uuid = s.uuid; o.security = s.cipher || 'auto'; o.alter_id = 0; o.packet_encoding = 'xudp'; }
+	else if (s.proto == 'trojan') o.password = s.password;
+	else { o.method = s.method; o.password = s.password; o.udp_over_tcp = { enabled: true, version: 2 }; }
+	if (KA > 0) { o.tcp_keep_alive = KA + 's'; o.tcp_keep_alive_interval = '15s'; }
+	if (s.tls != 'none') {
+		let t = { enabled: true, server_name: s.sni };
+		if (s.tls == 'reality') {
+			t.reality = { enabled: true, public_key: s.pbk, short_id: s.sid };
+			t.utls = { enabled: true, fingerprint: (s.fp && s.fp != 'none') ? s.fp : 'chrome' };
+		} else if (s.fp && s.fp != 'none')
+			t.utls = { enabled: true, fingerprint: s.fp };
+		if (length(s.alpn)) t.alpn = s.alpn;
+		if (s.pin) cwarn('sertifika sabitleme (SHA-256) sing-box ile yok, doğrulama kapatıldı: ' + s.name);
+		if (s.insecure || s.pin) t.insecure = true;
+		o.tls = t;
+	}
+	if (s.net == 'ws') {
+		let w = { type: 'ws', path: s.path || '/' };
+		if (s.host) w.headers = { Host: s.host };
+		if (WS_EARLY) { w.max_early_data = 2048; w.early_data_header_name = 'Sec-WebSocket-Protocol'; }
+		o.transport = w;
+	}
+	else if (s.net == 'grpc') {
+		o.transport = { type: 'grpc', service_name: s.svc || '' };
+		if (HB > 0) { o.transport.idle_timeout = HB + 's'; o.transport.ping_timeout = '15s'; }
+	}
+	else if (s.net == 'httpupgrade')
+		o.transport = { type: 'httpupgrade', path: s.path || '/', host: s.host || '' };
+	return o;
+}
+
+// Çekirdeğin kabul ettiği sunucular: [{ n, s, o }]
+function sb_nodes() {
+	let res = [];
+	for (let n in NODES) {
+		let s = spec(n), o = s ? sb_out(s) : null;
+		if (o) push(res, { n: n, s: s, o: o });
+	}
+	return res;
+}
+
+function sb_tgt(t) {
+	if (t == 'warp') cwarn('WARP yönlendirmesi bu çekirdekte yok, trafik VPN\'e yönlendirildi');
+	if (t == 'frag') cwarn('TLS parçalama bu çekirdekte yok, trafik direkt gönderildi');
+	if (t == 'proxy' || t == 'vpn' || t == 'warp') return { outbound: 'proxy' };
+	if (t == 'block') return { action: 'reject' };
+	return { outbound: 'direct' };
+}
+// Xray'deki add_match'in karşılığı: alan adı, IP ve port ayrı kurallar (her biri kendi başına eşleşir)
+function sb_match(m, t) {
+	let R = [], tg = sb_tgt(t), d = dsplit(filter(map(L(m.domain), dom), x => x)), ip = cidrs(L(m.ip)), pr = ranges(m.port ?? m.ports);
+	for (let k in ['domain', 'domain_suffix', 'domain_keyword', 'domain_regex']) {
+		if (!length(d[k])) continue;
+		let r = {};
+		r[k] = d[k];
+		push(R, { ...r, ...tg });
+	}
+	if (length(ip)) push(R, { ip_cidr: ip, ...tg });
+	if (length(pr)) {
+		let one = [], rg = [];
+		for (let x in pr) { if (x[0] == x[1]) push(one, x[0]); else push(rg, x[0] + ':' + x[1]); }
+		if (length(one)) push(R, { port: one, ...tg });
+		if (length(rg)) push(R, { port_range: rg, ...tg });
+	}
+	return R;
+}
+
+function sb_dnssrv(addr, tag, remote) {
+	let a = dsrv(addr);
+	if (!a) { cwarn('DNS adresi anlaşılamadı: ' + addr); return null; }
+	let o = { type: a.sch, tag: tag, server: a.host };
+	if (a.port) o.server_port = int(a.port);
+	if (a.sch == 'https') o.path = a.path || '/dns-query';
+	if (remote && !a.local) o.detour = 'proxy';
+	else o.routing_mark = MARK_CORE;
+	if (tag != 'direct-dns' && !is_v4(a.host) && !is_v6(a.host)) o.domain_resolver = 'direct-dns';
+	return o;
+}
+
+const LOGLV = { debug: 'debug', info: 'info', warning: 'warn', error: 'error', none: 'panic' };
+
+function singbox() {
+	if (!length(NODES))
+		die('hiç sunucu yok; önce link, JSON veya abonelik ekleyin', 2);
+	let SN = sb_nodes();
+	if (!length(SN))
+		die('bu çekirdekle çalışabilecek sunucu yok (sing-box: xhttp ve TCP HTTP başlığı desteklenmez)', 2);
+	let tp_port = num(opt('tproxy_port'), 12345), dns_port = num(opt('dns_port'), 15353);
+	let socks_port = num(opt('socks_port'), 10808), api_port = num(opt('api_port'), 10085);
+	let ok = {};
+	for (let x in SN) ok[x.n._tag] = 1;
+	let fb = (SEL && ok[SEL._tag]) ? SEL._tag : SN[0].n._tag;
+
+	// --- Girişler ---
+	let inb = [];
+	if (CAPTURE == 'tproxy') {
+		push(inb, { type: 'tproxy', tag: 'lan-in', listen: '0.0.0.0', listen_port: tp_port, network: 'tcp' });
+		push(inb, { type: 'tproxy', tag: 'lan-in-udp', listen: '0.0.0.0', listen_port: tp_port + 1, network: 'udp' });
+	} else
+		push(inb, { type: 'redirect', tag: 'lan-in', listen: '0.0.0.0', listen_port: tp_port });
+	if (DNS_ON) push(inb, { type: 'direct', tag: 'dns-in', listen: '0.0.0.0', listen_port: dns_port });
+	push(inb, { type: 'socks', tag: 'socks-in', listen: '127.0.0.1', listen_port: socks_port });
+	for (let x in SN)
+		push(inb, { type: 'socks', tag: 't-' + x.n._tag, listen: '127.0.0.1', listen_port: x.n._tport });
+
+	// --- Çıkışlar ---
+	let outb = [{ type: 'direct', tag: 'direct' }];
+	let tags = [];
+	for (let x in SN) { push(outb, x.o); push(tags, x.n._tag); }
+	push(outb, DISC ? { type: 'selector', tag: 'proxy', outbounds: ['direct'], default: 'direct' }
+		: { type: 'selector', tag: 'proxy', outbounds: tags, default: fb, interrupt_exist_connections: false });
+
+	// --- Yönlendirme ---
+	let ins = CAPTURE == 'tproxy' ? ['lan-in', 'lan-in-udp', 'socks-in'] : ['lan-in', 'socks-in'];
+	let R = [];
+	if (DNS_ON) push(R, { inbound: ['dns-in'], action: 'hijack-dns' });
+	if (DNS_MODE != 'off') push(R, { inbound: ins, port: [53], action: 'hijack-dns' });
+	for (let x in SN) push(R, { inbound: ['t-' + x.n._tag], outbound: x.n._tag });
+	// İçerik tanıma yalnızca kural eşleştirme için (hedef IP korunur; Xray'deki routeOnly gibi).
+	// UDP'de (hev) kapalı: her UDP oturumuna bekleme eklemesin; tun modunda TCP de socks-in'den geldiği için orada açık.
+	push(R, { inbound: CAPTURE == 'tproxy' ? ['lan-in'] : (CAPTURE == 'tun' ? ['lan-in', 'socks-in'] : ['lan-in']), action: 'sniff' });
+	if (on(opt('block_doh'), false)) {
+		let dd = dsplit(DOH_DOMAINS);
+		push(R, { inbound: ins, domain_suffix: dd.domain_suffix, port: [443, 853], action: 'reject' });
+	}
+	for (let a in APPS)
+		for (let r in sb_match({ domain: a.domain, ip: app_ips(a), port: a.ports }, a.route == 'vpn' ? 'proxy' : a.route == 'warp' ? 'warp' : a.route == 'frag' ? 'frag' : 'direct'))
+			push(R, r);
+	if (PUSH_FIX)
+		for (let r in sb_match({ domain: PUSH_DOMAINS, port: PUSH_PORTS }, 'direct')) push(R, r);
+	if (on(opt('ad_block'), false)) cwarn('reklam engelleme (geosite) bu çekirdekte yok, atlandı');
+	for (let r0 in RULES)
+		for (let r in sb_match({ domain: r0.domain, ip: r0.ip, port: r0.port }, r0.target || 'proxy'))
+			push(R, r);
+	push(R, { ip_is_private: true, outbound: 'direct' });
+
+	// --- DNS ---
+	let remote = opt('dns_remote', 'https://1.1.1.1/dns-query');
+	if (match(remote, /^[0-9.]+$/)) remote = 'tcp://' + remote;
+	let direct = dns_direct_addr('dns_direct', 0);
+	let ddom = [], pdom = [];
+	for (let a in APPS) for (let d in L(a.domain)) push((a.route == 'direct' || a.route == 'frag') ? ddom : pdom, dom(d));
+	if (PUSH_FIX) for (let d in PUSH_DOMAINS) push(ddom, d);
+	for (let r in RULES) {
+		if (r.target == 'block') continue;
+		for (let d in L(r.domain)) push(r.target == 'direct' ? ddom : pdom, dom(d));
+	}
+	pdom = filter(uniq(pdom), x => index(TDOMS, x) < 0);
+	let dsv = [sb_dnssrv(remote, 'remote', true), sb_dnssrv(direct, 'direct-dns', false)];
+	dsv = filter(dsv, x => x);
+	let dr = [];
+	let dm = (lst, srv) => {
+		let d = dsplit(filter(lst, x => x));
+		for (let k in ['domain', 'domain_suffix', 'domain_keyword', 'domain_regex']) {
+			if (!length(d[k])) continue;
+			let r = {};
+			r[k] = d[k];
+			push(dr, { ...r, action: 'route', server: srv });
+		}
+	};
+	if (length(TDOMS)) dm(TDOMS, 'remote');
+	if (length(pdom) && DNS_MODE != 'fast') dm(pdom, 'remote');
+	if (length(ddom)) dm(uniq(ddom), 'direct-dns');
+
+	let cfg = {
+		log: { level: LOGLV[opt('log_level', 'warning')] ?? 'warn', timestamp: false },
+		...(!DNS_ON ? {} : { dns: {
+			servers: dsv, rules: dr,
+			final: (MODE == 'list' || DNS_MODE == 'fast') ? 'direct-dns' : 'remote',
+			strategy: on(opt('ipv6'), false) ? 'prefer_ipv4' : 'ipv4_only'
+		} }),
+		inbounds: inb,
+		outbounds: outb,
+		route: {
+			rules: R,
+			final: (MODE == 'list') ? 'direct' : 'proxy',
+			default_mark: MARK_CORE,
+			default_domain_resolver: { server: 'direct-dns' },
+			auto_detect_interface: false
+		},
+		experimental: { clash_api: { external_controller: '127.0.0.1:' + api_port } }
+	};
+	// DNS kapalıyken bile sunucu alan adlarını çözecek bir sunucu gerekir (çıkışlar alan adıyla dial edebilir)
+	if (!DNS_ON) cfg.dns = { servers: filter([sb_dnssrv(direct, 'direct-dns', false)], x => x), strategy: 'ipv4_only' };
+	print(sprintf('%.J\n', cfg));
+}
+
+// VPN kapalıyken ping için geçici sing-box yapılandırması (her sunucu için ayrı SOCKS portu)
+function singbox_test() {
+	let SN = sb_nodes();
+	if (!length(SN)) die('hiç geçerli sunucu yok', 2);
+	let inb = [], outb = [{ type: 'direct', tag: 'direct' }], R = [];
+	for (let x in SN) {
+		push(outb, x.o);
+		push(inb, { type: 'socks', tag: 't-' + x.n._tag, listen: '127.0.0.1', listen_port: x.n._tport });
+		push(R, { inbound: ['t-' + x.n._tag], outbound: x.n._tag });
+	}
+	print(sprintf('%.J\n', { log: { level: 'panic' }, dns: { servers: filter([sb_dnssrv(dns_direct_addr('dns_direct', 0), 'direct-dns', false)], x => x) },
+		inbounds: inb, outbounds: outb, route: { rules: R, default_domain_resolver: { server: 'direct-dns' } } }));
+}
+
+// ---------- mihomo (Clash.Meta) ----------
+// mihomo JSON'u YAML olarak okur; bu yüzden aynı JSON üretici kullanılır.
+const MH_NET = { tcp: 1, ws: 1, grpc: 1, httpupgrade: 1 };
+function mh_proxy(s) {
+	if (s.htype == 'http') { cwarn('TCP HTTP başlığı mihomo ile desteklenmiyor, sunucu atlandı: ' + s.name); return null; }
+	if (!MH_NET[s.net]) { cwarn('"' + s.net + '" aktarımı mihomo ile desteklenmiyor, sunucu atlandı: ' + s.name); return null; }
+	if (!PROTOS[s.proto]) return null;
+	let p = { name: s.tag, type: (s.proto == 'shadowsocks' ? 'ss' : s.proto), server: s.server, port: s.port, udp: true };
+	if (s.proto == 'vless') { p.uuid = s.uuid; if (s.flow) p.flow = s.flow; p['packet-encoding'] = 'xudp'; }
+	else if (s.proto == 'vmess') { p.uuid = s.uuid; p.alterId = 0; p.cipher = s.cipher || 'auto'; p['packet-encoding'] = 'xudp'; }
+	else if (s.proto == 'trojan') p.password = s.password;
+	else { p.cipher = s.method; p.password = s.password; p['udp-over-tcp'] = true; p['udp-over-tcp-version'] = 2; }
+	if (s.tls != 'none' && s.proto != 'shadowsocks') {
+		p.tls = true;
+		p.servername = s.sni;
+		if (s.proto == 'trojan') p.sni = s.sni;
+		if (s.tls == 'reality') {
+			p['reality-opts'] = { 'public-key': s.pbk, 'short-id': s.sid || '' };
+			p['client-fingerprint'] = (s.fp && s.fp != 'none') ? s.fp : 'chrome';
+		} else if (s.fp && s.fp != 'none')
+			p['client-fingerprint'] = s.fp;
+		if (length(s.alpn)) p.alpn = s.alpn;
+		if (s.pin) {
+			if (match(s.pin, /^[0-9a-fA-F:]{64,95}$/)) p.fingerprint = s.pin;
+			else { cwarn('sertifika sabitleme biçimi mihomo ile uyumsuz, doğrulama kapatıldı: ' + s.name); p['skip-cert-verify'] = true; }
+		} else if (s.insecure)
+			p['skip-cert-verify'] = true;
+	}
+	if (s.net == 'ws') {
+		p.network = 'ws';
+		p['ws-opts'] = { path: s.path || '/' };
+		if (s.host) p['ws-opts'].headers = { Host: s.host };
+		if (WS_EARLY) { p['ws-opts']['max-early-data'] = 2048; p['ws-opts']['early-data-header-name'] = 'Sec-WebSocket-Protocol'; }
+	}
+	else if (s.net == 'grpc') { p.network = 'grpc'; p['grpc-opts'] = { 'grpc-service-name': s.svc || '' }; }
+	else if (s.net == 'httpupgrade') {
+		p.network = 'ws';
+		p['ws-opts'] = { path: s.path || '/', 'v2ray-http-upgrade': true };
+		if (s.host) p['ws-opts'].headers = { Host: s.host };
+	}
+	return p;
+}
+function mh_nodes() {
+	let res = [];
+	for (let n in NODES) {
+		let s = spec(n), p = s ? mh_proxy(s) : null;
+		if (p) push(res, { n: n, s: s, p: p });
+	}
+	return res;
+}
+function mh_tgt(t) {
+	if (t == 'warp') cwarn('WARP yönlendirmesi bu çekirdekte yok, trafik VPN\'e yönlendirildi');
+	if (t == 'frag') cwarn('TLS parçalama bu çekirdekte yok, trafik direkt gönderildi');
+	if (t == 'proxy' || t == 'vpn' || t == 'warp') return 'proxy';
+	if (t == 'block') return 'REJECT';
+	return 'DIRECT';
+}
+function mh_match(m, t) {
+	let R = [], tg = mh_tgt(t), d = dsplit(filter(map(L(m.domain), dom), x => x));
+	for (let x in d.domain) push(R, 'DOMAIN,' + x + ',' + tg);
+	for (let x in d.domain_suffix) push(R, 'DOMAIN-SUFFIX,' + x + ',' + tg);
+	for (let x in d.domain_keyword) push(R, 'DOMAIN-KEYWORD,' + x + ',' + tg);
+	for (let x in d.domain_regex) push(R, 'DOMAIN-REGEX,' + x + ',' + tg);
+	for (let x in cidrs(L(m.ip))) push(R, (index(x, ':') >= 0 ? 'IP-CIDR6,' : 'IP-CIDR,') + x + ',' + tg + ',no-resolve');
+	for (let x in ranges(m.port ?? m.ports))
+		push(R, 'DST-PORT,' + (x[0] == x[1] ? x[0] : x[0] + '-' + x[1]) + ',' + tg);
+	return R;
+}
+// DNS adresi -> mihomo biçimi (https://host/path, tls://host, udp/tcp düz); tünelden çözülecekse '#proxy' eki
+function mh_dns(addr, via) {
+	let a = dsrv(addr);
+	if (!a) { cwarn('DNS adresi anlaşılamadı: ' + addr); return null; }
+	let hp = a.host + (a.port ? ':' + a.port : '');
+	let u = a.sch == 'udp' ? hp : (a.sch == 'https' ? 'https://' + hp + (a.path || '/dns-query') : a.sch + '://' + hp);
+	if (via && !a.local) u += '#proxy';
+	return u;
+}
+
+function mihomo() {
+	if (!length(NODES))
+		die('hiç sunucu yok; önce link, JSON veya abonelik ekleyin', 2);
+	let MN = mh_nodes();
+	if (!length(MN))
+		die('bu çekirdekle çalışabilecek sunucu yok (mihomo: xhttp ve TCP HTTP başlığı desteklenmez)', 2);
+	let tp_port = num(opt('tproxy_port'), 12345), dns_port = num(opt('dns_port'), 15353);
+	let socks_port = num(opt('socks_port'), 10808), api_port = num(opt('api_port'), 10085);
+	let ok = {};
+	for (let x in MN) ok[x.n._tag] = 1;
+	let fb = (SEL && ok[SEL._tag]) ? SEL._tag : MN[0].n._tag;
+
+	// Sunucu listesi: seçilen en başta (select grubu ilk elemanı varsayılan yapar)
+	let names = [fb];
+	for (let x in MN) if (x.n._tag != fb) push(names, x.n._tag);
+	let proxies = map(MN, x => x.p);
+	push(proxies, { name: 'dns-out', type: 'dns' });
+
+	let lis = [];
+	if (CAPTURE == 'tproxy') {
+		push(lis, { name: 'lan-in', type: 'tproxy', listen: '0.0.0.0', port: tp_port, udp: false });
+		push(lis, { name: 'lan-in-udp', type: 'tproxy', listen: '0.0.0.0', port: tp_port + 1, udp: true });
+	} else
+		push(lis, { name: 'lan-in', type: 'redir', listen: '0.0.0.0', port: tp_port });
+	push(lis, { name: 'socks-in', type: 'socks', listen: '127.0.0.1', port: socks_port, udp: true });
+	for (let x in MN)
+		push(lis, { name: 't-' + x.n._tag, type: 'socks', listen: '127.0.0.1', port: x.n._tport, udp: false, proxy: x.n._tag });
+
+	let R = [];
+	if (DNS_MODE != 'off') push(R, 'DST-PORT,53,dns-out');
+	if (on(opt('block_doh'), false))
+		for (let r in mh_match({ domain: DOH_DOMAINS }, 'block')) push(R, r);
+	for (let a in APPS)
+		for (let r in mh_match({ domain: a.domain, ip: app_ips(a), port: a.ports }, a.route == 'vpn' ? 'proxy' : a.route))
+			push(R, r);
+	if (PUSH_FIX)
+		for (let r in mh_match({ domain: PUSH_DOMAINS, port: PUSH_PORTS }, 'direct')) push(R, r);
+	if (on(opt('ad_block'), false)) cwarn('reklam engelleme (geosite) bu çekirdekte yok, atlandı');
+	for (let r0 in RULES)
+		for (let r in mh_match({ domain: r0.domain, ip: r0.ip, port: r0.port }, r0.target || 'proxy'))
+			push(R, r);
+	for (let c in BYPASS4) push(R, 'IP-CIDR,' + c + ',DIRECT,no-resolve');
+	push(R, 'MATCH,' + (MODE == 'list' ? 'DIRECT' : 'proxy'));
+
+	// --- DNS ---
+	let remote = opt('dns_remote', 'https://1.1.1.1/dns-query');
+	if (match(remote, /^[0-9.]+$/)) remote = 'tcp://' + remote;
+	let direct = dns_direct_addr('dns_direct', 0), direct2 = dns_direct_addr('dns_direct2', 1);
+	let ddom = [], pdom = [];
+	for (let a in APPS) for (let d in L(a.domain)) push((a.route == 'direct' || a.route == 'frag') ? ddom : pdom, dom(d));
+	if (PUSH_FIX) for (let d in PUSH_DOMAINS) push(ddom, d);
+	for (let r in RULES) {
+		if (r.target == 'block') continue;
+		for (let d in L(r.domain)) push(r.target == 'direct' ? ddom : pdom, dom(d));
+	}
+	let pol = {}, mp = (lst, srv) => {
+		for (let d in uniq(filter(lst, x => x))) {
+			let m = match(d, /^([a-z]+):(.*)$/);
+			if (!m) { pol['+.' + d] = srv; continue; }
+			if (m[1] == 'domain') pol['+.' + m[2]] = srv;
+			else if (m[1] == 'full') pol[m[2]] = srv;
+			else if (m[1] == 'keyword') pol['*' + m[2] + '*'] = srv;
+		}
+	};
+	pdom = filter(uniq(pdom), x => index(TDOMS, x) < 0);
+	let rem = mh_dns(remote, true), dir = mh_dns(direct, false), dir2 = (direct2 != direct) ? mh_dns(direct2, false) : null;
+	let dirs = filter([dir, dir2], x => x);
+	if (length(ddom)) mp(uniq(ddom), dirs);
+	if (length(TDOMS)) mp(TDOMS, [rem]);
+	if (length(pdom) && DNS_MODE != 'fast') mp(pdom, [rem]);
+	let ns = (MODE == 'list' || DNS_MODE == 'fast') ? dirs : [rem];
+
+	let cfg = {
+		'mixed-port': 0,
+		'allow-lan': true,
+		'bind-address': '*',
+		mode: 'rule',
+		'log-level': ({ debug: 'debug', info: 'info', warning: 'warning', error: 'error', none: 'silent' })[opt('log_level', 'warning')] ?? 'warning',
+		ipv6: on(opt('ipv6'), false),
+		'routing-mark': MARK_CORE,
+		'unified-delay': true,
+		'tcp-concurrent': true,
+		'geodata-mode': false,
+		'external-controller': '127.0.0.1:' + api_port,
+		profile: { 'store-selected': false, 'store-fake-ip': false },
+		sniffer: { enable: on(opt('sniff'), true), 'parse-pure-ip': true, 'force-dns-mapping': true, 'override-destination': false,
+			sniff: { TLS: { ports: [443, 8443] }, HTTP: { ports: [80, 8080] }, QUIC: { ports: [443] } } },
+		listeners: lis,
+		proxies: proxies,
+		'proxy-groups': [DISC ? { name: 'proxy', type: 'select', proxies: ['DIRECT'] } : { name: 'proxy', type: 'select', proxies: names }],
+		rules: R
+	};
+	if (KA > 0) { cfg['keep-alive-interval'] = 15; cfg['keep-alive-idle'] = KA; }
+	if (DNS_ON && length(ns)) {
+		cfg.dns = {
+			enable: true, listen: '0.0.0.0:' + dns_port, ipv6: on(opt('ipv6'), false), 'enhanced-mode': 'normal',
+			'use-hosts': false, 'use-system-hosts': false,
+			'default-nameserver': length(filter([...WAN_DNS, direct], is_v4)) ? filter([...WAN_DNS, direct], is_v4) : ['1.1.1.1'],
+			nameserver: ns,
+			'proxy-server-nameserver': length(dirs) ? dirs : ['1.1.1.1'],
+			'respect-rules': false
+		};
+		if (length(keys(pol))) cfg.dns['nameserver-policy'] = pol;
+	}
+	print(sprintf('%.J\n', cfg));
+}
+
+function mihomo_test() {
+	let MN = mh_nodes();
+	if (!length(MN)) die('hiç geçerli sunucu yok', 2);
+	let lis = [], pr = [];
+	for (let x in MN) {
+		push(pr, x.p);
+		push(lis, { name: 't-' + x.n._tag, type: 'socks', listen: '127.0.0.1', port: x.n._tport, udp: false, proxy: x.n._tag });
+	}
+	print(sprintf('%.J\n', { 'mixed-port': 0, mode: 'rule', 'log-level': 'silent', 'routing-mark': MARK_CORE,
+		listeners: lis, proxies: pr, rules: ['MATCH,DIRECT'] }));
+}
+
 if (WHAT == 'xray') xray();
+else if (WHAT == 'singbox') singbox();
+else if (WHAT == 'singbox-test') singbox_test();
+else if (WHAT == 'mihomo') mihomo();
+else if (WHAT == 'mihomo-test') mihomo_test();
 else if (WHAT == 'nft') nft();
 else if (WHAT == 'dnsmasq') dnsmasq();
 else if (WHAT == 'hev') hev();

@@ -110,10 +110,16 @@ function parse(msg, prio, t, id, ts) {
 	if (!m) return null;
 	let tag = m[1], rest = m[3], level = 'info', text = rest;
 	if (tag == 'hev-socks5-tunnel') tag = 'hev';
+	let other = (tag == 'sing-box' || tag == 'mihomo');   // diğer çekirdeklerin günlüğü de çekirdek günlüğü sayılır
+	if (other) tag = 'xray';
 	if (tag != 'kediray' && tag != 'xray' && tag != 'hev') return null;
 	if (tag == 'xray') {
 		let x = match(rest, /^[0-9]{4}\/[0-9]{2}\/[0-9]{2} [0-9:.]+ (\[(Error|Warning|Info|Debug)\] )?(.*)$/s);
-		if (x) { text = x[3]; level = x[2] ? LV[x[2]] : 'info'; }
+		let sb = match(rest, /^(FATAL|ERROR|WARN|INFO|DEBUG|TRACE)\[[0-9]+\] ?(.*)$/s);
+		let mh = match(rest, /^time="[^"]*" level=([a-z]+) msg="(.*)"$/s);
+		if (sb) { text = sb[2]; level = (sb[1] == 'FATAL' || sb[1] == 'ERROR') ? 'error' : (sb[1] == 'WARN' ? 'warn' : (sb[1] == 'INFO' ? 'info' : 'debug')); }
+		else if (mh) { text = mh[2]; level = mh[1] == 'error' || mh[1] == 'fatal' ? 'error' : (mh[1] == 'warning' ? 'warn' : (mh[1] == 'info' ? 'info' : 'debug')); }
+		else if (x) { text = x[3]; level = x[2] ? LV[x[2]] : 'info'; }
 		else if (match(rest, /^(Failed to start|panic|fatal)/i)) level = 'error';
 		// her başlangıçta çıkan kullanım dışı uyarıları bilgi seviyesine indir
 		if (level == 'warn' && match(text, /deprecated|will be removed|Please (migrate|update)/)) level = 'info';

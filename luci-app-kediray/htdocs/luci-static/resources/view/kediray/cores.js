@@ -5,8 +5,7 @@
 'require fs';
 'require dom';
 
-/* KediRay - Çekirdekler: Xray dışındaki motor ikilileri (sing-box, mihomo) için kur / dosyadan yükle / kaldır.
- * Bu sürümde yalnızca ikililer yönetilir; VPN'i Xray çalıştırmaya devam eder. */
+/* KediRay - Çekirdekler: Xray, sing-box ve mihomo ikililerini yönet (kur / dosyadan yükle / kaldır) ve etkin çekirdeği seç. */
 
 /* Güvenli öğe oluşturucu: dizileri düzleştirir, metni her zaman düz metin olarak ekler (HTML çalışmaz) */
 function h(tag, attrs, children) {
@@ -31,6 +30,7 @@ const CSS = `
 .kc-name{font-size:1.25em;font-weight:700;margin:0}
 .kc-badge{display:inline-block;padding:1px 9px;border-radius:9px;font-size:.78em;font-weight:600;background:rgba(128,128,128,.18)}
 .kc-badge.on{background:rgba(34,163,85,.18);color:#3fb950}
+.kc-badge.act{background:rgba(42,125,225,.2);color:#4c9bf0}
 .kc-rows{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;align-items:baseline}
 .kc-k{opacity:.75}
 .kc-v{font-weight:600;font-variant-numeric:tabular-nums;word-break:break-all;text-align:right}
@@ -169,9 +169,9 @@ function fmtSize(n) {
 
 const KIND = { kediray: 'KediRay klasörü', system: 'Sistem paketi' };
 const NOTES = {
-	'xray': 'Ana çekirdek: VPN şu an bununla çalışıyor.',
-	'sing-box': 'Modemin paket deposundan kurulur (apk ya da opkg). Paketin kendi servisi kapalı tutulur.',
-	'mihomo': 'GitHub\'daki MetaCubeX/mihomo son sürümünden indirilir (arm64 ve armv7). İndirme sağlama toplamıyla doğrulanmaz; güvenmiyorsan kendin indirip "Dosya yükle…" ile yükle.'
+	'xray': 'Varsayılan çekirdek. En çok özellik bunda: WARP, TLS parçalama, reklam engelleme, ECH, sertifika sabitleme, xhttp.',
+	'sing-box': 'Etkin yapılırsa VPN sing-box ile çalışır. xhttp aktarımı, WARP, TLS parçalama, reklam/geosite listeleri ve sertifika sabitleme yok; bu sunucular/özellikler atlanır. Modemin paket deposundan kurulur (apk ya da opkg). Paketin kendi servisi kapalı tutulur.',
+	'mihomo': 'Etkin yapılırsa VPN mihomo ile çalışır. xhttp, WARP, TLS parçalama, reklam/geosite listeleri yok. GitHub\'daki MetaCubeX/mihomo son sürümünden indirilir (arm64 ve armv7). İndirme sağlama toplamıyla doğrulanmaz; güvenmiyorsan kendin indirip "Dosya yükle…" ile yükle.'
 };
 
 return view.extend({
@@ -218,23 +218,31 @@ return view.extend({
 		});
 	},
 
+	doUse(c) {
+		if (!window.confirm('Seçilen çekirdek etkin yapılsın mı? VPN açıksa birkaç saniye yeniden başlar. Sunucu/uygulama ayarların aynen kalır; sorun olursa buradan Xray\'e dönebilirsin.')) return;
+		return this.runJob(['use', c.id], c.name + ' etkinleştiriliyor…');
+	},
+
 	doRemove(c) {
 		if (!window.confirm(c.name + ' kaldırılsın mı?')) return;
 		return this.runJob(['remove', c.id], c.name + ' kaldırılıyor…');
 	},
 
 	card(c) {
-		const kind = c.id === 'xray' ? 'Ana çekirdek' : (c.installed ? (KIND[c.source] || '—') : '—');
+		const kind = c.id === 'xray' ? 'Varsayılan' : (c.installed ? (KIND[c.source] || '—') : '—');
 		const acts = [];
+		if (c.installed && !c.used)
+			acts.push(h('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, () => this.doUse(c)) }, 'Etkin yap'));
 		if (c.id !== 'xray') {
 			if (!c.installed) acts.push(h('button', { 'class': 'btn cbi-button cbi-button-positive', 'click': ui.createHandlerFn(this, () => this.doInstall(c)) }, 'Çekirdeği kur'));
 			acts.push(h('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, ev => this.doUpload(c, ev)) }, 'Dosya yükle…'));
-			if (c.installed) acts.push(h('button', { 'class': 'btn cbi-button cbi-button-negative', 'click': ui.createHandlerFn(this, () => this.doRemove(c)) }, 'Çekirdeği kaldır'));
+			if (c.installed && !c.used) acts.push(h('button', { 'class': 'btn cbi-button cbi-button-negative', 'click': ui.createHandlerFn(this, () => this.doRemove(c)) }, 'Çekirdeği kaldır'));
 		}
 		return h('div', { 'class': 'kc-card' }, [
 			h('div', { 'class': 'kc-head' }, [
 				h('h4', { 'class': 'kc-name' }, c.name),
-				h('span', { 'class': 'kc-badge' + (c.installed ? ' on' : '') }, c.installed ? 'Kurulu' : 'Kurulu değil')
+				h('span', { 'class': 'kc-badge' + (c.installed ? ' on' : '') }, c.installed ? 'Kurulu' : 'Kurulu değil'),
+				c.used ? h('span', { 'class': 'kc-badge act' }, 'Etkin') : ''
 			]),
 			h('div', { 'class': 'kc-rows' }, [
 				h('span', { 'class': 'kc-k' }, 'Tür'), h('span', { 'class': 'kc-v' }, kind),
@@ -252,7 +260,7 @@ return view.extend({
 		return h('div', {}, [
 			h('style', {}, CSS),
 			h('h2', {}, [h('img', { 'src': '/luci-static/kedi-logo.svg', 'style': 'height:1.3em;vertical-align:-0.25em;margin-right:8px;border-radius:6px' }), 'Çekirdekler']),
-			h('p', { 'class': 'kc-desc' }, 'VPN motorlarının ikili dosyalarını buradan yönetirsin: kur, dosyadan yükle, kaldır. Şimdilik VPN yalnızca Xray ile çalışır; sing-box ve mihomo hazır tutulur, onlarla çalışma sonraki sürümlerde eklenecek.'),
+			h('p', { 'class': 'kc-desc' }, 'VPN motorlarını buradan yönetirsin: kur, dosyadan yükle, kaldır ve hangisiyle çalışacağını seç. Sunucuların, uygulama kuralların ve DNS ayarların her çekirdekte aynı kalır; çekirdeğin desteklemediği parçalar atlanır ve günlüğe uyarı yazılır.'),
 			h('div', { 'class': 'kc-warn' }, 'İndirmeler onlarca MB tutar; mobil veride kotandan düşer. Çevrimdışıysan çekirdeğin arşivini kendi sayfasından indirip "Dosya yükle…" ile yükle.'),
 			h('div', { 'class': 'kc-grid' }, list.map(c => this.card(c)))
 		]);

@@ -53,6 +53,38 @@ core_ver() {
 	echo "$ver"
 }
 
+# ---------- Etkin çekirdek (xray | sing-box | mihomo) ----------
+# procd örneğinin adı hep "xray" kalır (durum/pid/izleme kodu çekirdekten bağımsız çalışsın).
+engine() { # → etkin çekirdeğin adı
+	case "$(uget main.core)" in sing-box) echo sing-box ;; mihomo) echo mihomo ;; *) echo xray ;; esac
+}
+engine_name() { case "$(engine)" in sing-box) echo sing-box ;; mihomo) echo mihomo ;; *) echo Xray ;; esac; }
+enginebin() { core_find "$(engine)"; }
+engine_ver() { local e b; e=$(engine); b=$(core_find "$e") || return 1; core_ver_of "$e" "$b"; }
+engine_gen() { case "$(engine)" in sing-box) echo singbox ;; mihomo) echo mihomo ;; *) echo xray ;; esac; }   # gen.uc komutu
+engine_gen_test() { case "$(engine)" in sing-box) echo singbox-test ;; mihomo) echo mihomo-test ;; *) echo test ;; esac; }
+engine_run() { # <yapılandırma> → çekirdeği önde çalıştırır (ping için geçici örnek)
+	local b; b=$(enginebin) || return 1
+	case "$(engine)" in
+		sing-box) mkdir -p "$RUN/sbping"; "$b" run -c "$1" -D "$RUN/sbping" ;;
+		mihomo) mkdir -p "$RUN/mhping"; "$b" -d "$RUN/mhping" -f "$1" ;;
+		*) XRAY_LOCATION_ASSET="$(assetdir)" "$b" run -c "$1" ;;
+	esac
+}
+engine_test() { # <yapılandırma> → 0: geçerli
+	local b; b=$(enginebin) || return 1
+	case "$(engine)" in
+		sing-box) mkdir -p "$RUN/sbtest"; "$b" check -c "$1" -D "$RUN/sbtest" ;;
+		mihomo) mkdir -p "$RUN/mhtest"; "$b" -t -d "$RUN/mhtest" -f "$1" ;;
+		*) xr run -test -c "$1" ;;
+	esac
+}
+# Canlı sunucu seçimi (sing-box clash_api / mihomo REST): PUT /proxies/proxy
+engine_api_select() { # <etiket>
+	curl -s -m 4 --noproxy '' -o /dev/null -w '%{http_code}' -X PUT -H 'Content-Type: application/json' \
+		-d "{\"name\":\"$1\"}" "http://$(api_addr)/proxies/proxy" 2>/dev/null | grep -q '^204$'
+}
+
 running() {
 	ubus call service list '{"name":"kediray"}' 2>/dev/null | jsonfilter -e '@.kediray.instances.xray.running' 2>/dev/null | grep -q true
 }
@@ -782,7 +814,8 @@ cmd_cores() { # JSON: çekirdek ikilileri
 	local id name bin ver sz src first=1 used inst
 	printf '['
 	for id in xray sing-box mihomo; do
-		case "$id" in xray) name=Xray; used=true ;; sing-box) name=sing-box; used=false ;; *) name=mihomo; used=false ;; esac
+		case "$id" in xray) name=Xray ;; sing-box) name=sing-box ;; *) name=mihomo ;; esac
+		[ "$(engine)" = "$id" ] && used=true || used=false
 		bin=$(core_find "$id") || bin=""
 		ver=""; sz=0; src=""; inst=false
 		if [ -n "$bin" ]; then
@@ -885,8 +918,42 @@ cmd_core_install() { # <sing-box|mihomo> [dosya]
 	esac
 }
 
+cmd_core_use() { # <xray|sing-box|mihomo>  etkin çekirdeği değiştirir
+	local id="$1" b tags prev i ok
+	case "$id" in xray|sing-box|mihomo) ;; *) echo "kullanım: kediray core-use <xray|sing-box|mihomo>" >&2; return 1 ;; esac
+	b=$(core_find "$id") || { echo "$id kurulu değil (önce Çekirdekler sayfasından kurun)" >&2; return 1; }
+	[ "$(engine)" = "$id" ] && { echo "$id zaten etkin"; return 0; }
+	prev=$(engine)
+	if [ "$id" = sing-box ]; then
+		tags=$("$b" version 2>/dev/null | awk -F: '/^Tags/{print $2}')
+		case "$tags" in *clash_api*) ;; *) say "uyarı: bu sing-box derlemesinde with_clash_api yok; canlı sunucu seçimi çalışmaz (seçim değişince çekirdek yeniden başlar)" ;; esac
+	fi
+	uci set "$CONF.main.core=$id" && uci commit "$CONF"
+	rm -f /etc/kediray.tested "$RUN/core.ver" "$RUN/core.ver.sz"
+	echo "etkin çekirdek: $id"
+	if [ "$(uget main.enabled)" = 1 ]; then
+		/etc/init.d/kediray restart >/dev/null 2>&1
+		i=0; ok=0
+		while [ $i -lt 40 ]; do
+			if running && port_open "$(tp_port)" && port_open "$(uget main.api_port || echo 10085)"; then ok=1; break; fi
+			i=$((i + 1)); sleep 0.5 2>/dev/null || sleep 1
+		done
+		if [ $ok = 0 ]; then
+			sayerr "$id çekirdeği başlamadı; önceki çekirdeğe ($prev) dönülüyor: $(sed -n '1,3p' "$RUN/last_error" 2>/dev/null | tr '\n' ' ')"
+			uci set "$CONF.main.core=$prev" && uci commit "$CONF"
+			rm -f /etc/kediray.tested "$RUN/core.ver" "$RUN/core.ver.sz"
+			/etc/init.d/kediray restart >/dev/null 2>&1
+			echo "$id başlatılamadı, $prev'e dönüldü" >&2
+			return 1
+		fi
+		echo "VPN yeni çekirdekle çalışıyor"
+	fi
+	return 0
+}
+
 cmd_core_remove() { # <sing-box|mihomo>
 	local id="$1" did=0
+	[ "$(engine)" = "$id" ] && { echo "$id şu an etkin çekirdek; önce başka çekirdeğe geçin" >&2; return 1; }
 	case "$id" in
 		sing-box|mihomo) ;;
 		xray) echo "Xray ana çekirdektir, kaldırılamaz" >&2; return 1 ;;
@@ -906,7 +973,7 @@ cmd_core_remove() { # <sing-box|mihomo>
 }
 
 cmd_core_bg() { # install|remove <ad> [dosya] — arka planda çalıştırır (panel isteği zaman aşımına uğramasın)
-	case "$1" in install|remove) ;; *) echo "install|remove olmalı" >&2; return 1 ;; esac
+	case "$1" in install|remove|use) ;; *) echo "install|remove|use olmalı" >&2; return 1 ;; esac
 	case "$2" in ''|*[!a-z0-9-]*) echo "geçersiz ad" >&2; return 1 ;; esac
 	case "$3" in ''|"$CORE_UP") ;; *) echo "geçersiz dosya" >&2; return 1 ;; esac
 	rm -f "$CORE_RC"
@@ -1095,26 +1162,30 @@ cmd_gen() {
 	unset KR_RCACHE; rm -rf "$RUN/rc"
 	ips=$(cat "$RUN/server_ips")
 
-	KR_RESOLVE="$(cat "$RUN/resolve" 2>/dev/null)" ucode "$SHARE/gen.uc" xray > "$RUN/config.new.json" 2> "$RUN/gen.err"
+	KR_RESOLVE="$(cat "$RUN/resolve" 2>/dev/null)" ucode "$SHARE/gen.uc" "$(engine_gen)" > "$RUN/config.new.json" 2> "$RUN/gen.err"
 	rc=$?
 	if [ $rc != 0 ]; then
 		rm -f "$RUN/config.new.json"
 		{ echo "Yapılandırma üretilemedi:"; cat "$RUN/gen.err"; } > "$RUN/last_error"
 		return $rc
 	fi
-	corebin >/dev/null || { sayerr "Xray çekirdeği bulunamadı: kediray update-core"; echo "Xray çekirdeği bulunamadı (kediray update-core)" > "$RUN/last_error"; return 1; }
+	if ! enginebin >/dev/null; then
+		if [ "$(engine)" = xray ]; then sayerr "Xray çekirdeği bulunamadı: kediray update-core"; echo "Xray çekirdeği bulunamadı (kediray update-core)" > "$RUN/last_error"
+		else sayerr "$(engine_name) çekirdeği kurulu değil (Çekirdekler sayfasından kurun ya da Xray'e dönün)"; echo "$(engine_name) çekirdeği kurulu değil (Çekirdekler sayfasından kurun ya da Xray'e dönün)" > "$RUN/last_error"; fi
+		return 1
+	fi
 	# Aynı yapılandırma + aynı çekirdek + aynı geo dosyaları daha önce test edildiyse testi atla (açılışı birkaç sn kısaltır)
 	local tkey tfile
-	tkey="$(md5sum < "$RUN/config.new.json" | cut -d' ' -f1)-$(core_ver)-$(wc -c < "$(assetdir)/geoip.dat" 2>/dev/null)-$(wc -c < "$(assetdir)/geosite.dat" 2>/dev/null)"
+	tkey="$(md5sum < "$RUN/config.new.json" | cut -d' ' -f1)-$(engine)-$(engine_ver)-$(wc -c < "$(assetdir)/geoip.dat" 2>/dev/null)-$(wc -c < "$(assetdir)/geosite.dat" 2>/dev/null)"
 	tfile=/etc/kediray.tested
 	if [ "$(cat "$tfile" 2>/dev/null)" = "$tkey" ] || [ "${KR_SKIP_TEST:-0}" = 1 ]; then
 		: > "$RUN/test.log"
-	elif ! xr run -test -c "$RUN/config.new.json" > "$RUN/test.log" 2>&1; then
+	elif ! engine_test "$RUN/config.new.json" > "$RUN/test.log" 2>&1; then
 		rm -f "$tfile"
-		sayerr "Xray yapılandırma testi başarısız:"
-		grep -iE 'fail|error|invalid' "$RUN/test.log" | tail -n 3 >&2
-		{ echo "Xray yapılandırma testi başarısız:"; grep -iE 'fail|error|invalid' "$RUN/test.log" | tail -n 3; } > "$RUN/last_error"
-		logger -t kediray -p daemon.err "Xray yapılandırma testi başarısız: $(grep -iE 'fail|error|invalid' "$RUN/test.log" | tail -n 1)"
+		sayerr "$(engine_name) yapılandırma testi başarısız:"
+		grep -iE 'fail|error|invalid|fatal' "$RUN/test.log" | tail -n 3 >&2
+		{ echo "$(engine_name) yapılandırma testi başarısız:"; grep -iE 'fail|error|invalid|fatal' "$RUN/test.log" | tail -n 3; } > "$RUN/last_error"
+		logger -t kediray -p daemon.err "$(engine_name) yapılandırma testi başarısız: $(grep -iE 'fail|error|invalid|fatal' "$RUN/test.log" | tail -n 1)"
 		return 1
 	else
 		echo "$tkey" > "$tfile"
@@ -1326,7 +1397,7 @@ fw_up_real() {
 	local i=0
 	while ! port_open "$(tp_port)"; do
 		i=$((i + 1))
-		[ $i -gt 30 ] && { sayerr "Xray başlamadı (port $(tp_port) açılmadı); kurallar uygulanmadı"; return 1; }
+		[ $i -gt 30 ] && { sayerr "$(engine_name) başlamadı (port $(tp_port) açılmadı); kurallar uygulanmadı"; return 1; }
 		sleep 0.5 2>/dev/null || sleep 1
 	done
 	local cap
@@ -1423,7 +1494,7 @@ fw_zone() {
 # (Xray'in kendi leastPing seçimi eşit hızdaki sunucular arasında sürekli gidip gelir.)
 set_override() { # <etiket>
 	local i=0
-	while ! xr api bo -s "$(api_addr)" -b proxy "$1" >/dev/null 2>&1; do
+	while ! { if [ "$(engine)" = xray ]; then xr api bo -s "$(api_addr)" -b proxy "$1"; else engine_api_select "$1"; fi; } >/dev/null 2>&1; do
 		i=$((i + 1)); [ $i -gt 10 ] && { say "sunucu seçimi uygulanamadı (API yanıt vermedi)"; return 1; }
 		sleep 1
 	done
@@ -1562,8 +1633,8 @@ apply_changes() {
 		done
 		if [ $ok = 0 ] && [ -s "$RUN/config.json.old" ]; then
 			cp "$RUN/config.json" "$RUN/config.failed.json"
-			{ echo "Yeni yapılandırma Xray'i başlatamadı, önceki yapılandırmaya dönüldü:"; xr run -test -c "$RUN/config.failed.json" 2>&1 | grep -iE 'fail|error|invalid' | tail -n 3; } > "$RUN/last_error"
-			sayerr "Yeni yapılandırma Xray'i başlatamadı, önceki yapılandırmaya dönülüyor: $(sed -n '2p' "$RUN/last_error")"
+			{ echo "Yeni yapılandırma $(engine_name) çekirdeğini başlatamadı, önceki yapılandırmaya dönüldü:"; engine_test "$RUN/config.failed.json" 2>&1 | grep -iE 'fail|error|invalid|fatal' | tail -n 3; } > "$RUN/last_error"
+			sayerr "Yeni yapılandırma $(engine_name) çekirdeğini başlatamadı, önceki yapılandırmaya dönülüyor: $(sed -n '2p' "$RUN/last_error")"
 			for f in config.json rules.nft hev.yaml dnsmasq.conf; do [ -s "$RUN/$f.old" ] && mv "$RUN/$f.old" "$RUN/$f"; done
 			date +%s > "$RUN/gen.fresh"
 			cut -d. -f1 /proc/uptime > "$RUN/soft_restart"
@@ -1576,6 +1647,10 @@ apply_changes() {
 }
 
 active_tag() {
+	if [ "$(engine)" != xray ]; then
+		curl -s -m 3 --noproxy '' "http://$(api_addr)/proxies/proxy" 2>/dev/null | jsonfilter -e '@.now' 2>/dev/null
+		return
+	fi
 	xr api bi -s "$(api_addr)" proxy 2>/dev/null | awk '
 		/Selecting Override/ { s = 1; next }
 		/Selects/ { s = 2; next }
@@ -1589,17 +1664,17 @@ cmd_status() {
 	running && r=1
 	[ -f "$RUN/fw" ] && fw=up
 	cf=$(conflicts)
-	core=$(core_ver)
+	core=$(engine_ver)
 	if [ $r = 1 ]; then
 		act=$(active_tag)
 		pid=$(ubus call service list '{"name":"kediray"}' 2>/dev/null | jsonfilter -e '@.kediray.instances.xray.pid')
 		[ -n "$pid" ] && [ -f "/proc/$pid/stat" ] && up=$(awk -v t="$(awk '{print int($1)}' /proc/uptime)" -v hz=100 '{print t - int($22 / hz)}' "/proc/$pid/stat")
 	fi
 	if [ "$1" = "--json" ]; then
-		KR_RUNNING=$r KR_FW=$fw KR_CORE="$core" KR_UPTIME="$up" KR_ACTIVE="$act" KR_CONFLICT="$cf" ucode "$SHARE/cli.uc" status
+		KR_RUNNING=$r KR_FW=$fw KR_ENGINE="$(engine_name)" KR_CORE="$core" KR_UPTIME="$up" KR_ACTIVE="$act" KR_CONFLICT="$cf" ucode "$SHARE/cli.uc" status
 	else
-		KR_RUNNING=$r KR_FW=$fw KR_CORE="$core" KR_UPTIME="$up" KR_ACTIVE="$act" KR_CONFLICT="$cf" ucode "$SHARE/cli.uc" status | \
-			ucode -e 'let s=json(require("fs").stdin.read("all")); print("Durum   : ", s.running ? "ÇALIŞIYOR" : (s.enabled ? "DURDU (hata?)" : "KAPALI"), "\nÇekirdek: Xray ", s.core, "\nMod     : ", s.mode, "\nSunucu  : ", s.active ? s.active.name + (s.active.ping ? " (" + s.active.ping + " ms)" : "") : "-", s.auto ? "  [otomatik]" : "  [sabit]", "\nSunucu sayısı: ", s.nodes, "\n", length(s.conflict) ? "UYARI   : çalışan başka VPN: " + join(" ", s.conflict) + "  ->  geçiş için: kediray takeover\n" : "");'
+		KR_RUNNING=$r KR_FW=$fw KR_ENGINE="$(engine_name)" KR_CORE="$core" KR_UPTIME="$up" KR_ACTIVE="$act" KR_CONFLICT="$cf" ucode "$SHARE/cli.uc" status | \
+			ucode -e 'let s=json(require("fs").stdin.read("all")); print("Durum   : ", s.running ? "ÇALIŞIYOR" : (s.enabled ? "DURDU (hata?)" : "KAPALI"), "\nÇekirdek: ", s.engine || "Xray", " ", s.core, "\nMod     : ", s.mode, "\nSunucu  : ", s.active ? s.active.name + (s.active.ping ? " (" + s.active.ping + " ms)" : "") : "-", s.auto ? "  [otomatik]" : "  [sabit]", "\nSunucu sayısı: ", s.nodes, "\n", length(s.conflict) ? "UYARI   : çalışan başka VPN: " + join(" ", s.conflict) + "  ->  geçiş için: kediray takeover\n" : "");'
 		[ "$(direct_state)" = dead ] && direct_auto && echo "Direkt  : YOK -> direkt giden her şey VPN'den çıkıyor (otomatik)"
 	fi
 }
@@ -1743,7 +1818,7 @@ cmd_ping() { # [sec] [--json]  VPN kapalıyken geçici test çekirdeği kullanı
 		list="$RUN/nodes.tsv"
 	else
 		# VPN kapalı: sadece ölçüm için ayrı portlarda geçici bir Xray aç (trafiği/DNS'i etkilemez)
-		corebin >/dev/null || { echo "Xray çekirdeği yok (kediray update-core)" >&2; [ $json = 1 ] && ucode "$SHARE/cli.uc" nodes; return 1; }
+		enginebin >/dev/null || { echo "$(engine_name) çekirdeği yok (Çekirdekler sayfası / kediray update-core)" >&2; [ $json = 1 ] && ucode "$SHARE/cli.uc" nodes; return 1; }
 		list="$RUN/nodes.ping.tsv"
 		export KR_TEST_BASE=$(( $(uget main.test_base || echo 21000) + 500 ))
 		ucode "$SHARE/gen.uc" nodes > "$list" 2>/dev/null
@@ -1754,8 +1829,8 @@ cmd_ping() { # [sec] [--json]  VPN kapalıyken geçici test çekirdeği kullanı
 		else
 			resolve_all "$list"
 		fi
-		KR_RESOLVE="$(cat "$RUN/resolve" 2>/dev/null)" ucode "$SHARE/gen.uc" test > "$RUN/ping.json" 2>/dev/null || { echo "Test yapılandırması üretilemedi" >&2; return 1; }
-		XRAY_LOCATION_ASSET="$(assetdir)" "$(corebin)" run -c "$RUN/ping.json" >/dev/null 2>&1 &
+		KR_RESOLVE="$(cat "$RUN/resolve" 2>/dev/null)" ucode "$SHARE/gen.uc" "$(engine_gen_test)" > "$RUN/ping.json" 2>/dev/null || { echo "Test yapılandırması üretilemedi" >&2; return 1; }
+		engine_run "$RUN/ping.json" >/dev/null 2>&1 &
 		tpid=$!
 		tp=$(awk -F"$T" 'NR==1{print $3}' "$list")
 		while ! port_open "$tp"; do
@@ -3009,12 +3084,12 @@ kr_version() { cat "$SHARE/version" 2>/dev/null || echo "?"; }
 cmd_version() { # [--json]
 	local ver core
 	ver=$(kr_version)
-	core=$(xr version 2>/dev/null | awk 'NR==1{print $2}')
+	core=$(engine_ver)
 	if [ "${1:-}" = --json ]; then
-		printf '{"version":"%s","core":"%s"}\n' "$ver" "$core"
+		printf '{"version":"%s","core":"%s","engine":"%s"}\n' "$ver" "$core" "$(engine_name)"
 	else
 		echo "KediRay $ver"
-		echo "Xray çekirdeği: ${core:-yok}"
+		echo "$(engine_name) çekirdeği: ${core:-yok}"
 		echo "Geliştirici: Şaban Vurgun · 2026"
 	fi
 	return 0
@@ -3608,6 +3683,7 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray autodirect on|off          Direkt çıkış yokken "direkt" seçilenleri otomatik VPN'e çevir (on) ya da seçime hep uy (off)
   kediray engines                    VPN motorları ve durumları (JSON)
   kediray engine <ad> start|stop     Motoru başlat/durdur (aynı anda yalnızca biri çalışır)
+  kediray core-use <çekirdek>        Etkin çekirdeği seç: xray | sing-box | mihomo
   kediray cores                      Çekirdek ikilileri: Xray, sing-box, mihomo (JSON)
   kediray core-install <sing-box|mihomo> [dosya]   Çekirdeği kur (dosya: .tar.gz, .gz ya da ikili)
   kediray core-remove <sing-box|mihomo>            Çekirdeği kaldır
@@ -3679,6 +3755,7 @@ case "$cmd" in
 	cores) cmd_cores ;;
 	core-install) cmd_core_install "$@" ;;
 	core-remove) cmd_core_remove "$@" ;;
+	core-use) cmd_core_use "$@" ;;
 	core-bg) cmd_core_bg "$@" ;;
 	core-log) cmd_core_log ;;
 	device) cmd_device "$@" ;;
@@ -3721,6 +3798,8 @@ case "$cmd" in
 	update-geo) cmd_update_geo ;;
 	import-xwrt) cmd_import_xwrt ;;
 	corebin) corebin ;;
+	core-active) engine ;;
+	core-bin) enginebin ;;
 	hevbin) hevbin ;;
 	capture) capture_eff ;;
 	assetdir) assetdir ;;

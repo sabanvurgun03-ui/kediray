@@ -216,7 +216,7 @@ return view.extend({
 				h('div', { 'class': 'ka-tag' }, 'OpenWrt için Xray tabanlı akıllı VPN'),
 				h('div', { 'class': 'ka-rows' }, [
 					row('Sürüm', d.version),
-					row('Proxy çekirdeği', d.core ? 'Xray ' + d.core : 'Xray —'),
+					row('Proxy çekirdeği', d.core ? (d.engine || 'Xray') + ' ' + d.core : (d.engine || 'Xray') + ' —'),
 					h('div', { 'class': 'ka-sep' }),
 					h('div', { 'class': 'ka-dev' }, [h('span', { 'class': 'ka-k' }, 'Geliştirici: '), h('b', {}, 'Şaban Vurgun'), ' · 2026'])
 				])

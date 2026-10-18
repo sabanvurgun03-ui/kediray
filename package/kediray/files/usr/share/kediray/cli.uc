@@ -73,6 +73,7 @@ if (CMD == 'status') {
 		running: getenv('KR_RUNNING') == '1',
 		fw: getenv('KR_FW') == 'up',
 		core: getenv('KR_CORE') || '',
+		engine: getenv('KR_ENGINE') || 'Xray',
 		uptime: int(getenv('KR_UPTIME') || 0),
 		mode: (m.mode == 'list') ? 'list' : 'global',
 		auto: !sn && sel != 'none',
