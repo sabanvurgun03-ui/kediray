@@ -1087,7 +1087,7 @@ own_probe() { # <çekirdek> <dosya>
 
 # Kendi yapılandırmadan çalıştırma hazırlığı (cmd_gen yerine)
 own_gen() {
-	local core f
+	local core f sp
 	core=$(engine)
 	f=$(own_path "$core") || {
 		echo "$core için seçili yapılandırma dosyası yok (Çekirdek ayarı sayfasından dosya ekleyip seçin)" > "$RUN/last_error"
@@ -1102,6 +1102,13 @@ own_gen() {
 	# Dashboard: dosyada API var ama external-ui yoksa (dashboard "404 page not found" verir) çalıştırılan kopyaya eklenir
 	if [ "$core" = mihomo ] && [ -d /usr/share/kediray/ui ] && grep -q '^external-controller:' "$RUN/config.new.json" && ! grep -q '^external-ui:' "$RUN/config.new.json"; then
 		printf '\nexternal-ui: ui\n' >> "$RUN/config.new.json"
+	fi
+	# Yerel SOCKS portu: güncelleme, hız testi, abonelik gibi modemin kendi istekleri VPN'e buradan çıkar (Xray modunda hep vardı).
+	# Dosyada sıfırdan büyük mixed-port / socks-port / port yoksa çalıştırılan kopyaya socks-port eklenir (127.0.0.1; allow-lan'a uyar).
+	if [ "$core" = mihomo ] && ! grep -Eq '^(mixed-port|socks-port|port):[ \t]*["'"'"']?[1-9]' "$RUN/config.new.json"; then
+		sp=$(uget main.socks_port); sp=${sp:-10808}
+		grep -Ev '^(mixed-port|socks-port):[ \t]*["'"'"']?0?["'"'"']?[ \t\r]*(#.*)?$' "$RUN/config.new.json" > "$RUN/config.new.tmp" && mv "$RUN/config.new.tmp" "$RUN/config.new.json"
+		printf '\nsocks-port: %s\n' "$sp" >> "$RUN/config.new.json"
 	fi
 	if ! core_test "$core" "$RUN/config.new.json" > "$RUN/test.log" 2>&1; then
 		{ echo "$(engine_name) yapılandırma testi başarısız ($(basename "$f")):"; grep -iE 'fail|error|invalid|fatal' "$RUN/test.log" | tail -n 3; } > "$RUN/last_error"
