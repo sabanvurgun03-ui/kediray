@@ -776,6 +776,19 @@ function nft() {
 		push(o, '\t}');
 	}
 
+	// TCP MSS ayarı: SYN paketlerindeki MSS, çıkış yolunun MTU'suna göre kısılır. Yol MTU'su 1500'den küçükse (hücresel hat,
+	// tünel sarmalaması) büyük indirmeler (WhatsApp foto/video) takılıyor ya da hiç açılmıyordu. Küçük paketler etkilenmez.
+	if (on(opt('mss_clamp'), true)) {
+		push(o, '\tchain mss_fwd {');
+		push(o, '\t\ttype filter hook forward priority mangle; policy accept;');
+		push(o, '\t\ttcp flags syn tcp option maxseg size set rt mtu');
+		push(o, '\t}');
+		push(o, '\tchain mss_out {');
+		push(o, '\t\ttype filter hook output priority mangle; policy accept;');
+		push(o, '\t\ttcp flags syn tcp option maxseg size set rt mtu');
+		push(o, '\t}');
+	}
+
 	// QUIC (UDP 443): tünelde (UDP-over-TCP) tarayıcıyı takılı bırakabiliyor — ör. Google giriş sayfası dönüp duruyor.
 	// v2rayNG ve Xray'in kendi varsayılanı gibi reddedilir; ICMP yanıtı anında gider, tarayıcı beklemeden TCP'ye (tünele) geçer.
 	if (on(opt('block_quic'), true)) {
@@ -848,7 +861,7 @@ function hev() {
 	let o = [
 		'tunnel:',
 		'  name: ' + (getenv('KR_TUN') || 'kediray0'),
-		'  mtu: ' + (num(opt('tun_mtu'), 8500) < 576 ? 576 : (num(opt('tun_mtu'), 8500) > 9000 ? 9000 : num(opt('tun_mtu'), 8500))),
+		'  mtu: ' + (num(opt('tun_mtu'), 1380) < 576 ? 576 : (num(opt('tun_mtu'), 1380) > 9000 ? 9000 : num(opt('tun_mtu'), 1380))),
 		'  multi-queue: false',
 		'  ipv4: ' + (getenv('KR_TUN_ADDR') || '198.19.0.1'),
 		'',

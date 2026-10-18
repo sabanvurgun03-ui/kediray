@@ -626,8 +626,10 @@ return view.extend({
 		o = s.taboption('adv', form.Value, 'tproxy_port', 'Yakalama (redirect/TPROXY) portu'); o.datatype = 'port'; o.default = '12345';
 		o = s.taboption('adv', form.Value, 'dns_port', 'Xray DNS portu'); o.datatype = 'port'; o.default = '15353';
 		o = s.taboption('adv', form.Value, 'socks_port', 'Yerel SOCKS5 portu (hev bu porta bağlanır)'); o.datatype = 'port'; o.default = '10808';
-		o = s.taboption('adv', form.Value, 'tun_mtu', 'TUN MTU', 'Yalnızca TUN yakalama modunda ve UDP için kullanılır. Varsayılan 8500; hat ya da sunucu büyük paketleri düşürüyorsa 1400-1500 dene. 576-9000 arası. Değiştirince VPN yeniden başlar.');
-		o.datatype = 'range(576,9000)'; o.placeholder = '8500';
+		o = s.taboption('adv', form.Value, 'tun_mtu', 'TUN MTU', 'Yalnızca TUN yakalama modunda ve UDP için kullanılır. Varsayılan 1380 (hücresel hatta WhatsApp foto/video takılmasını önler); sorun yoksa 1400-1500 denenebilir. 576-9000 arası. Değiştirince VPN yeniden başlar.');
+		o.datatype = 'range(576,9000)'; o.placeholder = '1380';
+		o = s.taboption('adv', form.Flag, 'mss_clamp', 'TCP MSS ayarı', 'Açıkken büyük indirmeler (WhatsApp foto/video) yol MTU\'suna uydurulur. Hücresel hatta indirmeler takılıyorsa açık kalsın. Değiştirince kurallar yenilenir.');
+		o.default = '1'; o.rmempty = false;
 		o = s.taboption('adv', form.Value, 'hev_bin', 'hev-socks5-tunnel yolu', 'Boş = sistemdeki hev-socks5-tunnel');
 		o = s.taboption('adv', form.Value, 'api_port', 'Xray API portu'); o.datatype = 'port'; o.default = '10085';
 		o = s.taboption('adv', form.Value, 'xray_bin', 'Xray çekirdek yolu', 'Boş = /usr/share/kediray/bin/xray');

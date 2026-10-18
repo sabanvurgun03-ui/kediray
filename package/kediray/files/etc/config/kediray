@@ -71,6 +71,8 @@ config main 'main'
 	# Tarayıcı/Android "Özel DNS" (DoH/DoT) bağlantılarını reddet. Varsayılan KAPALI: açıkken Speedtest gibi uygulamalar
 	# "Check your connection" uyarısı veriyordu (Android ağı doğrulanamadı sayıyor). Sayfalar hâlâ askıda kalıyorsa 1 yapın.
 	option block_doh '0'
+	# TCP MSS'yi yol MTU'suna kıs (hücresel hatta WhatsApp foto/video takılmasını önler); TUN MTU varsayılanı 1380
+	option mss_clamp '1'
 	option dns_port '15353'
 	option socks_port '10808'
 	option api_port '10085'
