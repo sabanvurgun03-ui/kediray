@@ -561,12 +561,6 @@ cmd_update() { # check [--json] | install | auto | cached
 	[ "$act" = --json ] && act=check
 	cur=$(kr_version); base=$(upd_base)
 	mkdir -p /tmp
-	# Test anahtarı: /tmp/kediray.fakeupd dosyası varsa denetim sahte "yeni sürüm var" döner (silince kalkar; RAM'dedir, yeniden başlatmada kendiliğinden gider)
-	if [ "$act" = check ] && [ -f /tmp/kediray.fakeupd ]; then
-		latest=$(echo "$cur" | awk -F. '{ $NF = $NF + 1 } 1' OFS=.)
-		[ $js = 1 ] && upd_json true "$latest" "$cur" true "" "$(date +%s)" manual || echo "Yeni sürüm var: $cur -> $latest (test)"
-		return 0
-	fi
 	if ! ufetch "$base/VERSION?t=$(date +%s)" "$t.v" 7; then
 		rm -f "$t.v"
 		[ $js = 1 ] && upd_json false "" "$cur" false "GitHub'a ulaşılamadı" || echo "GitHub'a ulaşılamadı: $base"
