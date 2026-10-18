@@ -743,6 +743,15 @@ upd_main_build() { # <çıktı dosyası>
 		fi
 		printf '%s\t%s\t%s\t%s\n' "$src" "$p" "$d" "$n" >> "$w/idx"
 	done < "$w/files.map"
+	# Dashboard arşivi (MetaCubeXD): iskelette dashboard işareti (KR_UI) varsa indirilip base64'e çevrilir (kurulum betiği gömülü olarak taşır)
+	: > "$w/ui.b64"
+	if grep -q '^@@KR_UI[@]@$' "$w/skel"; then
+		if ufetch "$base/dashboard/metacubexd.tgz?t=$t" "$w/ui.tgz" 90 && [ -s "$w/ui.tgz" ]; then
+			if command -v base64 >/dev/null 2>&1; then base64 "$w/ui.tgz" > "$w/ui.b64"
+			elif command -v openssl >/dev/null 2>&1; then openssl base64 -in "$w/ui.tgz" > "$w/ui.b64"; fi
+		fi
+		[ -s "$w/ui.b64" ] || echo "Uyarı: dashboard arşivi hazırlanamadı; dashboard kurulmayacak (VPN etkilenmez)" >&2
+	fi
 	awk -v ver="$ver" -v W="$w" -v q="$q" '
 		BEGIN { while ((getline l < (W "/idx")) > 0) { split(l, a, "\t"); p[a[1]] = a[2]; d[a[1]] = a[3]; f[a[1]] = W "/f." a[4] } }
 		/^@@KR_FIL[E] .*@@$/ {
@@ -752,10 +761,11 @@ upd_main_build() { # <çıktı dosyası>
 			while ((getline x < f[s]) > 0) print x
 			close(f[s]); print d[s]; next
 		}
+		/^@@KR_UI[@]@$/ { while ((getline x < (W "/ui.b64")) > 0) print x; close(W "/ui.b64"); print "KEDIRAY_UI_B64"; next }
 		{ gsub(/@VERSION[@]/, ver); print }
 		END { exit bad }' "$w/skel" > "$out" || { echo "Kurulum dosyası birleştirilemedi"; rm -rf "$w" "$out"; return 1; }
 	rm -rf "$w"
-	grep -q '^@@KR_FIL[E] ' "$out" && { echo "Birleştirmede çözülmemiş işaret kaldı"; rm -f "$out"; return 1; }
+	grep -Eq '^@@KR_(FIL[E] |UI[@]@)' "$out" && { echo "Birleştirmede çözülmemiş işaret kaldı"; rm -f "$out"; return 1; }
 	sh -n "$out" 2>/dev/null || { echo "Üretilen kurulum dosyasında sözdizimi hatası"; rm -f "$out"; return 1; }
 	return 0
 }

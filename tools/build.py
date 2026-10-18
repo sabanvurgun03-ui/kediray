@@ -298,7 +298,7 @@ def verify(root, out, ver, installer, rows, tf):
     bad = [s for s, p, d in rows if hd.get((p, d)) != rd(root / s)]
     check(len(hd) == len(rows) and not bad, '%d gömülü dosya ağaçtakiyle birebir aynı%s' % (len(rows), (': ' + ', '.join(bad)) if bad else ''))
 
-    check(gen.count('KEDIRAY_UI_B64') == 2 and base64.b64decode(gen.split("<<'KEDIRAY_UI_B64'", 1)[1].split('\n', 1)[1].split('KEDIRAY_UI_B64', 1)[0]) == (root / UI_ARCHIVE).read_bytes(), 'dashboard arşivi kurulum betiğinde birebir gömülü')
+    check(gen.count("<<'KEDIRAY_UI_B64'") == 1 and base64.b64decode(gen.split("<<'KEDIRAY_UI_B64'", 1)[1].split('\n', 1)[1].split('KEDIRAY_UI_B64', 1)[0]) == (root / UI_ARCHIVE).read_bytes(), 'dashboard arşivi kurulum betiğinde birebir gömülü')
 
     # 3) kediray-all
     top = 'kediray-all-' + ver
