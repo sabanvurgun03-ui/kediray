@@ -913,13 +913,18 @@ function trs(s) {
 		if (e != null) r = m[1] + e + m[3];
 	}
 	if (r == null) {
-		r = s.replace(RX, x => MAP.get(x));
+		const pc = n => n + (LANG === 'fr' ? '\u202f%' : '%');
+		r = s.replace(/Dünün %(\d+)'i/g, (x, n) => LANG === 'fr' ? pc(n) + ' d\u2019hier' : pc(n) + ' of yesterday')
+			.replace(/bugün günlük ortalamanın %(\d+)'i/g, (x, n) => LANG === 'fr' ? 'aujourd\u2019hui : ' + pc(n) + ' de la moyenne quotidienne' : 'today is ' + pc(n) + ' of the daily average');
+		r = r.replace(RX, x => MAP.get(x));
 		const u = UNITS[LANG];
 		r = r.replace(/(\d+)\s*saatte bir/g, (x, n) => u.every(n))
 			.replace(/(\d)\s*gün(?![\p{L}])/gu, (x, n) => n + ' ' + u.d)
 			.replace(/(\d)\s*sa(?![\p{L}])/gu, (x, n) => n + ' ' + u.h)
 			.replace(/(\d)\s*dk(?![\p{L}])/gu, (x, n) => n + ' ' + u.m)
-			.replace(/(\d)\s*sn(?![\p{L}])/gu, (x, n) => n + ' ' + u.s);
+			.replace(/(\d)\s*sn(?![\p{L}])/gu, (x, n) => n + ' ' + u.s)
+			/* Türkçe yüzde yazımı (%94) → İngilizce 94%, Fransızca 94 % */
+			.replace(/%(\d+(?:[.,]\d+)?)/g, (x, n) => n + (LANG === 'fr' ? '\u202f%' : '%'));
 	}
 	if (cache.size > 4000) cache.clear();
 	cache.set(s, r);
