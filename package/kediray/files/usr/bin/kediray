@@ -63,11 +63,20 @@ enginebin() { core_find "$(engine)"; }
 engine_ver() { local e b; e=$(engine); b=$(core_find "$e") || return 1; core_ver_of "$e" "$b"; }
 engine_gen() { case "$(engine)" in sing-box) echo singbox ;; mihomo) echo mihomo ;; *) echo xray ;; esac; }   # gen.uc komutu
 engine_gen_test() { case "$(engine)" in sing-box) echo singbox-test ;; mihomo) echo mihomo-test ;; *) echo test ;; esac; }
+geo_ok() { local d; d=$(assetdir); [ -s "$d/geoip.dat" ] && [ -s "$d/geosite.dat" ]; }
+mh_prep() { # <dizin> → mihomo ev dizini; geo dosyaları bağlanır
+	mkdir -p "$1"
+	if geo_ok; then
+		ln -sf "$(assetdir)/geoip.dat" "$1/GeoIP.dat"; ln -sf "$(assetdir)/geosite.dat" "$1/GeoSite.dat"
+	else
+		rm -f "$1/GeoIP.dat" "$1/GeoSite.dat"
+	fi
+}
 engine_run() { # <yapılandırma> → çekirdeği önde çalıştırır (ping için geçici örnek)
 	local b; b=$(enginebin) || return 1
 	case "$(engine)" in
 		sing-box) mkdir -p "$RUN/sbping"; "$b" run -c "$1" -D "$RUN/sbping" ;;
-		mihomo) mkdir -p "$RUN/mhping"; "$b" -d "$RUN/mhping" -f "$1" ;;
+		mihomo) mh_prep "$RUN/mhping"; "$b" -d "$RUN/mhping" -f "$1" ;;
 		*) XRAY_LOCATION_ASSET="$(assetdir)" "$b" run -c "$1" ;;
 	esac
 }
@@ -75,7 +84,7 @@ engine_test() { # <yapılandırma> → 0: geçerli
 	local b; b=$(enginebin) || return 1
 	case "$(engine)" in
 		sing-box) mkdir -p "$RUN/sbtest"; "$b" check -c "$1" -D "$RUN/sbtest" ;;
-		mihomo) mkdir -p "$RUN/mhtest"; "$b" -t -d "$RUN/mhtest" -f "$1" ;;
+		mihomo) mh_prep "$RUN/mhtest"; "$b" -t -d "$RUN/mhtest" -f "$1" ;;
 		*) xr run -test -c "$1" ;;
 	esac
 }
@@ -181,6 +190,8 @@ hevbin() {
 capture_eff() {
 	local c
 	c=$(uget main.capture); c=${c:-mixed}
+	# mihomo yerel mod: yakalamayı mihomo'nun kendi TUN'u yapar (hev ve KediRay nft yakalaması kullanılmaz)
+	[ "$(engine)" = mihomo ] && [ "$(uget main.mihomo_native)" = 1 ] && { echo native; return 0; }
 	case "$c" in mixed|tun)
 		if ! hevbin >/dev/null || [ ! -c /dev/net/tun ]; then
 			[ -f "$RUN/capture.warned" ] || { say "$c modu için hev-socks5-tunnel/kmod-tun yok; tproxy moduna geçildi (kur: apk add hev-socks5-tunnel kmod-tun)"; touch "$RUN/capture.warned"; }
@@ -811,11 +822,12 @@ core_ver_of() { # <ad> <ikili> → sürüm
 }
 
 cmd_cores() { # JSON: çekirdek ikilileri
-	local id name bin ver sz src first=1 used inst
+	local id name bin ver sz src first=1 used inst nat
 	printf '['
 	for id in xray sing-box mihomo; do
 		case "$id" in xray) name=Xray ;; sing-box) name=sing-box ;; *) name=mihomo ;; esac
 		[ "$(engine)" = "$id" ] && used=true || used=false
+		nat=false; [ "$id" = mihomo ] && [ "$(uget main.mihomo_native)" = 1 ] && nat=true
 		bin=$(core_find "$id") || bin=""
 		ver=""; sz=0; src=""; inst=false
 		if [ -n "$bin" ]; then
@@ -826,8 +838,8 @@ cmd_cores() { # JSON: çekirdek ikilileri
 		fi
 		[ $first = 1 ] || printf ','
 		first=0
-		printf '{"id":"%s","name":"%s","installed":%s,"version":"%s","size":%s,"path":"%s","source":"%s","used":%s}' \
-			"$id" "$name" "$inst" "$ver" "${sz:-0}" "$bin" "$src" "$used"
+		printf '{"id":"%s","name":"%s","installed":%s,"version":"%s","size":%s,"path":"%s","source":"%s","used":%s,"native":%s}' \
+			"$id" "$name" "$inst" "$ver" "${sz:-0}" "$bin" "$src" "$used" "$nat"
 	done
 	printf ']\n'
 }
@@ -951,6 +963,33 @@ cmd_core_use() { # <xray|sing-box|mihomo>  etkin çekirdeği değiştirir
 	return 0
 }
 
+cmd_core_native() { # on|off  — mihomo yerel mod (kendi TUN'u ve DNS yönlendirmesi)
+	local v prev i ok
+	case "$1" in on) v=1 ;; off) v=0 ;; *) echo "kullanım: kediray core-native on|off" >&2; return 1 ;; esac
+	prev=$(uget main.mihomo_native); prev=${prev:-0}
+	[ "$v" = 1 ] && [ "$(engine)" != mihomo ] && echo "uyarı: yerel mod yalnızca etkin çekirdek mihomo iken çalışır (kediray core-use mihomo)" >&2
+	[ "$v" = 1 ] && { [ -c /dev/net/tun ] || { echo "/dev/net/tun yok (kmod-tun kurulu değil); yerel mod açılamaz" >&2; return 1; }; }
+	[ "$prev" = "$v" ] && { echo "mihomo yerel mod zaten $1"; return 0; }
+	uci set "$CONF.main.mihomo_native=$v" && uci commit "$CONF"
+	rm -f /etc/kediray.tested
+	echo "mihomo yerel mod: $1"
+	[ "$(engine)" = mihomo ] && [ "$(uget main.enabled)" = 1 ] || return 0
+	/etc/init.d/kediray restart >/dev/null 2>&1
+	i=0; ok=0
+	while [ $i -lt 40 ]; do
+		if running && port_open "$(uget main.api_port || echo 10085)"; then ok=1; break; fi
+		i=$((i + 1)); sleep 0.5 2>/dev/null || sleep 1
+	done
+	if [ $ok = 0 ]; then
+		sayerr "mihomo yerel mod başlamadı, eski ayara dönülüyor: $(sed -n '1,3p' "$RUN/last_error" 2>/dev/null | tr '\n' ' ')"
+		uci set "$CONF.main.mihomo_native=$prev" && uci commit "$CONF"
+		rm -f /etc/kediray.tested
+		/etc/init.d/kediray restart >/dev/null 2>&1
+		return 1
+	fi
+	return 0
+}
+
 cmd_core_remove() { # <sing-box|mihomo>
 	local id="$1" did=0
 	[ "$(engine)" = "$id" ] && { echo "$id şu an etkin çekirdek; önce başka çekirdeğe geçin" >&2; return 1; }
@@ -973,7 +1012,7 @@ cmd_core_remove() { # <sing-box|mihomo>
 }
 
 cmd_core_bg() { # install|remove <ad> [dosya] — arka planda çalıştırır (panel isteği zaman aşımına uğramasın)
-	case "$1" in install|remove|use) ;; *) echo "install|remove|use olmalı" >&2; return 1 ;; esac
+	case "$1" in install|remove|use|native) ;; *) echo "install|remove|use|native olmalı" >&2; return 1 ;; esac
 	case "$2" in ''|*[!a-z0-9-]*) echo "geçersiz ad" >&2; return 1 ;; esac
 	case "$3" in ''|"$CORE_UP") ;; *) echo "geçersiz dosya" >&2; return 1 ;; esac
 	rm -f "$CORE_RC"
@@ -1149,6 +1188,8 @@ cmd_gen() {
 	cap=$(capture_eff)
 	echo "$cap" > "$RUN/capture"
 	export KR_WAN_DNS="$(wan_dns)"
+	export KR_LAN_IFS="$(lan_ifs)"
+	if [ "$(engine)" = mihomo ] && geo_ok; then export KR_GEO=1; else export KR_GEO=0; fi
 	export KR_CAPTURE="$cap" KR_MARK_CORE="$MARK_CORE" KR_MARK_TP="$MARK_TP" KR_MARK_TUN="$MARK_TUN" \
 		KR_TUN="$TUN_DEV" KR_TUN_ADDR="$TUN_ADDR"
 	if cap_insecure; then export KR_CAP_INSECURE=1; else export KR_CAP_INSECURE=0; fi
@@ -1394,23 +1435,27 @@ port_open() { # tcp port dinleniyor mu (IPv4 veya IPv6 soket)
 
 fw_up_real() {
 	[ -s "$RUN/config.json" ] && [ -s "$RUN/rules.nft" ] || return 1
-	local i=0
-	while ! port_open "$(tp_port)"; do
+	local i=0 cap wport
+	cap=$(cat "$RUN/capture" 2>/dev/null); cap=${cap:-mixed}
+	# yerel modda dinleyici port yok: çekirdeğin API portu hazır olunca devam edilir
+	wport=$(tp_port); [ "$cap" = native ] && wport=$(uget main.api_port || echo 10085)
+	while ! port_open "$wport"; do
 		i=$((i + 1))
-		[ $i -gt 30 ] && { sayerr "$(engine_name) başlamadı (port $(tp_port) açılmadı); kurallar uygulanmadı"; return 1; }
+		[ $i -gt 30 ] && { sayerr "$(engine_name) başlamadı (port $wport açılmadı); kurallar uygulanmadı"; return 1; }
 		sleep 0.5 2>/dev/null || sleep 1
 	done
-	local cap
-	cap=$(cat "$RUN/capture" 2>/dev/null); cap=${cap:-mixed}
-	case "$cap" in mixed|tun)
+	case "$cap" in mixed|tun|native)
 		i=0
 		while ! ip link show "$TUN_DEV" >/dev/null 2>&1; do
 			i=$((i + 1))
-			[ $i -gt 30 ] && { sayerr "hev-socks5-tunnel TUN aygıtını ($TUN_DEV) açmadı; kurallar uygulanmadı"; return 1; }
+			[ $i -gt 30 ] && { sayerr "TUN aygıtı ($TUN_DEV) açılmadı; kurallar uygulanmadı"; return 1; }
 			sleep 0.5 2>/dev/null || sleep 1
 		done
-		ip addr show dev "$TUN_DEV" 2>/dev/null | grep -q 'inet ' || ip addr add "$TUN_ADDR/24" dev "$TUN_DEV" 2>/dev/null
-		ip link set dev "$TUN_DEV" up
+		# adresi ve rotaları yerel modda mihomo kendisi kurar
+		if [ "$cap" != native ]; then
+			ip addr show dev "$TUN_DEV" 2>/dev/null | grep -q 'inet ' || ip addr add "$TUN_ADDR/24" dev "$TUN_DEV" 2>/dev/null
+			ip link set dev "$TUN_DEV" up
+		fi
 		fw_zone ;;
 	esac
 	rules_down
@@ -3390,7 +3435,7 @@ cmd_watchdog() {
 		else
 			: > "$RUN/nofw"
 		fi
-	elif case "$(cat "$RUN/capture" 2>/dev/null)" in mixed|tun) ! ip link show "$TUN_DEV" >/dev/null 2>&1 ;; *) false ;; esac; then
+	elif case "$(cat "$RUN/capture" 2>/dev/null)" in mixed|tun|native) ! ip link show "$TUN_DEV" >/dev/null 2>&1 ;; *) false ;; esac; then
 		# Kurallar var ama UDP tüneli (hev) düşmüş: TUN aygıtı kayboldu
 		log "watchdog: TUN aygıtı ($TUN_DEV) yok, UDP tüneli yeniden başlatılıyor"
 		/etc/init.d/kediray restart >/dev/null 2>&1
@@ -3683,6 +3728,7 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray autodirect on|off          Direkt çıkış yokken "direkt" seçilenleri otomatik VPN'e çevir (on) ya da seçime hep uy (off)
   kediray engines                    VPN motorları ve durumları (JSON)
   kediray engine <ad> start|stop     Motoru başlat/durdur (aynı anda yalnızca biri çalışır)
+  kediray core-native on|off         mihomo yerel mod: kendi TUN'u ile çalışır (hev/nft yakalaması yok)
   kediray core-use <çekirdek>        Etkin çekirdeği seç: xray | sing-box | mihomo
   kediray cores                      Çekirdek ikilileri: Xray, sing-box, mihomo (JSON)
   kediray core-install <sing-box|mihomo> [dosya]   Çekirdeği kur (dosya: .tar.gz, .gz ya da ikili)
@@ -3756,6 +3802,8 @@ case "$cmd" in
 	core-install) cmd_core_install "$@" ;;
 	core-remove) cmd_core_remove "$@" ;;
 	core-use) cmd_core_use "$@" ;;
+	core-native) cmd_core_native "$@" ;;
+	mh-prep) mh_prep "$@" ;;
 	core-bg) cmd_core_bg "$@" ;;
 	core-log) cmd_core_log ;;
 	device) cmd_device "$@" ;;

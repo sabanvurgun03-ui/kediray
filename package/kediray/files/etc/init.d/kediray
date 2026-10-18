@@ -81,7 +81,7 @@ _start_service() {
 	procd_open_instance xray
 	case "$eng" in
 		sing-box) mkdir -p "$RUN/sb"; procd_set_param command "$bin" run -c "$RUN/config.json" -D "$RUN/sb" ;;
-		mihomo) mkdir -p "$RUN/mh"; procd_set_param command "$bin" -d "$RUN/mh" -f "$RUN/config.json" ;;
+		mihomo) $PROG mh-prep "$RUN/mh"; procd_set_param command "$bin" -d "$RUN/mh" -f "$RUN/config.json" ;;
 		*) procd_set_param command "$bin" run -c "$RUN/config.json"
 		   procd_set_param env XRAY_LOCATION_ASSET="$asset" ;;
 	esac

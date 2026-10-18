@@ -387,7 +387,7 @@ function rem_ip4() {
 // Sorgu tünelin veri yoluna (TUN/TPROXY) girmez, çekirdek kendisi çözer -> hızlı ve sızıntısız.
 // 'off' (DNS'e dokunma) TUN yakalamasında hiçbir adı çözemez (cihazın 53 portu TUN'a girer, yanıt dönmez):
 // bu birleşimde sessizce 'private'a düşüyoruz.
-const DNS_MODE = (opt('dns_mode', 'private') == 'off' && CAPTURE == 'tun') ? 'private' : opt('dns_mode', 'private');
+const DNS_MODE = (opt('dns_mode', 'private') == 'off' && (CAPTURE == 'tun' || CAPTURE == 'native')) ? 'private' : opt('dns_mode', 'private');
 // Uygulama bazlı "DNS'i tünelden çöz" (tunnel_dns=1): global DNS modu 'off' olsa bile yalnız bu uygulamaların
 // alan adları dnsmasq -> çekirdek -> tünel yolundan çözülür; diğer her şey modemin kendi DNS'inde kalır.
 let TDOMS = [];
@@ -740,7 +740,7 @@ function nft() {
 		push(o, '\t\tmeta l4proto tcp meta mark set ' + MARK_TP + ' tproxy ip to :' + tp_port + ' accept');
 		push(o, '\t\tmeta l4proto udp meta mark set ' + MARK_TP + ' tproxy ip to :' + (tp_port + 1) + ' accept');
 		push(o, '\t}');
-	} else {
+	} else if (CAPTURE != 'native') {
 		// TCP: çekirdekte NAT redirect. fw4'ün dstnat'ından (-100) önce.
 		push(o, '\tchain nat_pre {');
 		push(o, '\t\ttype nat hook prerouting priority dstnat - 5; policy accept;');
@@ -766,7 +766,7 @@ function nft() {
 	// DNS (53): cihaz hangi DNS'i yazarsa yazsın çekirdekte KediRay DNS'ine gider.
 	// Böylece sorgu TUN/hev yoluna hiç girmez (ölçüm: o yol UDP başına ~200 ms ekliyor) ve
 	// Xray'in DNS önbelleği devreye girer. Kural tünelden geçen cihazlar için geçerli (Direkt cihaz kendi DNS'ini kullanır).
-	if (on(opt('dns_hijack'), true) && DNS_MODE != 'off') {
+	if (on(opt('dns_hijack'), true) && DNS_MODE != 'off' && CAPTURE != 'native') {
 		push(o, '\tchain dns_nat {');
 		push(o, '\t\ttype nat hook prerouting priority dstnat - 6; policy accept;');
 		guards('dns_act', '{ tcp, udp }');
@@ -791,7 +791,7 @@ function nft() {
 
 	// QUIC (UDP 443): tünelde (UDP-over-TCP) tarayıcıyı takılı bırakabiliyor — ör. Google giriş sayfası dönüp duruyor.
 	// v2rayNG ve Xray'in kendi varsayılanı gibi reddedilir; ICMP yanıtı anında gider, tarayıcı beklemeden TCP'ye (tünele) geçer.
-	if (on(opt('block_quic'), true)) {
+	if (on(opt('block_quic'), true) && CAPTURE != 'native') {
 		push(o, '\tchain quic_fwd {');
 		push(o, '\t\ttype filter hook forward priority filter - 5; policy accept;');
 		guards('quic_act', 'udp');
@@ -1266,6 +1266,9 @@ function singbox_test() {
 // ---------- mihomo (Clash.Meta) ----------
 // mihomo JSON'u YAML olarak okur; bu yüzden aynı JSON üretici kullanılır.
 const MH_NET = { tcp: 1, ws: 1, grpc: 1, httpupgrade: 1 };
+// Geo listeleri (kediray update-geo ile inen geoip.dat / geosite.dat): mihomo GEOSITE / GEOIP kuralları için
+const GEO = getenv('KR_GEO') == '1';
+const NATIVE = (CAPTURE == 'native');
 function mh_proxy(s) {
 	if (s.htype == 'http') { cwarn('TCP HTTP başlığı mihomo ile desteklenmiyor, sunucu atlandı: ' + s.name); return null; }
 	if (!MH_NET[s.net]) { cwarn('"' + s.net + '" aktarımı mihomo ile desteklenmiyor, sunucu atlandı: ' + s.name); return null; }
@@ -1321,12 +1324,23 @@ function mh_tgt(t) {
 	return 'DIRECT';
 }
 function mh_match(m, t) {
-	let R = [], tg = mh_tgt(t), d = dsplit(filter(map(L(m.domain), dom), x => x));
+	let R = [], tg = mh_tgt(t), dl = filter(map(L(m.domain), dom), x => x), il = L(m.ip), gd = [], gi = [];
+	for (let x in dl) {
+		let g = match(x, /^geosite:(.+)$/);
+		if (g) { if (GEO) push(R, 'GEOSITE,' + g[1] + ',' + tg); else cwarn('geosite listesi yok (kediray update-geo), atlandı: ' + x); }
+		else push(gd, x);
+	}
+	for (let x in il) {
+		let g = match(x, /^geoip:(.+)$/);
+		if (g) { if (GEO) push(R, 'GEOIP,' + g[1] + ',' + tg + ',no-resolve'); else cwarn('geoip listesi yok (kediray update-geo), atlandı: ' + x); }
+		else push(gi, x);
+	}
+	let d = dsplit(gd);
 	for (let x in d.domain) push(R, 'DOMAIN,' + x + ',' + tg);
 	for (let x in d.domain_suffix) push(R, 'DOMAIN-SUFFIX,' + x + ',' + tg);
 	for (let x in d.domain_keyword) push(R, 'DOMAIN-KEYWORD,' + x + ',' + tg);
 	for (let x in d.domain_regex) push(R, 'DOMAIN-REGEX,' + x + ',' + tg);
-	for (let x in cidrs(L(m.ip))) push(R, (index(x, ':') >= 0 ? 'IP-CIDR6,' : 'IP-CIDR,') + x + ',' + tg + ',no-resolve');
+	for (let x in cidrs(gi)) push(R, (index(x, ':') >= 0 ? 'IP-CIDR6,' : 'IP-CIDR,') + x + ',' + tg + ',no-resolve');
 	for (let x in ranges(m.port ?? m.ports))
 		push(R, 'DST-PORT,' + (x[0] == x[1] ? x[0] : x[0] + '-' + x[1]) + ',' + tg);
 	return R;
@@ -1339,6 +1353,19 @@ function mh_dns(addr, via) {
 	let u = a.sch == 'udp' ? hp : (a.sch == 'https' ? 'https://' + hp + (a.path || '/dns-query') : a.sch + '://' + hp);
 	if (via && !a.local) u += '#proxy';
 	return u;
+}
+
+// Cihaz kuralları (nft() ile aynı mantık): VPN / direkt / engelli
+function devices() {
+	let dev = { vpn: { mac: [], ip: [] }, direct: { mac: [], ip: [] }, block: { mac: [], ip: [] } };
+	for (let d in of('device')) {
+		let m = d.mode;
+		if (m != 'vpn' && m != 'direct' && m != 'block') continue;
+		if (DIRECT_DEAD && m == 'direct') m = 'vpn';
+		if (d.mac && match(d.mac, /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/)) push(dev[m].mac, lc(d.mac));
+		for (let x in L(d.ip)) if (is_v4(x)) push(dev[m].ip, x);
+	}
+	return dev;
 }
 
 function mihomo() {
@@ -1360,7 +1387,8 @@ function mihomo() {
 	push(proxies, { name: 'dns-out', type: 'dns' });
 
 	let lis = [];
-	if (CAPTURE == 'tproxy') {
+	if (NATIVE) { }
+	else if (CAPTURE == 'tproxy') {
 		push(lis, { name: 'lan-in', type: 'tproxy', listen: '0.0.0.0', port: tp_port, udp: false });
 		push(lis, { name: 'lan-in-udp', type: 'tproxy', listen: '0.0.0.0', port: tp_port + 1, udp: true });
 	} else
@@ -1378,12 +1406,24 @@ function mihomo() {
 			push(R, r);
 	if (PUSH_FIX)
 		for (let r in mh_match({ domain: PUSH_DOMAINS, port: PUSH_PORTS }, 'direct')) push(R, r);
-	if (on(opt('ad_block'), false)) cwarn('reklam engelleme (geosite) bu çekirdekte yok, atlandı');
+	if (on(opt('ad_block'), false)) {
+		if (GEO) push(R, 'GEOSITE,category-ads-all,REJECT');
+		else cwarn('reklam engelleme için geosite listesi yok (kediray update-geo), atlandı');
+	}
 	for (let r0 in RULES)
 		for (let r in mh_match({ domain: r0.domain, ip: r0.ip, port: r0.port }, r0.target || 'proxy'))
 			push(R, r);
 	for (let c in BYPASS4) push(R, 'IP-CIDR,' + c + ',DIRECT,no-resolve');
 	push(R, 'MATCH,' + (MODE == 'list' ? 'DIRECT' : 'proxy'));
+	// Yerel mod: kaynak IP'ye göre cihaz kuralları en başa (MAC'e göre olanlar TUN'un kendi listesinde)
+	let DV = devices(), defdev = DIRECT_DEAD ? 'vpn' : opt('default_device', 'vpn');
+	if (NATIVE) {
+		let pre = [];
+		for (let x in DV.direct.ip) push(pre, 'SRC-IP-CIDR,' + x + (index(x, '/') >= 0 ? '' : '/32') + ',DIRECT,no-resolve');
+		if (defdev == 'direct' && length(DV.vpn.ip))
+			cwarn('varsayılan cihaz "direkt" iken yalnızca IP ile tanımlı VPN cihazları yerel modda desteklenmez (MAC kullanın)');
+		R = [...pre, ...R];
+	}
 
 	// --- DNS ---
 	let remote = opt('dns_remote', 'https://1.1.1.1/dns-query');
@@ -1402,7 +1442,7 @@ function mihomo() {
 			if (!m) { pol['+.' + d] = srv; continue; }
 			if (m[1] == 'domain') pol['+.' + m[2]] = srv;
 			else if (m[1] == 'full') pol[m[2]] = srv;
-			else if (m[1] == 'keyword') pol['*' + m[2] + '*'] = srv;
+			else if (m[1] == 'keyword') cwarn('anahtar sözcük DNS yönlendirmesi mihomo ile yok, atlandı: ' + d);
 		}
 	};
 	pdom = filter(uniq(pdom), x => index(TDOMS, x) < 0);
@@ -1434,6 +1474,19 @@ function mihomo() {
 		rules: R
 	};
 	if (KA > 0) { cfg['keep-alive-interval'] = 15; cfg['keep-alive-idle'] = KA; }
+	if (GEO) { cfg['geodata-mode'] = true; cfg['geo-auto-update'] = false; }
+	if (NATIVE) {
+		// mihomo'nun kendi TUN'u: yönlendirme ve nftables yönlendirmesini mihomo kurar (auto-route + auto-redirect)
+		let ifs = L(getenv('KR_LAN_IFS') || 'br-lan');
+		let t = { enable: true, stack: opt('mihomo_stack', 'gvisor'), device: getenv('KR_TUN') || 'kediray0',
+			'auto-route': true, 'auto-redirect': true, 'auto-detect-interface': true, 'strict-route': false,
+			'dns-hijack': ['any:53', 'tcp://any:53'], mtu: num(opt('tun_mtu'), 1500),
+			'include-interface': ifs, 'route-exclude-address': BYPASS4 };
+		// Cihaz listesi MAC ile: varsayılan VPN ise direkt/engelli cihazlar dışarıda; varsayılan direkt ise yalnız VPN cihazları içeride
+		if (defdev == 'direct') t['include-mac-address'] = length(DV.vpn.mac) ? DV.vpn.mac : ['00:00:00:00:00:00'];
+		else if (length(DV.direct.mac) + length(DV.block.mac)) t['exclude-mac-address'] = [...DV.direct.mac, ...DV.block.mac];
+		cfg.tun = t;
+	}
 	if (DNS_ON && length(ns)) {
 		cfg.dns = {
 			enable: true, listen: '0.0.0.0:' + dns_port, ipv6: on(opt('ipv6'), false), 'enhanced-mode': 'normal',

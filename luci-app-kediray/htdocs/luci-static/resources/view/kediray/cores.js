@@ -171,7 +171,7 @@ const KIND = { kediray: 'KediRay klasörü', system: 'Sistem paketi' };
 const NOTES = {
 	'xray': 'Varsayılan çekirdek. En çok özellik bunda: WARP, TLS parçalama, reklam engelleme, ECH, sertifika sabitleme, xhttp.',
 	'sing-box': 'Etkin yapılırsa VPN sing-box ile çalışır. xhttp aktarımı, WARP, TLS parçalama, reklam/geosite listeleri ve sertifika sabitleme yok; bu sunucular/özellikler atlanır. Modemin paket deposundan kurulur (apk ya da opkg). Paketin kendi servisi kapalı tutulur.',
-	'mihomo': 'Etkin yapılırsa VPN mihomo ile çalışır. xhttp, WARP, TLS parçalama, reklam/geosite listeleri yok. GitHub\'daki MetaCubeX/mihomo son sürümünden indirilir (arm64 ve armv7). İndirme sağlama toplamıyla doğrulanmaz; güvenmiyorsan kendin indirip "Dosya yükle…" ile yükle.'
+	'mihomo': 'Etkin yapılırsa VPN mihomo ile çalışır. xhttp, WARP ve TLS parçalama yok. Reklam engelleme ve geosite/geoip kuralları için önce kediray update-geo ile listeleri indir. İstersen "Yerel mod" ile mihomo kendi TUN\'unu kullanır. GitHub\'daki MetaCubeX/mihomo son sürümünden indirilir (arm64 ve armv7). İndirme sağlama toplamıyla doğrulanmaz; güvenmiyorsan kendin indirip "Dosya yükle…" ile yükle.'
 };
 
 return view.extend({
@@ -223,6 +223,13 @@ return view.extend({
 		return this.runJob(['use', c.id], c.name + ' etkinleştiriliyor…');
 	},
 
+	doNative(c) {
+		if (!window.confirm(c.native
+			? 'mihomo yerel modu kapatılsın mı? VPN, KediRay\'in kendi yakalama katmanına (nft + hev) döner ve birkaç saniye yeniden başlar.'
+			: 'mihomo yerel mod açılsın mı? mihomo kendi TUN\'unu, yönlendirmesini ve DNS yakalamasını kullanır; KediRay\'in nft/hev yakalaması kapanır. VPN birkaç saniye yeniden başlar; başlamazsa eski ayara dönülür.')) return;
+		return this.runJob(['native', c.native ? 'off' : 'on'], 'mihomo yerel mod…');
+	},
+
 	doRemove(c) {
 		if (!window.confirm(c.name + ' kaldırılsın mı?')) return;
 		return this.runJob(['remove', c.id], c.name + ' kaldırılıyor…');
@@ -233,6 +240,8 @@ return view.extend({
 		const acts = [];
 		if (c.installed && !c.used)
 			acts.push(h('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, () => this.doUse(c)) }, 'Etkin yap'));
+		if (c.id === 'mihomo' && c.installed && c.used)
+			acts.push(h('button', { 'class': 'btn cbi-button' + (c.native ? '' : ' cbi-button-action'), 'click': ui.createHandlerFn(this, () => this.doNative(c)) }, c.native ? 'Yerel modu kapat' : 'Yerel modu aç'));
 		if (c.id !== 'xray') {
 			if (!c.installed) acts.push(h('button', { 'class': 'btn cbi-button cbi-button-positive', 'click': ui.createHandlerFn(this, () => this.doInstall(c)) }, 'Çekirdeği kur'));
 			acts.push(h('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, ev => this.doUpload(c, ev)) }, 'Dosya yükle…'));
@@ -242,7 +251,8 @@ return view.extend({
 			h('div', { 'class': 'kc-head' }, [
 				h('h4', { 'class': 'kc-name' }, c.name),
 				h('span', { 'class': 'kc-badge' + (c.installed ? ' on' : '') }, c.installed ? 'Kurulu' : 'Kurulu değil'),
-				c.used ? h('span', { 'class': 'kc-badge act' }, 'Etkin') : ''
+				c.used ? h('span', { 'class': 'kc-badge act' }, 'Etkin') : '',
+				(c.id === 'mihomo' && c.used && c.native) ? h('span', { 'class': 'kc-badge act' }, 'Yerel mod') : ''
 			]),
 			h('div', { 'class': 'kc-rows' }, [
 				h('span', { 'class': 'kc-k' }, 'Tür'), h('span', { 'class': 'kc-v' }, kind),
