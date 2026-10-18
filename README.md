@@ -13,7 +13,7 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 - Xray tabanlı VPN, birden fazla sunucu (düğüm), en iyi sunucuyu otomatik seçme
 - **Bağlantıyı kes:** sunucudan ayrıl, VPN açık kalsın, trafik doğrudan çıksın
 - **VPN Ayırma:** uygulama bazında yol seçimi (VPN, doğrudan, WARP, parçalama)
-- Trafik sayfası: bugün / bu hafta / bu ay kullanımı, kartları gizle ve sırala
+- Trafik sayfası: bugün / bu hafta / bu ay kullanımı, kartları gizle ve sırala. VPN'siz, sade karşılığı ayrı bir uygulama olarak da var: [KediStat](https://github.com/sabanvurgun03-ui/kedistat)
 - Bant sekmesi: modem bant taraması ve akıllı bant seçimi (QModem gerekir)
 - Görünüm: açık/koyu ve renk temaları
 - **Yedekle / geri yükle:** sunucular, uygulama kuralları ve ayarlar tek dosyada (modemi sıfırlayınca geri getir)
@@ -107,7 +107,7 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 - Xray-based VPN with multiple servers (nodes) and automatic best-server selection
 - **Disconnect:** leave the server but keep the VPN on, traffic goes out directly
 - **Split routing:** per-app route (VPN, direct, WARP, fragmentation)
-- Traffic page: today / this week / this month usage, hide and reorder cards
+- Traffic page: today / this week / this month usage, hide and reorder cards. A plain, VPN-free version is also available as a separate app: [KediStat](https://github.com/sabanvurgun03-ui/kedistat)
 - Band tab: modem band scan and smart band selection (needs QModem)
 - Appearance: light/dark and color themes
 - **Backup / restore:** servers, app rules and settings in one file (bring them back after a router reset)
