@@ -1091,7 +1091,13 @@ own_gen() {
 	f=$(own_path "$core") || {
 		echo "$core için seçili yapılandırma dosyası yok (Çekirdek ayarı sayfasından dosya ekleyip seçin)" > "$RUN/last_error"
 		sayerr "$(cat "$RUN/last_error")"; return 1; }
-	cp "$f" "$RUN/config.new.json" || return 1
+	# Eski KediRay şablonlarında route-exclude-address içinde 240.0.0.0/4 vardı: gerçek çekirdekte nftables "file exists" verip
+	# TUN'u açtırmıyordu (internet gidiyordu). Dosyanız değişmez; çalıştırılan kopyadan o satır çıkarılır.
+	if [ "$core" = mihomo ]; then
+		awk '/^[ \t]+route-exclude-address:/ { b = 1; print; next } b && /^[ \t]*-.*240\.0\.0\.0\/4/ { next } b && !/^[ \t]*-/ { b = 0 } { print }' "$f" > "$RUN/config.new.json" || return 1
+	else
+		cp "$f" "$RUN/config.new.json" || return 1
+	fi
 	if ! core_test "$core" "$RUN/config.new.json" > "$RUN/test.log" 2>&1; then
 		{ echo "$(engine_name) yapılandırma testi başarısız ($(basename "$f")):"; grep -iE 'fail|error|invalid|fatal' "$RUN/test.log" | tail -n 3; } > "$RUN/last_error"
 		sayerr "$(head -n1 "$RUN/last_error")"; rm -f "$RUN/config.new.json"; return 1
