@@ -7,4 +7,6 @@ compatibility_date = "2025-01-01"
 binding = "STATS"
 id = "BURAYA_KV_ID"
 
-# Yönetici şifresi: `npx wrangler secret put ADMIN_TOKEN`
+# Ana yönetici: `npx wrangler secret put ADMIN_USER` (kullanıcı adı) ve `npx wrangler secret put ADMIN_TOKEN` (şifre)
+# "Şifremi unuttum" için (isteğe bağlı): `npx wrangler secret put RESEND_API_KEY` ve `npx wrangler secret put RESET_EMAIL`
+# Sıfırlama bağlantısı için özel adres istersen: [vars] altında SITE_URL = "https://..."
