@@ -280,12 +280,12 @@ return view.extend({
 	},
 
 	/* GitHub yıldız ve indirme sayısı: modem GitHub API'sinden okur (6 saat önbellekli); ulaşılamazsa "—" gösterir */
-	showRepoStats() {
+	showRepoStats(refresh) {
 		const st = document.getElementById('ka-gh-stars'), dl = document.getElementById('ka-gh-dl');
 		if (!st || !dl) return Promise.resolve();
 		const sa = document.getElementById('ka-gh-stars-a') || st, da = document.getElementById('ka-gh-dl-a') || dl;
 		const none = why => { st.textContent = '—'; dl.textContent = '—'; sa.title = da.title = why; };
-		return fs.exec(CLI, ['repostats', '--json']).then(r => {
+		return fs.exec(CLI, refresh ? ['repostats', '--json', 'refresh'] : ['repostats', '--json']).then(r => {
 			let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
 			if (!j || !j.ok) return none('GitHub\'a ulaşılamadı');
 			const d = new Date(j.ts * 1000), p = n => String(n).padStart(2, '0');
@@ -352,6 +352,7 @@ return view.extend({
 			let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
 			if (!msg) return;
 			this.setLast(j);
+			this.showRepoStats(true);   // denetlerken yıldız/indirme sayıları da tazelenir
 			if (!j || !j.ok) msg.textContent = 'Denetlenemedi: ' + ((j && j.error) || 'GitHub\'a ulaşılamadı') + '.';
 			else if (j.newer) { updMsg(msg, 'new', j.rev ? 'Aynı sürümde (' + j.current + ') depoda yeni değişiklikler var.' : 'Yeni sürüm var: ' + j.current + ' → ' + j.latest); if (go) go.style.display = ''; }
 			else updMsg(msg, 'ok', 'Güncelsin (' + j.current + ')');

@@ -619,7 +619,7 @@ cmd_update() { # check [--json] | install | auto | cached
 # Sonuç RAM'de 6 saat saklanır; GitHub'a ulaşılamazsa son değer "stale" olarak döner. sha256sums ve tar.gz sayılmaz:
 # her güncelleme denetimi sha256sums'ı indirir, o sayıyı şişirirdi.
 GHS_CACHE=/tmp/kediray.ghstats    # "epoch|yıldız|indirme|release sayısı|depo"
-GHS_TTL=21600
+GHS_TTL=3600
 GHS_ASSET="kediray-install.sh"
 ghget() { # <url> -> gövdeyi yazar (VPN çalışıyorsa önce tünelden)
 	running && curl -fsSL --noproxy '' -m 6 -A "v2rayNG/1.10" -x "socks5h://127.0.0.1:$(uget main.socks_port || echo 1080)" "$1" 2>/dev/null && return 0
