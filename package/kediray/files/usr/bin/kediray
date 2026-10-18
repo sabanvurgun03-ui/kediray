@@ -58,14 +58,20 @@ core_ver() {
 engine() { # → etkin çekirdeğin adı
 	case "$(uget main.core)" in sing-box) echo sing-box ;; mihomo) echo mihomo ;; *) echo xray ;; esac
 }
+OWN_DIR=/etc/kediray/own
+OWN_UP=/tmp/kediray-own-upload
+own_on() { [ "$(engine)" != xray ] && [ "$(uget main.own_config)" = 1 ]; }   # "Kendi yapılandırmam" modu
+# çekirdek hazır mı: kendi yapılandırmada KediRay'in API'si yok, yalnızca çalışıp çalışmadığına bakılır
+core_ready() { running || return 1; own_on && return 0; port_open "$(uget main.api_port || echo 10085)"; }
 engine_name() { case "$(engine)" in sing-box) echo sing-box ;; mihomo) echo mihomo ;; *) echo Xray ;; esac; }
 enginebin() { core_find "$(engine)"; }
 engine_ver() { local e b; e=$(engine); b=$(core_find "$e") || return 1; core_ver_of "$e" "$b"; }
 engine_gen() { case "$(engine)" in sing-box) echo singbox ;; mihomo) echo mihomo ;; *) echo xray ;; esac; }   # gen.uc komutu
 engine_gen_test() { case "$(engine)" in sing-box) echo singbox-test ;; mihomo) echo mihomo-test ;; *) echo test ;; esac; }
 geo_ok() { local d; d=$(assetdir); [ -s "$d/geoip.dat" ] && [ -s "$d/geosite.dat" ]; }
-mh_prep() { # <dizin> → mihomo ev dizini; geo dosyaları bağlanır
-	mkdir -p "$1"
+mh_prep() { # <dizin> → mihomo ev dizini; geo dosyaları ve provider klasörleri bağlanır
+	mkdir -p "$1" "$OWN_DIR/mihomo/proxy_provider" "$OWN_DIR/mihomo/rule_provider"
+	ln -sfn "$OWN_DIR/mihomo/proxy_provider" "$1/proxy_provider"; ln -sfn "$OWN_DIR/mihomo/rule_provider" "$1/rule_provider"
 	if geo_ok; then
 		ln -sf "$(assetdir)/geoip.dat" "$1/GeoIP.dat"; ln -sf "$(assetdir)/geosite.dat" "$1/GeoSite.dat"
 	else
@@ -80,14 +86,15 @@ engine_run() { # <yapılandırma> → çekirdeği önde çalıştırır (ping i�
 		*) XRAY_LOCATION_ASSET="$(assetdir)" "$b" run -c "$1" ;;
 	esac
 }
-engine_test() { # <yapılandırma> → 0: geçerli
-	local b; b=$(enginebin) || return 1
-	case "$(engine)" in
-		sing-box) mkdir -p "$RUN/sbtest"; "$b" check -c "$1" -D "$RUN/sbtest" ;;
-		mihomo) mh_prep "$RUN/mhtest"; "$b" -t -d "$RUN/mhtest" -f "$1" ;;
-		*) xr run -test -c "$1" ;;
+core_test() { # <çekirdek> <yapılandırma> → 0: geçerli
+	local b; b=$(core_find "$1") || return 1
+	case "$1" in
+		sing-box) mkdir -p "$RUN/sbtest"; "$b" check -c "$2" -D "$RUN/sbtest" ;;
+		mihomo) mh_prep "$RUN/mhtest"; "$b" -t -d "$RUN/mhtest" -f "$2" ;;
+		*) xr run -test -c "$2" ;;
 	esac
 }
+engine_test() { core_test "$(engine)" "$1"; }
 # Canlı sunucu seçimi (sing-box clash_api / mihomo REST): PUT /proxies/proxy
 engine_api_select() { # <etiket>
 	curl -s -m 4 --noproxy '' -o /dev/null -w '%{http_code}' -X PUT -H 'Content-Type: application/json' \
@@ -190,6 +197,7 @@ hevbin() {
 capture_eff() {
 	local c
 	c=$(uget main.capture); c=${c:-mixed}
+	own_on && { echo own; return 0; }
 	# mihomo yerel mod: yakalamayı mihomo'nun kendi TUN'u yapar (hev ve KediRay nft yakalaması kullanılmaz)
 	[ "$(engine)" = mihomo ] && [ "$(uget main.mihomo_native)" = 1 ] && { echo native; return 0; }
 	case "$c" in mixed|tun)
@@ -947,7 +955,7 @@ cmd_core_use() { # <xray|sing-box|mihomo>  etkin çekirdeği değiştirir
 		/etc/init.d/kediray restart >/dev/null 2>&1
 		i=0; ok=0
 		while [ $i -lt 40 ]; do
-			if running && port_open "$(tp_port)" && port_open "$(uget main.api_port || echo 10085)"; then ok=1; break; fi
+			if core_ready; then ok=1; break; fi
 			i=$((i + 1)); sleep 0.5 2>/dev/null || sleep 1
 		done
 		if [ $ok = 0 ]; then
@@ -977,7 +985,7 @@ cmd_core_native() { # on|off  — mihomo yerel mod (kendi TUN'u ve DNS yönlendi
 	/etc/init.d/kediray restart >/dev/null 2>&1
 	i=0; ok=0
 	while [ $i -lt 40 ]; do
-		if running && port_open "$(uget main.api_port || echo 10085)"; then ok=1; break; fi
+		if core_ready; then ok=1; break; fi
 		i=$((i + 1)); sleep 0.5 2>/dev/null || sleep 1
 	done
 	if [ $ok = 0 ]; then
@@ -988,6 +996,200 @@ cmd_core_native() { # on|off  — mihomo yerel mod (kendi TUN'u ve DNS yönlendi
 		return 1
 	fi
 	return 0
+}
+
+# ---------- Kendi yapılandırmam (Neko tarzı): çekirdeğin kendi YAML/JSON dosyası ----------
+# mihomo için Clash YAML, sing-box için JSON. KediRay yalnızca seçili dosyayı doğrular, çekirdeği başlatır ve (dosyadaki
+# TUN ya da redirect girişine göre) yakalamayı ayarlar. Sunucu/uygulama/cihaz ayarları bu modda KullanılMAZ.
+own_core_ok() { case "$1" in mihomo|sing-box) return 0 ;; *) echo "çekirdek mihomo ya da sing-box olmalı" >&2; return 1 ;; esac; }
+own_name_ok() { # <çekirdek> <ad>
+	case "$2" in ''|.*|*/*|*[!A-Za-z0-9._-]*) return 1 ;; esac
+	case "$1:$2" in mihomo:*.yaml|mihomo:*.yml|sing-box:*.json) return 0 ;; esac
+	return 1
+}
+own_sel() { uget "main.own_cfg_$(echo "$1" | tr -d '-')"; }
+own_path() { local n; n=$(own_sel "$1"); [ -n "$n" ] && [ -f "$OWN_DIR/$1/$n" ] && echo "$OWN_DIR/$1/$n"; }
+
+# Dosyadan yakalama türünü ve API bilgisini oku: OWN_TYPE (tun|redir|none), OWN_VAL, OWN_API (host:port), OWN_SECRET
+own_probe() { # <çekirdek> <dosya>
+	local core="$1" f="$2" v
+	OWN_TYPE=none; OWN_VAL=""; OWN_API=""; OWN_SECRET=""
+	if [ "$core" = mihomo ]; then
+		if awk '/^tun:/{t=1;next} t&&/^[^ \t#]/{t=0} t&&/^[ \t]+enable:[ \t]*true/{f=1} END{exit !f}' "$f" 2>/dev/null; then
+			OWN_TYPE=tun
+			OWN_VAL=$(awk '/^tun:/{t=1;next} t&&/^[^ \t#]/{t=0} t&&/^[ \t]+device:/{gsub(/^[ \t]+device:[ \t]*|["\x27 \t\r]/,"");print;exit}' "$f")
+		else
+			v=$(awk -F: '/^redir-port:/{gsub(/[ \t\r]/,"",$2);print $2;exit}' "$f" 2>/dev/null)
+			[ -n "$v" ] && [ "$v" != 0 ] && { OWN_TYPE=redir; OWN_VAL="$v"; }
+		fi
+		OWN_API=$(awk '/^external-controller:/{sub(/^external-controller:[ \t]*/,"");gsub(/["\x27 \t\r]/,"");print;exit}' "$f" 2>/dev/null)
+		OWN_SECRET=$(awk '/^secret:/{sub(/^secret:[ \t]*/,"");gsub(/["\x27\r]/,"");print;exit}' "$f" 2>/dev/null)
+	else
+		if [ -n "$(jsonfilter -i "$f" -e '@.inbounds[@.type="tun"].type' 2>/dev/null)" ]; then
+			OWN_TYPE=tun; OWN_VAL=$(jsonfilter -i "$f" -e '@.inbounds[@.type="tun"].interface_name' 2>/dev/null)
+		else
+			v=$(jsonfilter -i "$f" -e '@.inbounds[@.type="redirect"].listen_port' 2>/dev/null | head -n1)
+			[ -n "$v" ] && { OWN_TYPE=redir; OWN_VAL="$v"; }
+		fi
+		OWN_API=$(jsonfilter -i "$f" -e '@.experimental.clash_api.external_controller' 2>/dev/null)
+		OWN_SECRET=$(jsonfilter -i "$f" -e '@.experimental.clash_api.secret' 2>/dev/null)
+	fi
+	case "$OWN_API" in :*) OWN_API="127.0.0.1$OWN_API" ;; 0.0.0.0:*) OWN_API="127.0.0.1:${OWN_API#0.0.0.0:}" ;; esac
+	return 0
+}
+
+# Kendi yapılandırmadan çalıştırma hazırlığı (cmd_gen yerine)
+own_gen() {
+	local core f
+	core=$(engine)
+	f=$(own_path "$core") || {
+		echo "$core için seçili yapılandırma dosyası yok (Çekirdek ayarı sayfasından dosya ekleyip seçin)" > "$RUN/last_error"
+		sayerr "$(cat "$RUN/last_error")"; return 1; }
+	cp "$f" "$RUN/config.new.json" || return 1
+	if ! core_test "$core" "$RUN/config.new.json" > "$RUN/test.log" 2>&1; then
+		{ echo "$(engine_name) yapılandırma testi başarısız ($(basename "$f")):"; grep -iE 'fail|error|invalid|fatal' "$RUN/test.log" | tail -n 3; } > "$RUN/last_error"
+		sayerr "$(head -n1 "$RUN/last_error")"; rm -f "$RUN/config.new.json"; return 1
+	fi
+	mv "$RUN/config.new.json" "$RUN/config.json"
+	own_probe "$core" "$RUN/config.json"
+	echo "$OWN_TYPE:$OWN_VAL" > "$RUN/own.type"
+	[ "$OWN_TYPE" = none ] && say "uyarı: yapılandırmada TUN ya da redirect girişi yok; trafik yakalanmaz (yalnızca yerel portlar çalışır)"
+	export KR_CAPTURE=own KR_OWN_REDIR="$([ "$OWN_TYPE" = redir ] && echo "$OWN_VAL")" KR_LAN_IFS="$(lan_ifs)" KR_MARK_CORE="$MARK_CORE"
+	ucode "$SHARE/gen.uc" nft > "$RUN/rules.nft" || return 1
+	: > "$RUN/dnsmasq.conf"; : > "$RUN/hev.yaml"
+	rm -f "$RUN/last_error"
+	return 0
+}
+
+cmd_own_list() { # <çekirdek>  JSON
+	local core="$1" d first=1 f n sz sel
+	own_core_ok "$core" || return 1
+	d="$OWN_DIR/$core"; sel=$(own_sel "$core")
+	printf '{"core":"%s","enabled":%s,"active":%s,"selected":"%s","files":[' "$core" \
+		"$([ "$(uget main.own_config)" = 1 ] && echo true || echo false)" "$({ own_on && [ "$(engine)" = "$core" ]; } && echo true || echo false)" "$sel"
+	for f in "$d"/*; do
+		[ -f "$f" ] || continue
+		n=$(basename "$f"); own_name_ok "$core" "$n" || continue
+		sz=$(wc -c < "$f" | tr -d ' ')
+		[ $first = 1 ] || printf ','
+		first=0
+		printf '{"name":"%s","size":%s}' "$n" "$sz"
+	done
+	printf ']}\n'
+}
+cmd_own_get() { # <çekirdek> <ad>
+	own_core_ok "$1" || return 1; own_name_ok "$1" "$2" || { echo "geçersiz dosya adı" >&2; return 1; }
+	cat "$OWN_DIR/$1/$2"
+}
+cmd_own_put() { # <çekirdek> <ad>  (içerik: /tmp/kediray-own-upload)
+	own_core_ok "$1" || return 1
+	own_name_ok "$1" "$2" || { echo "geçersiz dosya adı (mihomo: .yaml/.yml · sing-box: .json; harf, rakam, . _ -)" >&2; return 1; }
+	[ -f "$OWN_UP" ] || { echo "yüklenen içerik yok" >&2; return 1; }
+	[ "$(wc -c < "$OWN_UP")" -le 1048576 ] || { echo "dosya 1 MB'tan büyük" >&2; return 1; }
+	mkdir -p "$OWN_DIR/$1"
+	mv -f "$OWN_UP" "$OWN_DIR/$1/$2" && echo "kaydedildi: $2"
+}
+cmd_own_del() { # <çekirdek> <ad>
+	local core="$1" name="$2"
+	own_core_ok "$core" || return 1; own_name_ok "$core" "$name" || { echo "geçersiz dosya adı" >&2; return 1; }
+	{ own_on && [ "$(engine)" = "$core" ] && [ "$(own_sel "$core")" = "$name" ]; } && { echo "bu dosya şu an çalışıyor; önce başka dosya seçin ya da modu kapatın" >&2; return 1; }
+	rm -f "${OWN_DIR:?}/${core:?}/${name:?}"
+	[ "$(own_sel "$core")" = "$name" ] && { uci -q delete "$CONF.main.own_cfg_$(echo "$core" | tr -d '-')"; uci commit "$CONF"; }
+	echo "silindi: $name"
+}
+cmd_own_select() { # <çekirdek> <ad>
+	own_core_ok "$1" || return 1; own_name_ok "$1" "$2" || { echo "geçersiz dosya adı" >&2; return 1; }
+	[ -f "$OWN_DIR/$1/$2" ] || { echo "böyle bir dosya yok: $2" >&2; return 1; }
+	uci set "$CONF.main.own_cfg_$(echo "$1" | tr -d '-')=$2" && uci commit "$CONF"
+	echo "seçildi: $2"
+}
+cmd_own_check() { # <çekirdek> <ad>
+	own_core_ok "$1" || return 1; own_name_ok "$1" "$2" || { echo "geçersiz dosya adı" >&2; return 1; }
+	core_find "$1" >/dev/null || { echo "$1 kurulu değil" >&2; return 1; }
+	mkdir -p "$RUN"
+	if core_test "$1" "$OWN_DIR/$1/$2" > "$RUN/own.check" 2>&1; then
+		own_probe "$1" "$OWN_DIR/$1/$2"
+		echo "Geçerli. Yakalama: ${OWN_TYPE}${OWN_VAL:+ ($OWN_VAL)} · API: ${OWN_API:-yok}"
+		[ "$OWN_TYPE" = none ] && echo "Uyarı: TUN ya da redirect girişi yok; trafik yakalanmaz."
+		return 0
+	fi
+	grep -v '^$' "$RUN/own.check" | tail -n 8
+	return 1
+}
+# Sunucu listesinden başlangıç yapılandırması üret (sonra elle düzenlenir)
+cmd_own_template() { # <çekirdek> <ad>
+	local core="$1" name="$2" what cap=native out
+	own_core_ok "$core" || return 1; own_name_ok "$core" "$name" || { echo "geçersiz dosya adı" >&2; return 1; }
+	[ -e "$OWN_DIR/$core/$name" ] && { echo "$name zaten var; başka ad seçin" >&2; return 1; }
+	mkdir -p "$OWN_DIR/$core" "$RUN"
+	export KR_WAN_DNS="$(wan_dns)" KR_LAN_IFS="$(lan_ifs)" KR_MARK_CORE="$MARK_CORE" KR_TUN="$TUN_DEV"
+	if [ "$core" = mihomo ]; then what=mihomo-yaml; else what=singbox; cap=redirect; fi
+	if [ "$core" = mihomo ] && geo_ok; then export KR_GEO=1; else export KR_GEO=0; fi
+	out="$RUN/own.template.$$"
+	if ! KR_CAPTURE=$cap KR_RESOLVE="$(cat "$RUN/resolve" 2>/dev/null)" ucode "$SHARE/gen.uc" "$what" > "$out" 2>"$RUN/gen.err"; then
+		cat "$RUN/gen.err" >&2; return 1
+	fi
+	mv "$out" "$OWN_DIR/$core/$name"
+	echo "oluşturuldu: $name (KediRay sunucu listesinden; düzenleyip seçebilirsiniz)"
+}
+# Çekirdeğin kendi API'si: grup listesi, mod ve seçim
+own_api() { # <GET|PUT|PATCH> <yol> [gövde]
+	local f auth=""
+	f=$(own_path "$(engine)") || return 1
+	own_probe "$(engine)" "$f"
+	[ -n "$OWN_API" ] || return 1
+	[ -n "$OWN_SECRET" ] && auth="Authorization: Bearer $OWN_SECRET"
+	if [ -n "$3" ]; then curl -s -m 5 --noproxy '' -X "$1" -H 'Content-Type: application/json' ${auth:+-H "$auth"} -d "$3" -w '%{http_code}' "http://$OWN_API$2"
+	else curl -s -m 5 --noproxy '' -X "$1" ${auth:+-H "$auth"} "http://$OWN_API$2"; fi
+}
+cmd_own_api() { # groups | mode <rule|global|direct> | select <grup> <ad>
+	own_on || { echo "kendi yapılandırma modu kapalı" >&2; return 1; }
+	case "$1" in
+		groups) own_api GET /proxies ;;
+		mode) case "$2" in rule|global|direct) own_api PATCH /configs "{\"mode\":\"$2\"}" >/dev/null; echo "mod: $2" ;; *) echo "rule|global|direct" >&2; return 1 ;; esac ;;
+		select) case "$2$3" in *[\"\\/]*|'') echo "geçersiz ad" >&2; return 1 ;; esac
+			own_api PUT "/proxies/$(printf '%s' "$2" | sed 's/ /%20/g')" "{\"name\":\"$3\"}" | grep -q '204$' && echo "seçildi: $2 → $3" || { echo "seçilemedi" >&2; return 1; } ;;
+		mode-get) own_api GET /configs | jsonfilter -e '@.mode' 2>/dev/null ;;
+		*) echo "kullanım: kediray own-api groups|mode <m>|select <grup> <ad>" >&2; return 1 ;;
+	esac
+}
+cmd_own_apply() { # <çekirdek>  seçili dosyayla yeniden başlat
+	own_core_ok "$1" || return 1
+	{ [ "$(engine)" = "$1" ] && own_on; } || { echo "kendi yapılandırma modu $1 için açık değil; önce modu açın" >&2; return 1; }
+	if restart_check; then echo "yeniden başlatıldı"; return 0; fi
+	echo "çekirdek başlamadı: $(sed -n '1,3p' "$RUN/last_error" 2>/dev/null | tr '\n' ' ')" >&2
+	return 1
+}
+restart_check() { # VPN'i yeniden başlat; hazır olunca 0
+	local i=0
+	/etc/init.d/kediray restart >/dev/null 2>&1
+	while [ $i -lt 40 ]; do
+		core_ready && return 0
+		i=$((i + 1)); sleep 0.5 2>/dev/null || sleep 1
+	done
+	return 1
+}
+cmd_core_own() { # on|off  — kendi yapılandırma modu
+	local v prev core
+	case "$1" in on) v=1 ;; off) v=0 ;; *) echo "kullanım: kediray core-own on|off" >&2; return 1 ;; esac
+	core=$(engine)
+	if [ "$v" = 1 ]; then
+		[ "$core" != xray ] || { echo "kendi yapılandırma modu için önce mihomo ya da sing-box'u etkin yapın (kediray core-use)" >&2; return 1; }
+		own_path "$core" >/dev/null || { echo "$core için yapılandırma dosyası seçilmemiş" >&2; return 1; }
+		cmd_own_check "$core" "$(own_sel "$core")" >/dev/null || { echo "seçili dosya geçersiz; önce düzeltin (kediray own-check $core $(own_sel "$core"))" >&2; return 1; }
+	fi
+	prev=$(uget main.own_config); prev=${prev:-0}
+	[ "$prev" = "$v" ] && { echo "kendi yapılandırma modu zaten $1"; return 0; }
+	uci set "$CONF.main.own_config=$v" && uci commit "$CONF"
+	rm -f /etc/kediray.tested
+	echo "kendi yapılandırma modu: $1"
+	[ "$(uget main.enabled)" = 1 ] || return 0
+	restart_check && return 0
+	sayerr "kendi yapılandırma başlamadı, eski ayara dönülüyor: $(sed -n '1,3p' "$RUN/last_error" 2>/dev/null | tr '\n' ' ')"
+	uci set "$CONF.main.own_config=$prev" && uci commit "$CONF"
+	rm -f /etc/kediray.tested
+	/etc/init.d/kediray restart >/dev/null 2>&1
+	return 1
 }
 
 cmd_core_remove() { # <sing-box|mihomo>
@@ -1012,7 +1214,7 @@ cmd_core_remove() { # <sing-box|mihomo>
 }
 
 cmd_core_bg() { # install|remove <ad> [dosya] — arka planda çalıştırır (panel isteği zaman aşımına uğramasın)
-	case "$1" in install|remove|use|native) ;; *) echo "install|remove|use|native olmalı" >&2; return 1 ;; esac
+	case "$1" in install|remove|use|native|own) ;; *) echo "install|remove|use|native|own olmalı" >&2; return 1 ;; esac
 	case "$2" in ''|*[!a-z0-9-]*) echo "geçersiz ad" >&2; return 1 ;; esac
 	case "$3" in ''|"$CORE_UP") ;; *) echo "geçersiz dosya" >&2; return 1 ;; esac
 	rm -f "$CORE_RC"
@@ -1187,6 +1389,7 @@ cmd_gen() {
 	mkdir -p "$RUN"
 	cap=$(capture_eff)
 	echo "$cap" > "$RUN/capture"
+	if [ "$cap" = own ]; then own_gen; return $?; fi
 	export KR_WAN_DNS="$(wan_dns)"
 	export KR_LAN_IFS="$(lan_ifs)"
 	if [ "$(engine)" = mihomo ] && geo_ok; then export KR_GEO=1; else export KR_GEO=0; fi
@@ -1435,28 +1638,35 @@ port_open() { # tcp port dinleniyor mu (IPv4 veya IPv6 soket)
 
 fw_up_real() {
 	[ -s "$RUN/config.json" ] && [ -s "$RUN/rules.nft" ] || return 1
-	local i=0 cap wport
+	local i=0 cap wport ot owntun=0
 	cap=$(cat "$RUN/capture" 2>/dev/null); cap=${cap:-mixed}
 	# yerel modda dinleyici port yok: çekirdeğin API portu hazır olunca devam edilir
 	wport=$(tp_port); [ "$cap" = native ] && wport=$(uget main.api_port || echo 10085)
-	while ! port_open "$wport"; do
+	if [ "$cap" = own ]; then
+		ot=$(cat "$RUN/own.type" 2>/dev/null)
+		case "$ot" in redir:*) wport=${ot#redir:} ;; *) wport="" ;; esac
+		case "$ot" in tun:*) TUN_DEV=${ot#tun:}; [ -n "$TUN_DEV" ] || TUN_DEV=Meta; owntun=1 ;; esac
+	fi
+	while [ -n "$wport" ] && ! port_open "$wport"; do
 		i=$((i + 1))
 		[ $i -gt 30 ] && { sayerr "$(engine_name) başlamadı (port $wport açılmadı); kurallar uygulanmadı"; return 1; }
 		sleep 0.5 2>/dev/null || sleep 1
 	done
-	case "$cap" in mixed|tun|native)
-		i=0
-		while ! ip link show "$TUN_DEV" >/dev/null 2>&1; do
-			i=$((i + 1))
-			[ $i -gt 30 ] && { sayerr "TUN aygıtı ($TUN_DEV) açılmadı; kurallar uygulanmadı"; return 1; }
-			sleep 0.5 2>/dev/null || sleep 1
-		done
-		# adresi ve rotaları yerel modda mihomo kendisi kurar
-		if [ "$cap" != native ]; then
-			ip addr show dev "$TUN_DEV" 2>/dev/null | grep -q 'inet ' || ip addr add "$TUN_ADDR/24" dev "$TUN_DEV" 2>/dev/null
-			ip link set dev "$TUN_DEV" up
-		fi
-		fw_zone ;;
+	case "$cap" in mixed|tun|native|own)
+		if [ "$cap" != own ] || [ "$owntun" = 1 ]; then
+			i=0
+			while ! ip link show "$TUN_DEV" >/dev/null 2>&1; do
+				i=$((i + 1))
+				[ $i -gt 30 ] && { sayerr "TUN aygıtı ($TUN_DEV) açılmadı; kurallar uygulanmadı"; return 1; }
+				sleep 0.5 2>/dev/null || sleep 1
+			done
+			# yerel ve kendi-yapılandırma modlarında adresi ve rotaları çekirdek kendisi kurar
+			if [ "$cap" != native ] && [ "$cap" != own ]; then
+				ip addr show dev "$TUN_DEV" 2>/dev/null | grep -q 'inet ' || ip addr add "$TUN_ADDR/24" dev "$TUN_DEV" 2>/dev/null
+				ip link set dev "$TUN_DEV" up
+			fi
+			fw_zone
+		fi ;;
 	esac
 	rules_down
 	traffic_sample
@@ -1538,6 +1748,7 @@ fw_zone() {
 # o sunucu düşünce başkasına geçilir: çıkış IP'si oturum ortasında değişmez -> Metin2 gibi oyunlar atmaz.
 # (Xray'in kendi leastPing seçimi eşit hızdaki sunucular arasında sürekli gidip gelir.)
 set_override() { # <etiket>
+	own_on && return 0
 	local i=0
 	while ! { if [ "$(engine)" = xray ]; then xr api bo -s "$(api_addr)" -b proxy "$1"; else engine_api_select "$1"; fi; } >/dev/null 2>&1; do
 		i=$((i + 1)); [ $i -gt 10 ] && { say "sunucu seçimi uygulanamadı (API yanıt vermedi)"; return 1; }
@@ -1611,6 +1822,7 @@ auto_pick() { # [hariç etiket] -> en hızlı çalışan sunucunun etiketi (para
 }
 
 apply_node() {
+	own_on && return 0
 	local sel tag
 	sel=$(uget main.node)
 	[ "$sel" = none ] && return 0
@@ -1673,7 +1885,7 @@ apply_changes() {
 		/etc/init.d/kediray restart >/dev/null 2>&1
 		ok=0; i=0
 		while [ $i -lt 30 ]; do
-			if running && port_open "$(uget main.api_port || echo 10085)"; then ok=1; break; fi
+			if core_ready; then ok=1; break; fi
 			i=$((i + 1)); sleep 0.5 2>/dev/null || sleep 1
 		done
 		if [ $ok = 0 ] && [ -s "$RUN/config.json.old" ]; then
@@ -1692,6 +1904,7 @@ apply_changes() {
 }
 
 active_tag() {
+	own_on && return 0
 	if [ "$(engine)" != xray ]; then
 		curl -s -m 3 --noproxy '' "http://$(api_addr)/proxies/proxy" 2>/dev/null | jsonfilter -e '@.now' 2>/dev/null
 		return
@@ -3728,6 +3941,9 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray autodirect on|off          Direkt çıkış yokken "direkt" seçilenleri otomatik VPN'e çevir (on) ya da seçime hep uy (off)
   kediray engines                    VPN motorları ve durumları (JSON)
   kediray engine <ad> start|stop     Motoru başlat/durdur (aynı anda yalnızca biri çalışır)
+  kediray core-own on|off            Kendi yapılandırma modu: seçilen çekirdek kendi YAML/JSON dosyasıyla çalışır
+  kediray own-list|own-get|own-put|own-del|own-select|own-check|own-template <çekirdek> [dosya]
+  kediray own-api groups|mode <m>|select <grup> <ad>   Çekirdeğin kendi API'si (kendi yapılandırma modunda)
   kediray core-native on|off         mihomo yerel mod: kendi TUN'u ile çalışır (hev/nft yakalaması yok)
   kediray core-use <çekirdek>        Etkin çekirdeği seç: xray | sing-box | mihomo
   kediray cores                      Çekirdek ikilileri: Xray, sing-box, mihomo (JSON)
@@ -3803,6 +4019,16 @@ case "$cmd" in
 	core-remove) cmd_core_remove "$@" ;;
 	core-use) cmd_core_use "$@" ;;
 	core-native) cmd_core_native "$@" ;;
+	core-own) cmd_core_own "$@" ;;
+	own-list) cmd_own_list "$@" ;;
+	own-get) cmd_own_get "$@" ;;
+	own-put) cmd_own_put "$@" ;;
+	own-del) cmd_own_del "$@" ;;
+	own-select) cmd_own_select "$@" ;;
+	own-check) cmd_own_check "$@" ;;
+	own-template) cmd_own_template "$@" ;;
+	own-api) cmd_own_api "$@" ;;
+	own-apply) cmd_own_apply "$@" ;;
 	mh-prep) mh_prep "$@" ;;
 	core-bg) cmd_core_bg "$@" ;;
 	core-log) cmd_core_log ;;

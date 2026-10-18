@@ -38,14 +38,19 @@
 		"order": 5,
 		"action": { "type": "view", "path": "kediray/cores" }
 	},
+	"admin/vpn/kediray/own": {
+		"title": "Çekirdek ayarı",
+		"order": 6,
+		"action": { "type": "view", "path": "kediray/own" }
+	},
 	"admin/vpn/kediray/log": {
 		"title": "Günlük",
-		"order": 6,
+		"order": 7,
 		"action": { "type": "view", "path": "kediray/log" }
 	},
 	"admin/vpn/kediray/about": {
 		"title": "Hakkında",
-		"order": 7,
+		"order": 8,
 		"action": { "type": "view", "path": "kediray/about" }
 	}
 }

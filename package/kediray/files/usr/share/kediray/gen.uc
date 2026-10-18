@@ -387,7 +387,7 @@ function rem_ip4() {
 // Sorgu tünelin veri yoluna (TUN/TPROXY) girmez, çekirdek kendisi çözer -> hızlı ve sızıntısız.
 // 'off' (DNS'e dokunma) TUN yakalamasında hiçbir adı çözemez (cihazın 53 portu TUN'a girer, yanıt dönmez):
 // bu birleşimde sessizce 'private'a düşüyoruz.
-const DNS_MODE = (opt('dns_mode', 'private') == 'off' && (CAPTURE == 'tun' || CAPTURE == 'native')) ? 'private' : opt('dns_mode', 'private');
+const DNS_MODE = CAPTURE == 'own' ? 'off' : (opt('dns_mode', 'private') == 'off' && (CAPTURE == 'tun' || CAPTURE == 'native')) ? 'private' : opt('dns_mode', 'private');
 // Uygulama bazlı "DNS'i tünelden çöz" (tunnel_dns=1): global DNS modu 'off' olsa bile yalnız bu uygulamaların
 // alan adları dnsmasq -> çekirdek -> tünel yolundan çözülür; diğer her şey modemin kendi DNS'inde kalır.
 let TDOMS = [];
@@ -630,6 +630,10 @@ const BYPASS4 = [
 function nft() {
 	let ifs = L(getenv('KR_LAN_IFS') || 'br-lan');
 	let tp_port = num(opt('tproxy_port'), 12345);
+	// Kendi yapılandırma modu: yakalama yalnızca dosyadaki redirect girişi varsa (TCP); TUN'u çekirdek kendisi kurar
+	const OWN_REDIR = num(getenv('KR_OWN_REDIR'), 0);
+	if (CAPTURE == 'own' && OWN_REDIR) tp_port = OWN_REDIR;
+	const NOCAP = (CAPTURE == 'native') || (CAPTURE == 'own' && !OWN_REDIR);
 	let bypass = [...BYPASS4, ...filter(L(getenv('KR_SERVER_IPS')), is_v4)];
 	let dips = [], dports = [];
 	for (let a in APPS) {
@@ -740,7 +744,7 @@ function nft() {
 		push(o, '\t\tmeta l4proto tcp meta mark set ' + MARK_TP + ' tproxy ip to :' + tp_port + ' accept');
 		push(o, '\t\tmeta l4proto udp meta mark set ' + MARK_TP + ' tproxy ip to :' + (tp_port + 1) + ' accept');
 		push(o, '\t}');
-	} else if (CAPTURE != 'native') {
+	} else if (!NOCAP) {
 		// TCP: çekirdekte NAT redirect. fw4'ün dstnat'ından (-100) önce.
 		push(o, '\tchain nat_pre {');
 		push(o, '\t\ttype nat hook prerouting priority dstnat - 5; policy accept;');
@@ -766,7 +770,7 @@ function nft() {
 	// DNS (53): cihaz hangi DNS'i yazarsa yazsın çekirdekte KediRay DNS'ine gider.
 	// Böylece sorgu TUN/hev yoluna hiç girmez (ölçüm: o yol UDP başına ~200 ms ekliyor) ve
 	// Xray'in DNS önbelleği devreye girer. Kural tünelden geçen cihazlar için geçerli (Direkt cihaz kendi DNS'ini kullanır).
-	if (on(opt('dns_hijack'), true) && DNS_MODE != 'off' && CAPTURE != 'native') {
+	if (on(opt('dns_hijack'), true) && DNS_MODE != 'off' && CAPTURE != 'native' && CAPTURE != 'own') {
 		push(o, '\tchain dns_nat {');
 		push(o, '\t\ttype nat hook prerouting priority dstnat - 6; policy accept;');
 		guards('dns_act', '{ tcp, udp }');
@@ -791,7 +795,7 @@ function nft() {
 
 	// QUIC (UDP 443): tünelde (UDP-over-TCP) tarayıcıyı takılı bırakabiliyor — ör. Google giriş sayfası dönüp duruyor.
 	// v2rayNG ve Xray'in kendi varsayılanı gibi reddedilir; ICMP yanıtı anında gider, tarayıcı beklemeden TCP'ye (tünele) geçer.
-	if (on(opt('block_quic'), true) && CAPTURE != 'native') {
+	if (on(opt('block_quic'), true) && CAPTURE != 'native' && CAPTURE != 'own') {
 		push(o, '\tchain quic_fwd {');
 		push(o, '\t\ttype filter hook forward priority filter - 5; policy accept;');
 		guards('quic_act', 'udp');
@@ -1368,6 +1372,43 @@ function devices() {
 	return dev;
 }
 
+// Düzenlenebilir YAML çıktısı (Kendi yapılandırmam şablonu): JSON'dan blok biçimli YAML
+const MH_YAML = (WHAT == 'mihomo-yaml');
+function ys(v) { return v === null ? 'null' : (type(v) == 'string' ? sprintf('%J', v) : '' + v); }
+function ykey(k) { return match(k, /^[A-Za-z0-9_.-]+$/) ? k : sprintf('%J', k); }
+function yml(v, sp, out) {
+	for (let k in keys(v)) {
+		let x = v[k], kk = ykey(k);
+		if (type(x) == 'object') {
+			if (length(keys(x))) { push(out, sp + kk + ':'); yml(x, sp + '  ', out); }
+			else push(out, sp + kk + ': {}');
+		}
+		else if (type(x) == 'array') {
+			if (length(x)) { push(out, sp + kk + ':'); yls(x, sp + '  ', out); }
+			else push(out, sp + kk + ': []');
+		}
+		else push(out, sp + kk + ': ' + ys(x));
+	}
+}
+function yls(a, sp, out) {
+	for (let x in a) {
+		if (type(x) == 'object' && length(keys(x))) {
+			let sub = [];
+			yml(x, sp + '  ', sub);
+			sub[0] = sp + '- ' + substr(sub[0], length(sp) + 2);
+			for (let l in sub) push(out, l);
+		}
+		else if (type(x) == 'object') push(out, sp + '- {}');
+		else push(out, sp + '- ' + ys(x));
+	}
+}
+function mih_out(cfg) {
+	if (!MH_YAML) { print(sprintf('%.J\n', cfg)); return; }
+	let out = ['# KediRay şablonu: sunucu listesinden üretildi. Düzenleyip "Seç" ile çalıştırabilirsiniz.'];
+	yml(cfg, '', out);
+	print(join('\n', out), '\n');
+}
+
 function mihomo() {
 	if (!length(NODES))
 		die('hiç sunucu yok; önce link, JSON veya abonelik ekleyin', 2);
@@ -1498,7 +1539,7 @@ function mihomo() {
 		};
 		if (length(keys(pol))) cfg.dns['nameserver-policy'] = pol;
 	}
-	print(sprintf('%.J\n', cfg));
+	mih_out(cfg);
 }
 
 function mihomo_test() {
@@ -1516,7 +1557,7 @@ function mihomo_test() {
 if (WHAT == 'xray') xray();
 else if (WHAT == 'singbox') singbox();
 else if (WHAT == 'singbox-test') singbox_test();
-else if (WHAT == 'mihomo') mihomo();
+else if (WHAT == 'mihomo' || WHAT == 'mihomo-yaml') mihomo();
 else if (WHAT == 'mihomo-test') mihomo_test();
 else if (WHAT == 'nft') nft();
 else if (WHAT == 'dnsmasq') dnsmasq();

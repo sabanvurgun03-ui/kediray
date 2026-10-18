@@ -17,7 +17,8 @@
 			"file": {
 				"/tmp/kediray-update.sh": [ "write" ],
 				"/tmp/kediray-restore.conf": [ "write" ],
-				"/tmp/kediray-core-upload": [ "write" ]
+				"/tmp/kediray-core-upload": [ "write" ],
+				"/tmp/kediray-own-upload": [ "write" ]
 			},
 			"uci": [ "kediray" ]
 		}
