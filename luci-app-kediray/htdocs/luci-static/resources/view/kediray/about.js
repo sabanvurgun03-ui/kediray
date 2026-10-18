@@ -16,6 +16,16 @@ function h(tag, attrs, children) {
 	return E(tag, attrs || {}, out);
 }
 
+/* Güncelleme durumu: yeşil ✓ (güncelsin) ya da sarı ⓘ (güncelleme var), yuvarlak içinde simgeyle */
+function updMsg(msg, kind, text) {
+	const ok = kind === 'ok';
+	const w = h('span', { 'style': 'display:inline-flex;align-items:center;gap:8px;color:' + (ok ? '#3fb950' : '#e0a82e') });
+	w.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><circle cx="12" cy="12" r="10"/>'
+		+ (ok ? '<path d="M7.5 12.5l3 3 6-6.5"/>' : '<path d="M12 11v5.5"/><circle cx="12" cy="7.8" r="0.6" fill="currentColor"/>') + '</svg>';
+	w.appendChild(document.createTextNode(text));
+	msg.textContent = ''; msg.appendChild(w);
+}
+
 const ICONS = {
 	coffee: [ '0 0 24 24', 'M2 21h18v-2H2v2zM20 8h-2V5h2v3zm0-5H4v10c0 2.21 1.79 4 4 4h6c2.21 0 4-1.79 4-4v-3h2c1.11 0 2-.89 2-2V5c0-1.11-.89-2-2-2z', '#ffdd00' ],
 	update: [ '0 0 24 24', 'M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z', '' ],
@@ -187,7 +197,7 @@ return view.extend({
 			let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
 			const msg = document.getElementById('ka-upd-msg'), go = document.getElementById('ka-upd-go');
 			this.setLast(j);
-			if (j && j.ok && j.newer && msg && !msg.textContent) { msg.textContent = j.rev ? 'Aynı sürümde (' + j.current + ') depoda yeni değişiklikler var.' : 'Yeni sürüm var: ' + j.current + ' → ' + j.latest; if (go) go.style.display = ''; }
+			if (j && j.ok && j.newer && msg && !msg.textContent) { updMsg(msg, 'new', j.rev ? 'Aynı sürümde (' + j.current + ') depoda yeni değişiklikler var.' : 'Yeni sürüm var: ' + j.current + ' → ' + j.latest); if (go) go.style.display = ''; }
 		}).catch(() => null);
 	},
 
@@ -343,13 +353,8 @@ return view.extend({
 			if (!msg) return;
 			this.setLast(j);
 			if (!j || !j.ok) msg.textContent = 'Denetlenemedi: ' + ((j && j.error) || 'GitHub\'a ulaşılamadı') + '.';
-			else if (j.newer) { msg.textContent = j.rev ? 'Aynı sürümde (' + j.current + ') depoda yeni değişiklikler var.' : 'Yeni sürüm var: ' + j.current + ' → ' + j.latest; if (go) go.style.display = ''; }
-			else {
-				const w = h('span', { 'style': 'display:inline-flex;align-items:center;gap:8px;color:#3fb950' });
-				w.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>';
-				w.appendChild(document.createTextNode('Güncelsin (' + j.current + ')'));
-				msg.textContent = ''; msg.appendChild(w);
-			}
+			else if (j.newer) { updMsg(msg, 'new', j.rev ? 'Aynı sürümde (' + j.current + ') depoda yeni değişiklikler var.' : 'Yeni sürüm var: ' + j.current + ' → ' + j.latest); if (go) go.style.display = ''; }
+			else updMsg(msg, 'ok', 'Güncelsin (' + j.current + ')');
 		}).catch(() => { if (msg) msg.textContent = 'Denetlenemedi: panel yanıt vermedi.'; });
 	},
 
