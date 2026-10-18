@@ -21,6 +21,7 @@ const ICONS = {
 	update: [ '0 0 24 24', 'M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z', '' ],
 	github: [ '0 0 16 16', 'M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z', '' ],
 	license: [ '0 0 24 24', 'M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z', '' ],
+	stats: [ '0 0 24 24', 'M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z', '' ],
 	backup: [ '0 0 24 24', 'M17 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V7l-4-4zm-5 16a3 3 0 110-6 3 3 0 010 6zm3-10H5V5h10v4z', '' ]
 };
 
@@ -44,6 +45,13 @@ const CSS = `
 .ka-dev{grid-column:1/-1;margin-top:4px}
 .ka-dev b{font-size:1.05em}
 .ka-note{opacity:.7;font-size:.9em;margin-top:16px;max-width:620px;line-height:1.5}
+.ka-gh{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.ka-gt{display:flex;flex-direction:column;align-items:center;gap:2px;padding:14px 8px 12px;border-radius:12px;border:1px solid rgba(128,128,128,.28);background:linear-gradient(160deg,rgba(128,128,128,.12),rgba(128,128,128,.02));color:inherit!important;text-decoration:none!important;transition:box-shadow .25s ease,transform .12s ease}
+.ka-gt:hover{box-shadow:0 0 10px rgba(128,128,128,.45)}
+.ka-gt:active{transform:scale(.98)}
+.ka-gt i{font-style:normal;font-size:1.35em;line-height:1}
+.ka-gt b{font-size:1.9em;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.ka-gt small{opacity:.7;font-size:.84em}
 `;
 
 /* Tema (Ayarlar → Görünüm): mod ve vurgu rengi tarayıcıda saklanır, tüm KediRay sayfalarında uygulanır.
@@ -182,10 +190,16 @@ return view.extend({
 				h('div', { 'class': 'ka-rows' }, [
 					row('Sürüm', d.version),
 					row('Proxy çekirdeği', d.core ? 'Xray ' + d.core : 'Xray —'),
-					h('div', { 'class': 'ka-k' }, 'GitHub yıldızı'), h('div', { 'class': 'ka-v', 'id': 'ka-gh-stars' }, '…'),
-					h('div', { 'class': 'ka-k' }, 'İndirme'), h('div', { 'class': 'ka-v', 'id': 'ka-gh-dl' }, '…'),
 					h('div', { 'class': 'ka-sep' }),
 					h('div', { 'class': 'ka-dev' }, [h('span', { 'class': 'ka-k' }, 'Geliştirici: '), h('b', {}, 'Şaban Vurgun'), ' · 2026'])
+				])
+			]),
+			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
+				title('stats', 'İstatistikler'),
+				h('div', { 'class': 'ka-k' }, 'GitHub deposundaki yıldız ve indirme sayısı'),
+				h('div', { 'class': 'ka-gh' }, [
+					h('a', { 'class': 'ka-gt', 'id': 'ka-gh-stars-a', 'href': 'https://github.com/sabanvurgun03-ui/kediray/stargazers', 'target': '_blank', 'rel': 'noopener noreferrer' }, [h('i', { 'style': 'color:#e3b341' }, '★'), h('b', { 'id': 'ka-gh-stars' }, '…'), h('small', {}, 'yıldız')]),
+					h('a', { 'class': 'ka-gt', 'id': 'ka-gh-dl-a', 'href': 'https://github.com/sabanvurgun03-ui/kediray/releases', 'target': '_blank', 'rel': 'noopener noreferrer' }, [h('i', { 'style': 'color:#3b82f6' }, '⬇'), h('b', { 'id': 'ka-gh-dl' }, '…'), h('small', {}, 'indirme')])
 				])
 			]),
 			h('div', { 'class': 'ka-card', 'id': 'ka-lic-card', 'style': 'margin-top:14px;display:none' }, [   // lisans kapalıyken hiç görünmesin (açılıp kapanma titremesi olmasın)
@@ -243,17 +257,18 @@ return view.extend({
 	showRepoStats() {
 		const st = document.getElementById('ka-gh-stars'), dl = document.getElementById('ka-gh-dl');
 		if (!st || !dl) return Promise.resolve();
-		const none = why => { st.textContent = '—'; dl.textContent = '—'; st.title = dl.title = why; };
+		const sa = document.getElementById('ka-gh-stars-a') || st, da = document.getElementById('ka-gh-dl-a') || dl;
+		const none = why => { st.textContent = '—'; dl.textContent = '—'; sa.title = da.title = why; };
 		return fs.exec(CLI, ['repostats', '--json']).then(r => {
 			let j = null; try { j = JSON.parse((r.stdout || '').trim()); } catch (e) { }
 			if (!j || !j.ok) return none('GitHub\'a ulaşılamadı');
 			const d = new Date(j.ts * 1000), p = n => String(n).padStart(2, '0');
 			const when = p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
 			const tip = 'Son güncelleme: ' + when + (j.stale ? ' (GitHub\'a ulaşılamadı, son kayıtlı değer)' : '');
-			st.textContent = '★ ' + j.stars;
-			dl.textContent = j.releases ? '⬇ ' + j.downloads : '—';
-			st.title = tip;
-			dl.title = 'GitHub Releases\'teki kurulum dosyasının (kediray-install.sh) indirme sayısı. ' + tip;
+			st.textContent = j.stars;
+			dl.textContent = j.releases ? j.downloads : '—';
+			sa.title = tip;
+			da.title = 'GitHub Releases\'teki kurulum dosyasının (kediray-install.sh) indirme sayısı. ' + tip;
 		}).catch(() => none('Panel yanıt vermedi'));
 	},
 
