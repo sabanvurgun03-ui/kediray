@@ -1410,7 +1410,8 @@ yls = function(a, sp, out) {
 };
 function mih_out(cfg) {
 	if (!MH_YAML) { print(sprintf('%.J\n', cfg)); return; }
-	let out = ['# KediRay şablonu: sunucu listesinden üretildi. Düzenleyip "Seç" ile çalıştırabilirsiniz.'];
+	let out = ['# KediRay şablonu: sunucu listesinden üretildi. Düzenleyip "Seç" ile çalıştırabilirsiniz.',
+		'# ipv6: false  -> modemin kendi trafiği de TUN\'dan geçtiği için IPv6 kapalı (sunucunuzun IPv6 çıkışı yoksa IPv6 bağlantılar takılır). Açmak için iki "ipv6" satırını da true yapın.'];
 	yml(cfg, '', out);
 	print(join('\n', out), '\n');
 }
@@ -1522,7 +1523,7 @@ function mihomo() {
 		'bind-address': '*',
 		mode: 'rule',
 		'log-level': ({ debug: 'debug', info: 'info', warning: 'warning', error: 'error', none: 'silent' })[opt('log_level', 'warning')] ?? 'warning',
-		ipv6: on(opt('ipv6'), false),
+		ipv6: MH_YAML ? false : on(opt('ipv6'), false),
 		'routing-mark': MARK_CORE,
 		'unified-delay': true,
 		'tcp-concurrent': true,
@@ -1557,7 +1558,7 @@ function mihomo() {
 	}
 	if (DNS_ON && length(ns)) {
 		cfg.dns = {
-			enable: true, listen: '0.0.0.0:' + dns_port, ipv6: on(opt('ipv6'), false), 'enhanced-mode': 'normal',
+			enable: true, listen: '0.0.0.0:' + dns_port, ipv6: MH_YAML ? false : on(opt('ipv6'), false), 'enhanced-mode': 'normal',
 			'use-hosts': false, 'use-system-hosts': false,
 			'default-nameserver': length(filter([...WAN_DNS, direct], is_v4)) ? filter([...WAN_DNS, direct], is_v4) : ['1.1.1.1'],
 			nameserver: ns,
