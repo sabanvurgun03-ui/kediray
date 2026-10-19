@@ -253,6 +253,7 @@ write_files() {
 @@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/i18n.js@@
 @@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/cores.js@@
 @@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/own.js@@
+@@KR_FILE luci-app-kediray/htdocs/luci-static/resources/view/kediray/dash.js@@
 @@KR_FILE luci-app-kediray/root/usr/share/luci/menu.d/luci-app-kediray.json@@
 @@KR_FILE luci-app-kediray/root/usr/share/rpcd/acl.d/luci-app-kediray.json@@
 @@KR_FILE luci-app-kediray/htdocs/luci-static/kedi-logo.svg@@

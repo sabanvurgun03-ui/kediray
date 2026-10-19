@@ -43,14 +43,23 @@
 		"order": 6,
 		"action": { "type": "view", "path": "kediray/own" }
 	},
+	"admin/vpn/kediray/dash": {
+		"title": "Dashboard",
+		"order": 7,
+		"action": { "type": "view", "path": "kediray/dash" },
+		"depends": { "uci": [
+			{ "kediray": { "main": { "core": "mihomo" } } },
+			{ "kediray": { "main": { "core": "sing-box" } } }
+		] }
+	},
 	"admin/vpn/kediray/log": {
 		"title": "Günlük",
-		"order": 7,
+		"order": 8,
 		"action": { "type": "view", "path": "kediray/log" }
 	},
 	"admin/vpn/kediray/about": {
 		"title": "Hakkında",
-		"order": 8,
+		"order": 9,
 		"action": { "type": "view", "path": "kediray/about" }
 	}
 }
