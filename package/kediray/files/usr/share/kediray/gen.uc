@@ -7,6 +7,7 @@
 
 const fs = require('fs');
 const WHAT = ARGV[0] || 'xray';
+const SB_OWN = (WHAT == 'singbox-own');   // sing-box "Kendi yapılandırmam" şablonu: sunucular KediRay'deki adlarıyla yazılır
 const DATA_MODES = { 'outbound': 1, 'outbound-json': 1 };
 
 function load() {
@@ -1163,6 +1164,23 @@ function singbox() {
 	for (let x in SN) ok[x.n._tag] = 1;
 	let fb = (SEL && ok[SEL._tag]) ? SEL._tag : SN[0].n._tag;
 
+	// Kendi yapılandırma şablonunda (singbox-own) çıkışlar KediRay'deki adlarıyla yazılır (mihomo-yaml ile aynı;
+	// panelde "node-002" yerine okunur ad görünür). Diğer kipte etiket node-00X kalır: KediRay sunucu seçimini o etiketle yapar.
+	// Ad: benzersiz, ayrılmış etiketlerden kaçınır. Giriş etiketleri (t-node-00X) değişmez.
+	let PN = {}, seen = { 'direct': 1, 'proxy': 1, 'warp': 1, 'frag': 1, 'block': 1, 'dns-in': 1, 'direct-dns': 1, 'remote': 1 };
+	if (SB_OWN) {
+		for (let x in SN) {
+			let nm = trim(replace('' + (x.s.name || ''), /[\t\r\n]+/g, ' '));
+			if (length(nm) > 60) nm = substr(nm, 0, 60);
+			if (!length(nm)) nm = x.n._tag;
+			let base = nm, k = 2;
+			while (seen[lc(nm)]) { nm = base + '-' + k; k++; }
+			seen[lc(nm)] = 1;
+			PN[x.n._tag] = nm;
+		}
+	}
+	let pname = (t) => PN[t] ?? t;
+
 	// --- Girişler ---
 	let inb = [];
 	if (CAPTURE == 'tproxy') {
@@ -1178,16 +1196,16 @@ function singbox() {
 	// --- Çıkışlar ---
 	let outb = [{ type: 'direct', tag: 'direct' }];
 	let tags = [];
-	for (let x in SN) { push(outb, x.o); push(tags, x.n._tag); }
+	for (let x in SN) { x.o.tag = pname(x.n._tag); push(outb, x.o); push(tags, x.o.tag); }
 	push(outb, DISC ? { type: 'selector', tag: 'proxy', outbounds: ['direct'], default: 'direct' }
-		: { type: 'selector', tag: 'proxy', outbounds: tags, default: fb, interrupt_exist_connections: false });
+		: { type: 'selector', tag: 'proxy', outbounds: tags, default: pname(fb), interrupt_exist_connections: false });
 
 	// --- Yönlendirme ---
 	let ins = CAPTURE == 'tproxy' ? ['lan-in', 'lan-in-udp', 'socks-in'] : ['lan-in', 'socks-in'];
 	let R = [];
 	if (DNS_ON) push(R, { inbound: ['dns-in'], action: 'hijack-dns' });
 	if (DNS_MODE != 'off') push(R, { inbound: ins, port: [53], action: 'hijack-dns' });
-	for (let x in SN) push(R, { inbound: ['t-' + x.n._tag], outbound: x.n._tag });
+	for (let x in SN) push(R, { inbound: ['t-' + x.n._tag], outbound: pname(x.n._tag) });
 	// İçerik tanıma yalnızca kural eşleştirme için (hedef IP korunur; Xray'deki routeOnly gibi).
 	// UDP'de (hev) kapalı: her UDP oturumuna bekleme eklemesin; tun modunda TCP de socks-in'den geldiği için orada açık.
 	push(R, { inbound: CAPTURE == 'tproxy' ? ['lan-in'] : (CAPTURE == 'tun' ? ['lan-in', 'socks-in'] : ['lan-in']), action: 'sniff' });
@@ -1583,7 +1601,7 @@ function mihomo_test() {
 }
 
 if (WHAT == 'xray') xray();
-else if (WHAT == 'singbox') singbox();
+else if (WHAT == 'singbox' || WHAT == 'singbox-own') singbox();
 else if (WHAT == 'singbox-test') singbox_test();
 else if (WHAT == 'mihomo' || WHAT == 'mihomo-yaml') mihomo();
 else if (WHAT == 'mihomo-test') mihomo_test();

@@ -1189,7 +1189,7 @@ cmd_own_template() { # <çekirdek> <ad>
 	[ -e "$OWN_DIR/$core/$name" ] && { echo "$name zaten var; başka ad seçin" >&2; return 1; }
 	mkdir -p "$OWN_DIR/$core" "$RUN"
 	export KR_WAN_DNS="$(wan_dns)" KR_LAN_IFS="$(lan_ifs)" KR_MARK_CORE="$MARK_CORE" KR_TUN="$TUN_DEV"
-	if [ "$core" = mihomo ]; then what=mihomo-yaml; else what=singbox; cap=redirect; fi
+	if [ "$core" = mihomo ]; then what=mihomo-yaml; else what=singbox-own; cap=redirect; fi
 	if [ "$core" = mihomo ] && geo_ok; then export KR_GEO=1; else export KR_GEO=0; fi
 	out="$RUN/own.template.$$"
 	# Şablona dashboard ayarları hazır girer (external-controller 0.0.0.0, secret, external-ui: ui); elle eklemeye gerek kalmaz
