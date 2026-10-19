@@ -1446,21 +1446,25 @@ function mihomo() {
 	for (let x in MN) ok[x.n._tag] = 1;
 	let fb = (SEL && ok[SEL._tag]) ? SEL._tag : MN[0].n._tag;
 
-	// Kendi yapılandırma şablonunda (mihomo-yaml) sunucular KediRay'deki adlarıyla yazılır (panelde "node-002" yerine okunur ad görünür).
-	// Native/diğer kipte ad node-00X kalır: KediRay sunucu seçimini o etiketle yapar. Ad: benzersiz, ayrılmış sözcüklerden kaçınır.
+	// Sunucular her kipte KediRay'deki adlarıyla yazılır (dashboard'da "node-002" yerine okunur ad görünür). Ad: benzersiz,
+	// ayrılmış sözcüklerden kaçınır, tırnak ve ters bölü içermez (API gövdesine olduğu gibi konur). KediRay sunucu seçimini
+	// etiketle (node-00X) yapar; etiket <-> ad eşlemesi RUN/mh.names dosyasına yazılır (kediray betiği ikisini de çevirir).
 	let PN = {}, seen = { 'direct': 1, 'reject': 1, 'reject-drop': 1, 'pass': 1, 'compatible': 1, 'global': 1, 'proxy': 1, 'dns-out': 1 };
-	if (MH_YAML) {
-		for (let x in MN) {
-			let nm = trim(replace('' + (x.s.name || ''), /[\t\r\n]+/g, ' '));
-			if (length(nm) > 60) nm = substr(nm, 0, 60);
-			if (!length(nm)) nm = x.n._tag;
-			let base = nm, k = 2;
-			while (seen[lc(nm)]) { nm = base + '-' + k; k++; }
-			seen[lc(nm)] = 1;
-			PN[x.n._tag] = nm;
-		}
+	for (let x in MN) {
+		let nm = trim(replace('' + (x.s.name || ''), /[\t\r\n"\\]+/g, ' '));
+		if (length(nm) > 60) nm = substr(nm, 0, 60);
+		if (!length(nm)) nm = x.n._tag;
+		let base = nm, k = 2;
+		while (seen[lc(nm)]) { nm = base + '-' + k; k++; }
+		seen[lc(nm)] = 1;
+		PN[x.n._tag] = nm;
 	}
 	let pname = (t) => PN[t] ?? t;
+	if (WHAT == 'mihomo' && getenv('KR_RUN')) {
+		let nl = [];
+		for (let x in MN) push(nl, x.n._tag + '\t' + pname(x.n._tag));
+		fs.writefile(getenv('KR_RUN') + '/mh.names', join('\n', nl) + '\n');
+	}
 
 	// Sunucu listesi: seçilen en başta (select grubu ilk elemanı varsayılan yapar)
 	let names = [pname(fb)];

@@ -112,8 +112,12 @@ core_test() { # <çekirdek> <yapılandırma> → 0: geçerli
 engine_test() { core_test "$(engine)" "$1"; }
 # Canlı sunucu seçimi (sing-box clash_api / mihomo REST): PUT /proxies/proxy
 engine_api_select() { # <etiket>
+	local nm="$1"
+	# mihomo: config'te sunucular okunur adlarıyla durur (RUN/mh.names: etiket<TAB>ad); eşleme yoksa etiket olduğu gibi gider
+	[ "$(engine)" = mihomo ] && nm=$(awk -F"$T" -v t="$1" '$1 == t { print $2; exit }' "$RUN/mh.names" 2>/dev/null)
+	[ -n "$nm" ] || nm="$1"
 	curl -s -m 4 --noproxy '' -o /dev/null -w '%{http_code}' -X PUT -H 'Content-Type: application/json' -H "$(api_hdr)" \
-		-d "{\"name\":\"$1\"}" "http://$(api_addr)/proxies/proxy" 2>/dev/null | grep -q '^204$'
+		-d "{\"name\":\"$nm\"}" "http://$(api_addr)/proxies/proxy" 2>/dev/null | grep -q '^204$'
 }
 
 running() {
@@ -2052,9 +2056,13 @@ apply_changes() {
 }
 
 active_tag() {
+	local now tag=""
 	own_on && return 0
 	if [ "$(engine)" != xray ]; then
-		curl -s -m 3 --noproxy '' -H "$(api_hdr)" "http://$(api_addr)/proxies/proxy" 2>/dev/null | jsonfilter -e '@.now' 2>/dev/null
+		now=$(curl -s -m 3 --noproxy '' -H "$(api_hdr)" "http://$(api_addr)/proxies/proxy" 2>/dev/null | jsonfilter -e '@.now' 2>/dev/null)
+		# mihomo: API okunur adı döndürür; KediRay'in etiketine (node-00X) çevir
+		[ "$(engine)" = mihomo ] && [ -n "$now" ] && tag=$(awk -F"$T" -v n="$now" '$2 == n { print $1; exit }' "$RUN/mh.names" 2>/dev/null)
+		echo "${tag:-$now}"
 		return
 	fi
 	xr api bi -s "$(api_addr)" proxy 2>/dev/null | awk '
