@@ -1545,12 +1545,14 @@ function mihomo() {
 		let t = { enable: true, stack: opt('mihomo_stack', 'gvisor'), device: getenv('KR_TUN') || 'kediray0',
 			'auto-route': true, 'auto-redirect': true, 'auto-detect-interface': true, 'strict-route': false,
 			'dns-hijack': ['any:53', 'tcp://any:53'], mtu: num(opt('tun_mtu'), 1500),
-			'include-interface': ifs,
 			// 240.0.0.0/4 (aralığın sonu 255.255.255.255) diğerleriyle birleşince nftables küme kurulumu "file exists" verip TUN'u açtırmıyor (gerçek çekirdekte doğrulandı)
 			'route-exclude-address': filter(BYPASS4, c => c != '240.0.0.0/4') };
 		// Cihaz listesi MAC ile: varsayılan VPN ise direkt/engelli cihazlar dışarıda; varsayılan direkt ise yalnız VPN cihazları içeride
 		if (defdev == 'direct') t['include-mac-address'] = length(DV.vpn.mac) ? DV.vpn.mac : ['00:00:00:00:00:00'];
 		else if (length(DV.direct.mac) + length(DV.block.mac)) t['exclude-mac-address'] = [...DV.direct.mac, ...DV.block.mac];
+		// Kendi yapılandırma şablonunda include-interface yok: modemin kendi trafiği (arayüz, opkg, NTP) de VPN'e girer.
+		// KediRay'in yönettiği native kipte yalnız LAN arayüzleri yakalanır (gerçek TUN ile ikisi de doğrulandı: include-interface yokken yönlendirici kaynaklı bağlantı proxy'den geçer, döngü olmaz).
+		if (!MH_YAML) t['include-interface'] = ifs;
 		cfg.tun = t;
 	}
 	if (DNS_ON && length(ns)) {
