@@ -1427,10 +1427,26 @@ function mihomo() {
 	for (let x in MN) ok[x.n._tag] = 1;
 	let fb = (SEL && ok[SEL._tag]) ? SEL._tag : MN[0].n._tag;
 
+	// Kendi yapılandırma şablonunda (mihomo-yaml) sunucular KediRay'deki adlarıyla yazılır (panelde "node-002" yerine okunur ad görünür).
+	// Native/diğer kipte ad node-00X kalır: KediRay sunucu seçimini o etiketle yapar. Ad: benzersiz, ayrılmış sözcüklerden kaçınır.
+	let PN = {}, seen = { 'direct': 1, 'reject': 1, 'reject-drop': 1, 'pass': 1, 'compatible': 1, 'global': 1, 'proxy': 1, 'dns-out': 1 };
+	if (MH_YAML) {
+		for (let x in MN) {
+			let nm = trim(replace('' + (x.s.name || ''), /[\t\r\n]+/g, ' '));
+			if (length(nm) > 60) nm = substr(nm, 0, 60);
+			if (!length(nm)) nm = x.n._tag;
+			let base = nm, k = 2;
+			while (seen[lc(nm)]) { nm = base + '-' + k; k++; }
+			seen[lc(nm)] = 1;
+			PN[x.n._tag] = nm;
+		}
+	}
+	let pname = (t) => PN[t] ?? t;
+
 	// Sunucu listesi: seçilen en başta (select grubu ilk elemanı varsayılan yapar)
-	let names = [fb];
-	for (let x in MN) if (x.n._tag != fb) push(names, x.n._tag);
-	let proxies = map(MN, x => x.p);
+	let names = [pname(fb)];
+	for (let x in MN) if (x.n._tag != fb) push(names, pname(x.n._tag));
+	let proxies = map(MN, x => { x.p.name = pname(x.n._tag); return x.p; });
 	push(proxies, { name: 'dns-out', type: 'dns' });
 
 	let lis = [];
@@ -1442,7 +1458,7 @@ function mihomo() {
 		push(lis, { name: 'lan-in', type: 'redir', listen: '0.0.0.0', port: tp_port });
 	push(lis, { name: 'socks-in', type: 'socks', listen: '127.0.0.1', port: socks_port, udp: true });
 	for (let x in MN)
-		push(lis, { name: 't-' + x.n._tag, type: 'socks', listen: '127.0.0.1', port: x.n._tport, udp: false, proxy: x.n._tag });
+		push(lis, { name: 't-' + x.n._tag, type: 'socks', listen: '127.0.0.1', port: x.n._tport, udp: false, proxy: pname(x.n._tag) });
 
 	let R = [];
 	if (DNS_MODE != 'off') push(R, 'DST-PORT,53,dns-out');
