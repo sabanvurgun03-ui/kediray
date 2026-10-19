@@ -1105,8 +1105,10 @@ own_gen() {
 	fi
 	# Yerel SOCKS portu: güncelleme, hız testi, abonelik gibi modemin kendi istekleri VPN'e buradan çıkar (Xray modunda hep vardı).
 	# Dosyada sıfırdan büyük mixed-port / socks-port / port yoksa çalıştırılan kopyaya socks-port eklenir (127.0.0.1; allow-lan'a uyar).
-	if [ "$core" = mihomo ] && ! grep -Eq '^(mixed-port|socks-port|port):[ \t]*["'"'"']?[1-9]' "$RUN/config.new.json"; then
-		sp=$(uget main.socks_port); sp=${sp:-10808}
+	sp=$(uget main.socks_port); sp=${sp:-10808}
+	# Aynı portu dosyadaki bir dinleyici ya da üst düzey port zaten kullanıyorsa (şablondaki socks-in) ikinci kez eklenmez: "address already in use"
+	if [ "$core" = mihomo ] && ! grep -Eq '^(mixed-port|socks-port|port):[ \t]*["'"'"']?[1-9]' "$RUN/config.new.json" \
+		&& ! grep -Eq "^[ \t]+port:[ \t]*[\"']?$sp[\"']?[ \t\r]*\$" "$RUN/config.new.json"; then
 		grep -Ev '^(mixed-port|socks-port):[ \t]*["'"'"']?0?["'"'"']?[ \t\r]*(#.*)?$' "$RUN/config.new.json" > "$RUN/config.new.tmp" && mv "$RUN/config.new.tmp" "$RUN/config.new.json"
 		printf '\nsocks-port: %s\n' "$sp" >> "$RUN/config.new.json"
 	fi
@@ -1247,6 +1249,9 @@ cmd_own_diag() {
 	echo "nft (mihomo) kural sayısı: $(nft list table inet mihomo 2>/dev/null | grep -c .)"
 	nft list table inet mihomo 2>/dev/null | grep -E 'chain|output|local|oifname|redirect|mark' | head -n 14
 	echo "dosyadaki tun bölümü:"; awk '/^tun:/{p=1;print;next} p&&/^[^ \t#]/{p=0} p{print}' "$f" 2>/dev/null | head -n 24
+	echo "--- son başlatma hatası ---"
+	[ -s "$RUN/last_error" ] && head -n 5 "$RUN/last_error" || echo "(kayıtlı hata yok)"
+	logread 2>/dev/null | grep -iE 'mihomo|kediray' | grep -iE 'level=(error|fatal)|fatal|panic|already in use|failed|başlamad|hata' | tail -n 8 | cut -c1-260
 	echo "--- son mihomo/KediRay günlüğü ---"
 	logread 2>/dev/null | grep -iE 'mihomo|kediray|xray' | tail -n 15 | cut -c1-220
 }
