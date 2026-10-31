@@ -13,3 +13,7 @@ html[data-kedi] body header ul .active > a,html[data-kedi] body header .nav .act
 html[data-kedi] body .nav .dropdown-menu{background:var(--k-card)!important;border:1px solid var(--k-line2);border-radius:var(--k-r3);box-shadow:var(--k-shadow)}
 html[data-kedi] body .nav .dropdown-menu a{color:var(--k-ink)!important}
 html[data-kedi] body .nav .dropdown-menu a:hover,html[data-kedi] body .nav .dropdown-menu .active a{background:color-mix(in srgb,var(--k-a2) 22%,transparent)!important}
+/* sekme çubuğu: Bootstrap'in sabit yüksekliği sarı çizgiyi ayırıcı çizginin altına itiyordu */
+html[data-kedi] body .tabs,html[data-kedi] body .cbi-tabmenu{height:auto!important;min-height:0!important;align-items:flex-end}
+html[data-kedi] body .tabs > li,html[data-kedi] body .cbi-tabmenu > li{height:auto!important;line-height:1.3!important;margin:0 0 -1px!important;padding:0!important;display:block}
+html[data-kedi] body .tabs > li > a,html[data-kedi] body .cbi-tabmenu > li > a{line-height:1.3!important;height:auto!important;margin:0!important}

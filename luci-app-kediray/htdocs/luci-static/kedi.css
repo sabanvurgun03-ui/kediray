@@ -290,3 +290,7 @@ html[data-kedi] .kk-two{grid-template-columns:repeat(auto-fit,minmax(min(100%,36
 html[data-kedi] body button.kk-tool{border-radius:var(--k-r2)!important;background:var(--k-card)!important;min-height:0;padding:14px 16px;border:1px solid var(--k-line)!important;box-shadow:var(--k-shadow)!important}
 html[data-kedi] body button.kk-tool:hover{background:color-mix(in srgb,var(--k-a2) 12%,var(--k-card))!important;border-color:var(--k-accent)!important}
 html[data-kedi] .kk-top{margin-bottom:8px}
+/* sekme çubuğu: Bootstrap'in sabit yüksekliği sarı çizgiyi ayırıcı çizginin altına itiyordu */
+html[data-kedi] body .tabs,html[data-kedi] body .cbi-tabmenu{height:auto!important;min-height:0!important;align-items:flex-end}
+html[data-kedi] body .tabs > li,html[data-kedi] body .cbi-tabmenu > li{height:auto!important;line-height:1.3!important;margin:0 0 -1px!important;padding:0!important;display:block}
+html[data-kedi] body .tabs > li > a,html[data-kedi] body .cbi-tabmenu > li > a{line-height:1.3!important;height:auto!important;margin:0!important}
