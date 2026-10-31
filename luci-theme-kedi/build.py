@@ -68,9 +68,11 @@ for src, dst, mode in FILES:
     dstq = dst.replace('@TPL@', '$TPL')
     data = open(path, 'rb').read()
     if src.endswith('.png'):
-        b = base64.b64encode(data).decode()
-        lines = '\n'.join(b[i:i+76] for i in range(0, len(b), 76))
-        out.append('base64 -d <<\'KT_EOF_%d\' | put "$ROOT%s" %s\n%s\nKT_EOF_%d\n' % (n, dstq, mode, lines, n))
+        # base64 aracı her modemde yok: ikili dosya printf ile sekizlik kaçışlarla yazılır (busybox ash uyumlu)
+        out.append('mkdir -p "$(dirname "$ROOT%s")" && : > "$ROOT%s"\n' % (dstq, dstq))
+        for i in range(0, len(data), 48):
+            out.append("printf '%s' >> \"$ROOT%s\"\n" % (''.join('\\%03o' % c for c in data[i:i+48]), dstq))
+        out.append('chmod %s "$ROOT%s"\n' % (mode, dstq))
     else:
         t = data.decode()
         assert ('\nKT_EOF_%d\n' % n) not in t
