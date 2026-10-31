@@ -283,7 +283,7 @@ chmod 755 /usr/bin/aw1k-usage /usr/libexec/rpcd/aw1k 2>/dev/null
 chmod 755 /usr/bin/kediray /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray /etc/hotplug.d/firewall/99-kediray
 # Güncelleme rpcd/arka plan üzerinden çalışırsa umask 077 olabilir: web'in sunduğu dosyalar 403 verir. Okunur yap.
 chmod 755 /www/luci-static/resources/view/kediray 2>/dev/null
-chmod 644 /www/luci-static/resources/view/kediray/*.js /www/luci-static/kedi-logo.svg /usr/share/luci/menu.d/luci-app-kediray.json /usr/share/rpcd/acl.d/luci-app-kediray.json /usr/share/rpcd/acl.d/aw1k-panel.json 2>/dev/null
+chmod 644 /www/luci-static/resources/view/kediray/*.js /www/luci-static/kedi-logo.svg /www/luci-static/kedi.css /usr/share/luci/menu.d/luci-app-kediray.json /usr/share/rpcd/acl.d/luci-app-kediray.json /usr/share/rpcd/acl.d/aw1k-panel.json 2>/dev/null
 # Tarayıcı önbelleği: LuCI görünüm dosyalarını sürüm etiketli adla da yayınla ve menüyü ona yönlendir.
 # (Aynı adlı .js dosyasını tarayıcı bir saat saklar; güncellemeden sonra eski sayfa görünüyordu. Yeni ad = yeni adres.)
 # KR_DEV=1 (kediray update main / reinstall): sürüm aynı kalsa da tarayıcı önbelleği yeni adla aşılır

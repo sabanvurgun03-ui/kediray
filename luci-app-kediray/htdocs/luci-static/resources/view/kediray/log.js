@@ -86,7 +86,7 @@ function krTheme() {
 		/* Kedi tasarım sistemi: ortak stil dosyası + koyu/açık tema (Otomatik = sistem teması) */
 		if (!document.getElementById('kedi-css') && document.head) {
 			const lk = document.createElement('link');
-			lk.id = 'kedi-css'; lk.rel = 'stylesheet'; lk.href = '/luci-static/kedi.css?v=1.19.89';
+			lk.id = 'kedi-css'; lk.rel = 'stylesheet'; lk.href = '/luci-static/kedi.css?v=1.19.90';
 			document.head.appendChild(lk);
 		}
 		const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
