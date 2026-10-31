@@ -3,7 +3,8 @@
 Kullanım: python3 luci-theme-kedi/build.py   (önce gen-css.py çalışır)"""
 import os, base64, subprocess, sys
 here = os.path.dirname(os.path.abspath(__file__))
-subprocess.check_call([sys.executable, os.path.join(here, 'gen-css.py')])
+if os.path.exists(os.path.join(here, 'gen-css.py')):
+    subprocess.check_call([sys.executable, os.path.join(here, 'gen-css.py')])
 ver = open(os.path.join(here, 'VERSION')).read().strip()
 H = os.path.join(here, 'htdocs/luci-static')
 FILES = [  # (kaynak, hedef, kip)
