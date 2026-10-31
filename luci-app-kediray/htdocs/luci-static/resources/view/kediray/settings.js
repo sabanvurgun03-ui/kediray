@@ -62,29 +62,17 @@ function krTheme() {
 		let st = document.getElementById('kr-theme-css');
 		if (!st) { st = document.createElement('style'); st.id = 'kr-theme-css'; document.head.appendChild(st); }
 		let css = '';
-		if (mode !== 'auto') {
-			const d = mode === 'dark';
-			const bg = d ? '#14181e' : '#f3f5f8', fg = d ? '#e4e8ee' : '#1b2330', card = d ? '#1d232c' : '#ffffff',
-				bd = d ? '#333b47' : '#d3dae3', inp = d ? '#252c37' : '#ffffff';
-			css += 'html,body,body .main,body .main-right,body #maincontent,body #view,body .cbi-map,body .cbi-section,body .cbi-tabcontainer,body .cbi-section-node{background:' + bg + '!important;color:' + fg + '!important}'
-				+ 'body header,body .modal{background:' + card + '!important;color:' + fg + '!important}'
-				+ 'body header a,body .menu a,body label,body h1,body h2,body h3,body p,body td,body th{color:' + fg + '!important}'
-				+ '.kr-card{background:' + card + '!important;border-color:' + bd + '!important}'
-				+ 'body input,body select,body textarea,body .cbi-dropdown{background:' + inp + '!important;color:' + fg + '!important;border-color:' + bd + '!important}'
-				+ 'body .table .tr,body .table .th,body .table .td,body .cbi-section-table-row{background:transparent!important}'
-				+ 'body .btn,body .cbi-button{background:' + inp + '!important;color:' + fg + '!important;border-color:' + bd + '!important}'
-				+ 'body .cbi-button-negative{color:#e05252!important;border-color:#e05252!important}'
-				+ 'body .cbi-button-positive{background:#22a355!important;color:#fff!important;border-color:#22a355!important}'
-				+ 'body .cbi-button-action{background:' + (ac || '#2a7de1') + '!important;color:#fff!important;border-color:' + (ac || '#2a7de1') + '!important}';
+		/* Kedi tasarım sistemi: ortak stil dosyası + koyu/açık tema (Otomatik = sistem teması) */
+		if (!document.getElementById('kedi-css') && document.head) {
+			const lk = document.createElement('link');
+			lk.id = 'kedi-css'; lk.rel = 'stylesheet'; lk.href = '/luci-static/kedi.css?v=1.19.89';
+			document.head.appendChild(lk);
 		}
+		const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+		document.documentElement.setAttribute('data-kedi', mode === 'auto' ? ((mq && mq.matches) ? 'dark' : 'light') : mode);
+		if (mq && !window.__krMq) { window.__krMq = true; const f = () => krTheme(); if (mq.addEventListener) mq.addEventListener('change', f); }
 		if (ac) {
-			css += ':root{--kr-accent:' + ac + '}'
-				+ '.kr-seg button.kr-act:not(.kr-direct):not(.kr-block),.kr-tabs button.kr-act{background:' + ac + '!important;border-color:' + ac + '!important;color:#fff!important}'
-				+ '.kr-tag:not(.kr-tag-red){background:' + ac + '2e!important}'
-				+ '.kr-active{background:' + ac + '16!important}'
-				+ '.kr-card{border-top:3px solid ' + ac + '!important}'
-				+ '.kr-traffic{--krc-vpn:' + ac + '!important}'
-				+ 'body .cbi-button-action{background:' + ac + '!important;border-color:' + ac + '!important;color:#fff!important}';
+			css += 'html[data-kedi]{--k-a2:' + ac + ';--k-a1:color-mix(in srgb,' + ac + ' 55%,#000);--k-accent:color-mix(in srgb,' + ac + ' 55%,#fff)}';
 		}
 		/* Yakınlaştırma / uzaklaştırma: % değeri tarayıcıda saklanır; sağ alttaki − % + düğmeleri her KediRay sayfasında görünür */
 		const zm = Math.min(160, Math.max(60, Math.round((+c.zoom || 100) / 10) * 10));

@@ -10,6 +10,7 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 
 ## Özellikler
 
+- **Yeni tasarım (1.19.89):** mor Kedi teması, koyu/açık/otomatik, telefonda da rahat; aynı renk modeli AW1K Panel ile ortak
 - Xray tabanlı VPN, birden fazla sunucu (düğüm), en iyi sunucuyu otomatik seçme
 - **Bağlantıyı kes:** sunucudan ayrıl, VPN açık kalsın, trafik doğrudan çıksın
 - **VPN Ayırma:** uygulama bazında yol seçimi (VPN, doğrudan, WARP, parçalama)
@@ -25,13 +26,27 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 
 ## Ekran görüntüleri
 
-<p align="center"><img src="docs/ana-panel.png" alt="KediRay ana panel" width="560"></p>
+<p align="center"><img src="docs/ana-panel.png" alt="KediRay ana panel (koyu)" width="640"></p>
 
-*KediRay VPN ana paneli (örnek verilerle): canlı hız, durum, bağlı sunucu, uygulama/cihaz yönü (VPN / Direkt) ve sunucu listesi.*
+*Kontrol Paneli (örnek verilerle): canlı hız ve oturum toplamı, durum, bağlı sunucu, uygulama/cihaz yönü (VPN / Direkt) ve sunucu listesi.*
+
+<p align="center"><img src="docs/ana-panel-acik.png" alt="KediRay ana panel (açık)" width="420">&nbsp;<img src="docs/mobil.png" alt="KediRay mobil görünüm" width="170"></p>
+
+*Açık tema ve telefon görünümü: koyu / açık / otomatik (sistem teması); her ekran boyutunda çalışır.*
+
+<p align="center"><img src="docs/trafik.png" alt="KediRay Trafik" width="560"></p>
+
+*Trafik: bugün / dün / hafta / ay, cihaz bazında kullanım, günlük ve aylık grafikler.*
 
 <p align="center"><img src="docs/vpn-ayirma.png" alt="KediRay VPN Ayırma" width="560"></p>
 
 *VPN Ayırma: VPN motoru, Cloudflare WARP ve uygulama bazında VPN / Direkt / Parçala / WARP seçimi.*
+
+<p align="center"><img src="docs/ayarlar.png" alt="KediRay Ayarlar" width="420">&nbsp;<img src="docs/cekirdekler.png" alt="KediRay Çekirdekler" width="420"></p>
+
+*Ayarlar ve Çekirdekler (Xray · sing-box · mihomo).*
+
+> Ekran görüntüleri örnek verilerle, gerçek arayüz koduyla alınmıştır.
 
 ## Sistem gereksinimleri
 
@@ -107,6 +122,7 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 
 ### Features
 
+- **New design (1.19.89):** purple Kedi theme, dark/light/auto, phone-friendly; same colour model as AW1K Panel
 - Xray-based VPN with multiple servers (nodes) and automatic best-server selection
 - **Disconnect:** leave the server but keep the VPN on, traffic goes out directly
 - **Split routing:** per-app route (VPN, direct, WARP, fragmentation)
@@ -122,13 +138,27 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 
 ### Screenshots
 
-<p align="center"><img src="docs/ana-panel.png" alt="KediRay main panel" width="560"></p>
+<p align="center"><img src="docs/ana-panel.png" alt="KediRay main panel (dark)" width="640"></p>
 
-*KediRay VPN main panel (sample data): live speed, status, connected server, per-app/device route (VPN / Direct) and server list.*
+*Dashboard (sample data): live speed and session totals, status, connected server, per-app/device route (VPN / Direct) and server list.*
+
+<p align="center"><img src="docs/ana-panel-acik.png" alt="KediRay main panel (light)" width="420">&nbsp;<img src="docs/mobil.png" alt="KediRay mobile view" width="170"></p>
+
+*Light theme and phone layout: dark / light / auto (system theme); responsive on every screen size.*
+
+<p align="center"><img src="docs/trafik.png" alt="KediRay Traffic" width="560"></p>
+
+*Traffic: today / yesterday / week / month, per-device usage, daily and monthly charts.*
 
 <p align="center"><img src="docs/vpn-ayirma.png" alt="KediRay VPN split" width="560"></p>
 
 *VPN split: VPN engine, Cloudflare WARP and per-app VPN / Direct / Fragment / WARP choice.*
+
+<p align="center"><img src="docs/ayarlar.png" alt="KediRay Settings" width="420">&nbsp;<img src="docs/cekirdekler.png" alt="KediRay Cores" width="420"></p>
+
+*Settings and Cores (Xray · sing-box · mihomo).*
+
+> Screenshots use sample data and the real interface code.
 
 ### System requirements
 

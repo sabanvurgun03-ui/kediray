@@ -3972,7 +3972,7 @@ cmd_uninstall() {
 	/etc/init.d/cron restart >/dev/null 2>&1
 	rm -rf "$SHARE" "$RUN" /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray \
 		/www/luci-static/resources/view/kediray /usr/share/luci/menu.d/luci-app-kediray.json \
-		/usr/share/rpcd/acl.d/luci-app-kediray.json /www/luci-static/kedi-logo.svg /etc/kediray.sub_last /etc/kediray.traffic.json
+		/usr/share/rpcd/acl.d/luci-app-kediray.json /www/luci-static/kedi-logo.svg /www/luci-static/kedi.css /etc/kediray.sub_last /etc/kediray.traffic.json
 	[ "$1" = "--purge" ] && rm -f /etc/config/kediray
 	rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
 	/etc/init.d/rpcd reload >/dev/null 2>&1

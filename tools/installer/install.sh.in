@@ -257,6 +257,7 @@ write_files() {
 @@KR_FILE luci-app-kediray/root/usr/share/luci/menu.d/luci-app-kediray.json@@
 @@KR_FILE luci-app-kediray/root/usr/share/rpcd/acl.d/luci-app-kediray.json@@
 @@KR_FILE luci-app-kediray/htdocs/luci-static/kedi-logo.svg@@
+@@KR_FILE luci-app-kediray/htdocs/luci-static/kedi.css@@
 mkdir -p /usr/libexec/rpcd
 @@KR_FILE package/aw1k-panel/files/usr/bin/aw1k-usage@@
 @@KR_FILE package/aw1k-panel/files/usr/libexec/rpcd/aw1k@@
