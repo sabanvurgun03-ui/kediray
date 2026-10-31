@@ -30,9 +30,10 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 
 *Kontrol Paneli (örnek verilerle): canlı hız ve oturum toplamı, durum, bağlı sunucu, uygulama/cihaz yönü (VPN / Direkt) ve sunucu listesi.*
 
-<p align="center"><img src="docs/ana-panel-acik.png" alt="KediRay ana panel (açık)" width="640"></p>
-
-<p align="center"><img src="docs/mobil.png" alt="KediRay mobil görünüm" width="260"></p>
+<table align="center"><tr>
+<td valign="top"><img src="docs/ana-panel-acik.png" alt="KediRay light" width="520"></td>
+<td valign="top"><img src="docs/mobil.png" alt="KediRay mobile" width="200"></td>
+</tr></table>
 
 *Açık tema ve telefon görünümü: koyu / açık / otomatik (sistem teması); her ekran boyutunda çalışır.*
 
@@ -44,9 +45,10 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 
 *VPN Ayırma: VPN motoru, Cloudflare WARP ve uygulama bazında VPN / Direkt / Parçala / WARP seçimi.*
 
-<p align="center"><img src="docs/ayarlar.png" alt="KediRay Ayarlar" width="560"></p>
-
-<p align="center"><img src="docs/cekirdekler.png" alt="KediRay Çekirdekler" width="560"></p>
+<table align="center"><tr>
+<td valign="top"><img src="docs/ayarlar.png" alt="KediRay Settings" width="400"></td>
+<td valign="top"><img src="docs/cekirdekler.png" alt="KediRay Cores" width="400"></td>
+</tr></table>
 
 *Ayarlar ve Çekirdekler (Xray · sing-box · mihomo).*
 
@@ -146,9 +148,10 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 
 *Dashboard (sample data): live speed and session totals, status, connected server, per-app/device route (VPN / Direct) and server list.*
 
-<p align="center"><img src="docs/ana-panel-acik.png" alt="KediRay main panel (light)" width="640"></p>
-
-<p align="center"><img src="docs/mobil.png" alt="KediRay mobile view" width="260"></p>
+<table align="center"><tr>
+<td valign="top"><img src="docs/ana-panel-acik.png" alt="KediRay light" width="520"></td>
+<td valign="top"><img src="docs/mobil.png" alt="KediRay mobile" width="200"></td>
+</tr></table>
 
 *Light theme and phone layout: dark / light / auto (system theme); responsive on every screen size.*
 
@@ -160,9 +163,10 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 
 *VPN split: VPN engine, Cloudflare WARP and per-app VPN / Direct / Fragment / WARP choice.*
 
-<p align="center"><img src="docs/ayarlar.png" alt="KediRay Settings" width="560"></p>
-
-<p align="center"><img src="docs/cekirdekler.png" alt="KediRay Cores" width="560"></p>
+<table align="center"><tr>
+<td valign="top"><img src="docs/ayarlar.png" alt="KediRay Settings" width="400"></td>
+<td valign="top"><img src="docs/cekirdekler.png" alt="KediRay Cores" width="400"></td>
+</tr></table>
 
 *Settings and Cores (Xray · sing-box · mihomo).*
 
