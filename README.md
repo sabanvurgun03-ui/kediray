@@ -30,9 +30,13 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 
 *Kontrol Paneli (örnek verilerle): canlı hız ve oturum toplamı, durum, bağlı sunucu, uygulama/cihaz yönü (VPN / Direkt) ve sunucu listesi.*
 
+<p align="center"><img src="docs/ana-panel-acik.png" alt="KediRay light" width="640"></p>
+
 <table align="center"><tr>
-<td valign="top"><img src="docs/ana-panel-acik.png" alt="KediRay light" width="520"></td>
-<td valign="top"><img src="docs/mobil.png" alt="KediRay mobile" width="200"></td>
+<td valign="top"><img src="docs/mobil-1.png" alt="KediRay mobile 1" width="150"></td>
+<td valign="top"><img src="docs/mobil-2.png" alt="KediRay mobile 2" width="150"></td>
+<td valign="top"><img src="docs/mobil-3.png" alt="KediRay mobile 3" width="150"></td>
+<td valign="top"><img src="docs/mobil-4.png" alt="KediRay mobile 4" width="150"></td>
 </tr></table>
 
 *Açık tema ve telefon görünümü: koyu / açık / otomatik (sistem teması); her ekran boyutunda çalışır.*
@@ -148,9 +152,13 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 
 *Dashboard (sample data): live speed and session totals, status, connected server, per-app/device route (VPN / Direct) and server list.*
 
+<p align="center"><img src="docs/ana-panel-acik.png" alt="KediRay light" width="640"></p>
+
 <table align="center"><tr>
-<td valign="top"><img src="docs/ana-panel-acik.png" alt="KediRay light" width="520"></td>
-<td valign="top"><img src="docs/mobil.png" alt="KediRay mobile" width="200"></td>
+<td valign="top"><img src="docs/mobil-1.png" alt="KediRay mobile 1" width="150"></td>
+<td valign="top"><img src="docs/mobil-2.png" alt="KediRay mobile 2" width="150"></td>
+<td valign="top"><img src="docs/mobil-3.png" alt="KediRay mobile 3" width="150"></td>
+<td valign="top"><img src="docs/mobil-4.png" alt="KediRay mobile 4" width="150"></td>
 </tr></table>
 
 *Light theme and phone layout: dark / light / auto (system theme); responsive on every screen size.*
