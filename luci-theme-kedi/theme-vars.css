@@ -1,0 +1,22 @@
+/* luci-theme-kedi — Bootstrap'in renk değişkenlerini Kedi paletiyle değiştirir; ardından ortak Kedi kuralları gelir. */
+:root[data-kedi]{
+	--background-color-h:262;--background-color-s:40%;--background-color-l:9%;
+	--primary-color-high:#8B5CF6;--primary-color-medium:#7C3AED;--primary-color-low:#6D28D9;--on-primary-color:#fff;
+	--error-color-high-rgb:242,112,109;--error-color-high:#F2706D;--error-color-medium:#E25B58;--error-color-low:#D4504D;--on-error-color:#fff;
+	--success-color-high-rgb:61,209,111;--success-color-high:#3DD16F;--success-color-medium:#2FBF60;--success-color-low:#25A652;--on-success-color:#0b1a10;
+	--warn-color-high:#F0B429;--warn-color-medium:#E3A81E;--warn-color-low:#D49A12;--on-warn-color:#1b1200;
+	--font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+:root[data-kedi="light"]{
+	--background-color-h:255;--background-color-s:100%;--background-color-l:98%;
+	--text-color-h:262;--text-color-s:45%;--text-color-l:12%;
+}
+:root[data-kedi="dark"]{
+	--background-color-delta-l-sign:1;--text-color-delta-l-sign:-1;--border-color-delta-l-sign:1;
+	--text-color-h:262;--text-color-s:30%;--text-color-l:95%;
+}
+/* KediRay · Kedi tasarım sistemi (mor) — tüm KediRay sayfaları bu dosyayı kullanır.
+   Yalnızca görünümdür: veri, düğme davranışı ve CLI çıktıları değişmez.
+   Etkinleştirme: krTheme() <html data-kedi="dark|light"> yazar (Otomatik = sistem teması).
+   Renk modeli, AW1K Panel (Android) ThemeDef ile aynıdır: bg, accent, panel, panelEnd, good, warn, bad. */
+

@@ -11,6 +11,7 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 ## Özellikler
 
 - **Yeni tasarım (1.19.90):** mor Kedi teması, koyu/açık/otomatik, telefonda da rahat; aynı renk modeli AW1K Panel ile ortak
+- **Kedi LuCI teması (isteğe bağlı):** tüm OpenWrt arayüzüne aynı mor tema, ayrı kurulum betiği: `luci-theme-kedi-install.sh` (bkz. `luci-theme-kedi/README.md`)
 - Xray tabanlı VPN, birden fazla sunucu (düğüm), en iyi sunucuyu otomatik seçme
 - **Bağlantıyı kes:** sunucudan ayrıl, VPN açık kalsın, trafik doğrudan çıksın
 - **VPN Ayırma:** uygulama bazında yol seçimi (VPN, doğrudan, WARP, parçalama)
@@ -133,6 +134,7 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 ### Features
 
 - **New design (1.19.90):** purple Kedi theme, dark/light/auto, phone-friendly; same colour model as AW1K Panel
+- **Kedi LuCI theme (optional):** the same purple theme for the whole OpenWrt interface, separate installer `luci-theme-kedi-install.sh` (see `luci-theme-kedi/README.md`)
 - Xray-based VPN with multiple servers (nodes) and automatic best-server selection
 - **Disconnect:** leave the server but keep the VPN on, traffic goes out directly
 - **Split routing:** per-app route (VPN, direct, WARP, fragmentation)

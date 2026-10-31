@@ -1,0 +1,173 @@
+/* luci-theme-kedi — Bootstrap'in renk değişkenlerini Kedi paletiyle değiştirir; ardından ortak Kedi kuralları gelir. */
+:root[data-kedi]{
+	--background-color-h:262;--background-color-s:40%;--background-color-l:9%;
+	--primary-color-high:#8B5CF6;--primary-color-medium:#7C3AED;--primary-color-low:#6D28D9;--on-primary-color:#fff;
+	--error-color-high-rgb:242,112,109;--error-color-high:#F2706D;--error-color-medium:#E25B58;--error-color-low:#D4504D;--on-error-color:#fff;
+	--success-color-high-rgb:61,209,111;--success-color-high:#3DD16F;--success-color-medium:#2FBF60;--success-color-low:#25A652;--on-success-color:#0b1a10;
+	--warn-color-high:#F0B429;--warn-color-medium:#E3A81E;--warn-color-low:#D49A12;--on-warn-color:#1b1200;
+	--font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+:root[data-kedi="light"]{
+	--background-color-h:255;--background-color-s:100%;--background-color-l:98%;
+	--text-color-h:262;--text-color-s:45%;--text-color-l:12%;
+}
+:root[data-kedi="dark"]{
+	--background-color-delta-l-sign:1;--text-color-delta-l-sign:-1;--border-color-delta-l-sign:1;
+	--text-color-h:262;--text-color-s:30%;--text-color-l:95%;
+}
+/* KediRay · Kedi tasarım sistemi (mor) — tüm KediRay sayfaları bu dosyayı kullanır.
+   Yalnızca görünümdür: veri, düğme davranışı ve CLI çıktıları değişmez.
+   Etkinleştirme: krTheme() <html data-kedi="dark|light"> yazar (Otomatik = sistem teması).
+   Renk modeli, AW1K Panel (Android) ThemeDef ile aynıdır: bg, accent, panel, panelEnd, good, warn, bad. */
+
+/* KediRay · Kedi tasarım sistemi (mor) — tüm KediRay sayfaları bu dosyayı kullanır.
+   Yalnızca görünümdür: veri, düğme davranışı ve CLI çıktıları değişmez.
+   Etkinleştirme: krTheme() <html data-kedi="dark|light"> yazar (Otomatik = sistem teması).
+   Renk modeli, AW1K Panel (Android) ThemeDef ile aynıdır: bg, accent, panel, panelEnd, good, warn, bad. */
+
+html[data-kedi]{
+	--k-bg:#110B1E;--k-bg2:#160F27;--k-card:#1B1330;--k-card2:#251A41;--k-in:#1F1636;
+	--k-line:rgba(196,181,253,.15);--k-line2:rgba(196,181,253,.28);
+	--k-ink:#EEE9FB;--k-soft:#B8AED3;--k-mute:#8B80AA;
+	--k-accent:#C4B5FD;--k-a1:#4C1D95;--k-a2:#7C3AED;--k-on:#fff;
+	--k-good:#3DD16F;--k-warn:#F0B429;--k-bad:#F2706D;--k-bolt:#FBBF24;--k-direct:#5EEAD4;
+	--k-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 10px 30px -14px rgba(0,0,0,.65);
+	--k-r1:22px;--k-r2:14px;--k-r3:10px;
+	color-scheme:dark;
+}
+html[data-kedi="light"]{
+	--k-bg:#F5F2FF;--k-bg2:#EFEBFB;--k-card:#FFFFFF;--k-card2:#F3EEFF;--k-in:#FFFFFF;
+	--k-line:rgba(76,29,149,.14);--k-line2:rgba(76,29,149,.3);
+	--k-ink:#1E1233;--k-soft:#54487A;--k-mute:#7B709B;
+	--k-accent:#6D28D9;--k-a1:#4C1D95;--k-a2:#7C3AED;
+	--k-good:#16A34A;--k-warn:#B7791F;--k-bad:#D43F3B;--k-bolt:#D99A06;--k-direct:#0F9E8E;
+	--k-shadow:0 1px 2px rgba(76,29,149,.06),0 10px 28px -16px rgba(76,29,149,.35);
+	color-scheme:light;
+}
+
+/* ---------- sayfa zemini ve LuCI kabuğu ---------- */
+html[data-kedi],html[data-kedi] body{background:var(--k-bg)!important;color:var(--k-ink)!important}
+html[data-kedi] body .main,html[data-kedi] body .main-right,html[data-kedi] body #maincontent,
+html[data-kedi] body #view,html[data-kedi] body .cbi-map,html[data-kedi] body .cbi-section,
+html[data-kedi] body .cbi-section-node,html[data-kedi] body .cbi-tabcontainer{background:transparent!important;color:var(--k-ink)!important}
+html[data-kedi] body header,html[data-kedi] body .main > header{background:var(--k-bg2)!important;border-bottom:1px solid var(--k-line);color:var(--k-ink)!important}
+html[data-kedi] body header a,html[data-kedi] body .menu a{color:var(--k-soft)!important}
+html[data-kedi] body header a:hover,html[data-kedi] body .menu a:hover{color:var(--k-ink)!important}
+html[data-kedi] body header .brand{color:var(--k-ink)!important;font-weight:600;letter-spacing:.01em}
+html[data-kedi] body #maincontent{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;max-width:1240px}
+html[data-kedi] body h1,html[data-kedi] body h2,html[data-kedi] body h3,html[data-kedi] body label,
+html[data-kedi] body p,html[data-kedi] body td,html[data-kedi] body th,html[data-kedi] body legend{color:var(--k-ink)!important}
+html[data-kedi] body a{color:var(--k-accent)}
+html[data-kedi] body .main > footer,html[data-kedi] body footer{color:var(--k-mute)!important}
+html[data-kedi] ::selection{background:var(--k-a2);color:#fff}
+
+/* sayfa başlığı: logo + ad */
+html[data-kedi] body #view > div > h2,html[data-kedi] body #view h2:first-child{
+	display:flex;align-items:center;gap:12px;margin:6px 0 18px!important;font-size:1.7em;font-weight:700;letter-spacing:-.01em;color:var(--k-ink)!important;border:0}
+html[data-kedi] body #view h2 img{height:1.55em!important;width:1.55em;margin:0!important;vertical-align:baseline!important;border-radius:11px!important;box-shadow:0 6px 18px -6px rgba(124,58,237,.7)}
+
+/* üst sekmeler (Kontrol Paneli · Trafik · …) ve ayar sekmeleri */
+html[data-kedi] body .tabs,html[data-kedi] body .cbi-tabmenu{background:transparent!important;border:0!important;border-bottom:1px solid var(--k-line)!important;display:flex;flex-wrap:wrap;gap:2px;margin:0 0 18px!important;padding:0!important}
+html[data-kedi] body .tabs > li,html[data-kedi] body .cbi-tabmenu > li{background:transparent!important;border:0!important;margin:0!important;border-radius:0!important}
+html[data-kedi] body .tabs > li > a,html[data-kedi] body .cbi-tabmenu > li > a{color:var(--k-soft)!important;background:transparent!important;border:0!important;border-radius:10px 10px 0 0;padding:9px 15px;font-weight:550;display:block}
+html[data-kedi] body .tabs > li:hover > a,html[data-kedi] body .cbi-tabmenu > li:hover > a{color:var(--k-ink)!important;background:var(--k-card)!important}
+html[data-kedi] body .tabs > li.active > a,html[data-kedi] body .cbi-tabmenu > li.cbi-tab > a,html[data-kedi] body .cbi-tabmenu > li.active > a{color:var(--k-ink)!important;box-shadow:inset 0 -3px 0 var(--k-bolt);background:var(--k-card)!important}
+@media (max-width:700px){html[data-kedi] body .tabs,html[data-kedi] body .cbi-tabmenu{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}html[data-kedi] body .tabs > li > a,html[data-kedi] body .cbi-tabmenu > li > a{white-space:nowrap}}
+
+/* ---------- kartlar ---------- */
+html[data-kedi] .kr-card{background:var(--k-card)!important;border:1px solid var(--k-line)!important;border-top:1px solid var(--k-line)!important;border-radius:var(--k-r1);padding:18px 20px;box-shadow:var(--k-shadow);color:var(--k-ink)}
+html[data-kedi] .kr-card:hover{box-shadow:var(--k-shadow);border-color:var(--k-line2)!important}
+html[data-kedi] .kr-card h3{margin:0 0 12px;font-size:1.02em;font-weight:650;opacity:1;color:var(--k-ink)!important}
+html[data-kedi] .kr-ch:hover{opacity:1}
+html[data-kedi] .kr-caret{color:var(--k-accent);opacity:1}
+html[data-kedi] .kr-grid{gap:16px;margin-bottom:16px}
+html[data-kedi] .kr-grid > .kr-card:first-child{background:radial-gradient(120% 90% at 0 0,color-mix(in srgb,var(--k-a2) 26%,var(--k-card)),var(--k-card) 70%)!important}
+html[data-kedi] .kr-sub,html[data-kedi] .kr-hint{color:var(--k-soft);opacity:1}
+html[data-kedi] .kr-big{font-size:1.45em;font-weight:700;color:var(--k-ink)}
+html[data-kedi] .kr-mono{background:var(--k-card2);color:var(--k-ink);border:1px solid var(--k-line);border-radius:7px}
+html[data-kedi] .kr-app{border-bottom:1px solid var(--k-line)}
+html[data-kedi] .kr-tag{background:color-mix(in srgb,var(--k-a2) 28%,transparent)!important;color:var(--k-accent);border-radius:999px;padding:1px 9px;font-weight:600}
+html[data-kedi] .kr-tag.kr-tag-red{background:color-mix(in srgb,var(--k-bad) 24%,transparent)!important;color:var(--k-bad)}
+html[data-kedi] .kr-active{background:color-mix(in srgb,var(--k-a2) 14%,transparent)!important}
+html[data-kedi] .kr-warn{background:color-mix(in srgb,var(--k-warn) 14%,transparent);border-color:color-mix(in srgb,var(--k-warn) 45%,transparent);color:var(--k-ink);border-radius:var(--k-r3)}
+html[data-kedi] .kr-errs{background:color-mix(in srgb,var(--k-bad) 12%,transparent);border-color:color-mix(in srgb,var(--k-bad) 45%,transparent);border-radius:var(--k-r3)}
+html[data-kedi] .kr-ok{color:var(--k-good)}html[data-kedi] .kr-no{color:var(--k-bad)}
+html[data-kedi] .kr-view,html[data-kedi] .kr-ed,html[data-kedi] .kr-gut{background:var(--k-in);border-color:var(--k-line);color:var(--k-ink)}
+html[data-kedi] .kr-ed{border-radius:var(--k-r3)}
+
+/* durum noktası */
+html[data-kedi] .kr-dot{width:11px;height:11px}
+
+/* ---------- düğmeler ---------- */
+html[data-kedi] body .btn,html[data-kedi] body .cbi-button,html[data-kedi] body button.cbi-button{
+	background:var(--k-card2)!important;color:var(--k-ink)!important;border:1px solid var(--k-line2)!important;border-radius:var(--k-r3)!important;
+	box-shadow:none!important;text-shadow:none!important;min-height:34px;padding:6px 14px;font-weight:550;transition:background .18s,border-color .18s,transform .08s}
+html[data-kedi] body .btn:hover,html[data-kedi] body .cbi-button:hover{background:color-mix(in srgb,var(--k-a2) 22%,var(--k-card2))!important;border-color:var(--k-accent)!important}
+html[data-kedi] body .btn:active,html[data-kedi] body .cbi-button:active{transform:translateY(1px)}
+html[data-kedi] body .cbi-button-action,html[data-kedi] body .btn.cbi-button-action,html[data-kedi] body button.cbi-button.cbi-button-action,html[data-kedi] body .cbi-page-actions .cbi-button-action,html[data-kedi] body .cbi-button-apply,html[data-kedi] body .btn.cbi-button-apply,html[data-kedi] body button.cbi-button.cbi-button-apply,html[data-kedi] body .cbi-page-actions .cbi-button-apply,html[data-kedi] body .cbi-button-save,html[data-kedi] body .btn.cbi-button-save,html[data-kedi] body button.cbi-button.cbi-button-save,html[data-kedi] body .cbi-page-actions .cbi-button-save,html[data-kedi] body .cbi-button-positive,html[data-kedi] body .btn.cbi-button-positive,html[data-kedi] body button.cbi-button.cbi-button-positive,html[data-kedi] body .cbi-page-actions .cbi-button-positive{
+	background:linear-gradient(135deg,var(--k-a1),var(--k-a2))!important;color:#fff!important;border-color:transparent!important}
+html[data-kedi] body .cbi-button-action:hover,html[data-kedi] body .btn.cbi-button-action:hover,html[data-kedi] body button.cbi-button.cbi-button-action:hover,html[data-kedi] body .cbi-page-actions .cbi-button-action:hover,html[data-kedi] body .cbi-button-apply:hover,html[data-kedi] body .btn.cbi-button-apply:hover,html[data-kedi] body button.cbi-button.cbi-button-apply:hover,html[data-kedi] body .cbi-page-actions .cbi-button-apply:hover,html[data-kedi] body .cbi-button-save:hover,html[data-kedi] body .btn.cbi-button-save:hover,html[data-kedi] body button.cbi-button.cbi-button-save:hover,html[data-kedi] body .cbi-page-actions .cbi-button-save:hover,html[data-kedi] body .cbi-button-positive:hover,html[data-kedi] body .btn.cbi-button-positive:hover,html[data-kedi] body button.cbi-button.cbi-button-positive:hover,html[data-kedi] body .cbi-page-actions .cbi-button-positive:hover{filter:brightness(1.12);background:linear-gradient(135deg,var(--k-a1),var(--k-a2))!important}
+html[data-kedi] body .cbi-button-negative,html[data-kedi] body .cbi-button-remove{color:var(--k-bad)!important;border-color:color-mix(in srgb,var(--k-bad) 55%,transparent)!important;background:transparent!important}
+html[data-kedi] body .cbi-button-negative:hover{background:color-mix(in srgb,var(--k-bad) 16%,transparent)!important}
+html[data-kedi] body .btn[disabled],html[data-kedi] body .cbi-button[disabled]{opacity:.45}
+html[data-kedi] body :focus-visible{outline:2px solid var(--k-bolt);outline-offset:2px}
+
+/* VPN | Direkt | Engelle seçici */
+html[data-kedi] .kr-seg{border:1px solid var(--k-line2);border-radius:999px;background:var(--k-in);padding:2px;gap:2px}
+html[data-kedi] .kr-seg button{border-radius:999px!important;padding:5px 15px;color:var(--k-soft)!important;background:transparent!important;border:0!important;min-height:0}
+html[data-kedi] .kr-seg button:not(.kr-act):hover{background:var(--k-card2)!important;color:var(--k-ink)!important}
+html[data-kedi] .kr-seg button.kr-act{background:linear-gradient(135deg,var(--k-a1),var(--k-a2))!important;color:#fff!important;animation:none}
+html[data-kedi] .kr-seg button.kr-act.kr-direct{background:linear-gradient(135deg,#0F766E,#14B8A6)!important;color:#fff!important}
+html[data-kedi] .kr-seg button.kr-act.kr-block{background:linear-gradient(135deg,#9F1239,#E11D48)!important;color:#fff!important}
+html[data-kedi] .kr-seg button.kr-blockbtn{color:var(--k-bad)!important}
+html[data-kedi] .kr-seg:has(button.kr-act){animation:none}
+html[data-kedi] .kr-seg.kr-dim{opacity:.45}
+html[data-kedi] .kr-seg.kr-dim button.kr-act{background:transparent!important;color:var(--k-soft)!important}
+/* sekmeler (sunucu ekle penceresi vb.) */
+html[data-kedi] .kr-tabs button{border:1px solid var(--k-line2);color:var(--k-soft);background:transparent;border-radius:999px;padding:5px 16px}
+html[data-kedi] .kr-tabs button.kr-act{background:linear-gradient(135deg,var(--k-a1),var(--k-a2))!important;border-color:transparent!important;color:#fff!important}
+
+/* anahtar */
+html[data-kedi] .kr-switch span.kr-knob{background:var(--k-line2)}
+html[data-kedi] .kr-switch input:checked + span.kr-knob{background:var(--k-a2)}
+html[data-kedi] .kr-switch span.kr-knob:after{box-shadow:0 1px 3px rgba(0,0,0,.4)}
+
+/* ---------- form alanları ---------- */
+html[data-kedi] body input:not([type=checkbox]):not([type=radio]),html[data-kedi] body select,html[data-kedi] body textarea,html[data-kedi] body .cbi-dropdown{
+	background:var(--k-in)!important;color:var(--k-ink)!important;border:1px solid var(--k-line2)!important;border-radius:var(--k-r3)!important;box-shadow:none!important;min-height:34px}
+html[data-kedi] body input:focus,html[data-kedi] body select:focus,html[data-kedi] body textarea:focus{border-color:var(--k-accent)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--k-a2) 30%,transparent)!important}
+html[data-kedi] body input[type=checkbox],html[data-kedi] body input[type=radio]{accent-color:var(--k-a2)}
+html[data-kedi] body .cbi-dropdown > ul,html[data-kedi] body .cbi-dropdown > ul > li{background:var(--k-card)!important;color:var(--k-ink)!important}
+html[data-kedi] body .cbi-dropdown > ul > li[selected],html[data-kedi] body .cbi-dropdown > ul > li:hover{background:var(--k-card2)!important}
+html[data-kedi] body .cbi-value-description,html[data-kedi] body .cbi-section-descr,html[data-kedi] body .cbi-value-helptext{color:var(--k-soft)!important}
+html[data-kedi] body .cbi-value{border-bottom:1px solid var(--k-line)}
+html[data-kedi] body .cbi-section{background:var(--k-card)!important;border:1px solid var(--k-line);border-radius:var(--k-r1);padding:14px 20px;margin-bottom:16px;box-shadow:var(--k-shadow)}
+html[data-kedi] body .cbi-section h3{border-bottom:1px solid var(--k-line)}
+
+/* ---------- tablolar ---------- */
+html[data-kedi] body .table,html[data-kedi] body table{border-color:var(--k-line)!important}
+html[data-kedi] body .table .tr,html[data-kedi] body .table .td,html[data-kedi] body .table .th,html[data-kedi] body .cbi-section-table-row,html[data-kedi] body table tr{background:transparent!important;border-color:var(--k-line)!important}
+html[data-kedi] body .table .th,html[data-kedi] body table th{color:var(--k-soft)!important;font-size:.82em;font-weight:600;letter-spacing:.02em;border-bottom:1px solid var(--k-line2)!important}
+html[data-kedi] body table.kr-table tr:hover td,html[data-kedi] body .table .tr:hover .td{background:color-mix(in srgb,var(--k-a2) 8%,transparent)!important}
+html[data-kedi] .kr-table td,html[data-kedi] .kr-table th{padding:9px 10px!important}
+
+/* ---------- pencereler ---------- */
+html[data-kedi] body .modal{background:var(--k-card)!important;color:var(--k-ink)!important;border:1px solid var(--k-line2);border-radius:var(--k-r1);box-shadow:0 30px 80px -20px rgba(0,0,0,.7)}
+html[data-kedi] body #modal_overlay{background:rgba(10,6,20,.62)!important;backdrop-filter:blur(3px)}
+html[data-kedi] body .modal h4{color:var(--k-ink)!important}
+
+/* genel LuCI parçaları */
+html[data-kedi] body .alert-message{border-radius:var(--k-r2);border:1px solid var(--k-line2);background:var(--k-card)!important;color:var(--k-ink)}
+html[data-kedi] body .cbi-progressbar{border-radius:999px;border-color:var(--k-line2);background:var(--k-in)}
+html[data-kedi] body .cbi-progressbar > div{background:linear-gradient(90deg,var(--k-a1),var(--k-a2))!important;border-radius:999px}
+html[data-kedi] body .ifacebox,html[data-kedi] body .ifacebadge{background:var(--k-card)!important;border:1px solid var(--k-line)!important;border-radius:var(--k-r2);color:var(--k-ink)}
+html[data-kedi] body .label{border-radius:999px}
+html[data-kedi] body pre,html[data-kedi] body code,html[data-kedi] body .cbi-tooltip{background:var(--k-card2);color:var(--k-ink);border-radius:var(--k-r3);border:1px solid var(--k-line)}
+html[data-kedi] body .cbi-section-error{border-radius:var(--k-r3)}
+html[data-kedi] body .spinning{color:var(--k-soft)}
+html[data-kedi] body #indicators .label{background:color-mix(in srgb,var(--k-a2) 30%,transparent);color:var(--k-ink)!important}
+html[data-kedi] body .cbi-page-actions{background:transparent!important;border:0!important;padding:8px 0!important}
+html[data-kedi] body header ul .active > a,html[data-kedi] body header .nav .active > a,html[data-kedi] body header .brand:hover{background:color-mix(in srgb,var(--k-a2) 24%,transparent)!important;color:var(--k-ink)!important;box-shadow:inset 0 -3px 0 var(--k-bolt)}
+html[data-kedi] body .nav .dropdown-menu{background:var(--k-card)!important;border:1px solid var(--k-line2);border-radius:var(--k-r3);box-shadow:var(--k-shadow)}
+html[data-kedi] body .nav .dropdown-menu a{color:var(--k-ink)!important}
+html[data-kedi] body .nav .dropdown-menu a:hover,html[data-kedi] body .nav .dropdown-menu .active a{background:color-mix(in srgb,var(--k-a2) 22%,transparent)!important}

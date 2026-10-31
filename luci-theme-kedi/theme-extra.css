@@ -1,0 +1,15 @@
+/* genel LuCI parçaları */
+html[data-kedi] body .alert-message{border-radius:var(--k-r2);border:1px solid var(--k-line2);background:var(--k-card)!important;color:var(--k-ink)}
+html[data-kedi] body .cbi-progressbar{border-radius:999px;border-color:var(--k-line2);background:var(--k-in)}
+html[data-kedi] body .cbi-progressbar > div{background:linear-gradient(90deg,var(--k-a1),var(--k-a2))!important;border-radius:999px}
+html[data-kedi] body .ifacebox,html[data-kedi] body .ifacebadge{background:var(--k-card)!important;border:1px solid var(--k-line)!important;border-radius:var(--k-r2);color:var(--k-ink)}
+html[data-kedi] body .label{border-radius:999px}
+html[data-kedi] body pre,html[data-kedi] body code,html[data-kedi] body .cbi-tooltip{background:var(--k-card2);color:var(--k-ink);border-radius:var(--k-r3);border:1px solid var(--k-line)}
+html[data-kedi] body .cbi-section-error{border-radius:var(--k-r3)}
+html[data-kedi] body .spinning{color:var(--k-soft)}
+html[data-kedi] body #indicators .label{background:color-mix(in srgb,var(--k-a2) 30%,transparent);color:var(--k-ink)!important}
+html[data-kedi] body .cbi-page-actions{background:transparent!important;border:0!important;padding:8px 0!important}
+html[data-kedi] body header ul .active > a,html[data-kedi] body header .nav .active > a,html[data-kedi] body header .brand:hover{background:color-mix(in srgb,var(--k-a2) 24%,transparent)!important;color:var(--k-ink)!important;box-shadow:inset 0 -3px 0 var(--k-bolt)}
+html[data-kedi] body .nav .dropdown-menu{background:var(--k-card)!important;border:1px solid var(--k-line2);border-radius:var(--k-r3);box-shadow:var(--k-shadow)}
+html[data-kedi] body .nav .dropdown-menu a{color:var(--k-ink)!important}
+html[data-kedi] body .nav .dropdown-menu a:hover,html[data-kedi] body .nav .dropdown-menu .active a{background:color-mix(in srgb,var(--k-a2) 22%,transparent)!important}
