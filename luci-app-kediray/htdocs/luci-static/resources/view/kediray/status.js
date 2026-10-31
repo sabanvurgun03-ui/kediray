@@ -581,7 +581,7 @@ function krTheme() {
 		/* Kedi tasarım sistemi: ortak stil dosyası + koyu/açık tema (Otomatik = sistem teması) */
 		if (!document.getElementById('kedi-css') && document.head) {
 			const lk = document.createElement('link');
-			lk.id = 'kedi-css'; lk.rel = 'stylesheet'; lk.href = '/luci-static/kedi.css?v=1.19.90';
+			lk.id = 'kedi-css'; lk.rel = 'stylesheet'; lk.href = '/luci-static/kedi.css?v=1.19.91';
 			document.head.appendChild(lk);
 		}
 		const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -1119,17 +1119,25 @@ return view.extend({
 		if (this.ownPrev !== undefined && this.ownPrev !== !!st.own) { location.reload(); return; }
 		this.ownPrev = !!st.own;
 		this.own = !!st.own;
-		[this.elApps, this.elNodes, this.elDevs].forEach(el => { if (el) el.style.display = this.own ? 'none' : ''; });
+		[this.elApps, this.elNodes, this.elDevs, this.elTools].forEach(el => { if (el) el.style.display = this.own ? 'none' : ''; });
 		const dot = st.running ? 'kr-on' : (st.enabled ? 'kr-err' : 'kr-off');
 		const txt = st.running ? 'Çalışıyor' : (st.enabled ? 'Durdu — Günlük sekmesine bak' : 'Kapalı');
 		const modes = { rule: 'Tümü VPN', global: 'Tümü VPN', list: 'Sadece liste VPN' };
 		const cf = st.conflict || [];
-		this.card(this.elStatus, 'status', 'Durum', [
-			h('div', { 'class': 'kr-big' }, [h('span', { 'class': 'kr-dot ' + dot }), txt]),
-			h('div', { 'class': 'kr-sub' }, [
+		const act = st.active;
+		const toggle = cf.length && !st.enabled
+			? btn.call(this, '⇄ Güvenli geçiş', 'cbi-button-positive', () => this.doTakeover(st))
+			: btn.call(this, st.enabled ? 'Durdur' : 'Başlat', st.enabled ? 'cbi-button-negative' : 'cbi-button-positive', () => this.doToggle(st));
+		dom.content(this.elStatus, [
+			h('div', { 'class': 'kk-top' }, [
+				h('div', { 'class': 'kk-state' }, [h('span', { 'class': 'kr-dot ' + dot }), txt, st.running ? [' · Açık: ', live(st.uptime)] : '']),
+				h('div', { 'class': 'kk-acts' }, [toggle, btn.call(this, 'Yeniden başlat', 'cbi-button-action', () => this.doRestart())])
+			]),
+			h('div', { 'class': 'kk-title' }, st.running ? 'Bağlısın' : txt),
+			h('div', { 'class': 'kk-sub' }, [
+				st.running && act && act.name && !st.own ? [h('span', {}, 'Trafiğin'), ' ', h('b', {}, act.name), ' ', h('span', {}, 'üzerinden çıkıyor.'), ' '] : '',
 				(st.engine || 'Xray') + ' ', st.core || '?', st.own ? ' · Kendi yapılandırma: ' + (st.own_file || '-') : [' · Mod: ', modes[st.mode] || st.mode || '-'],
 				' · Yakalama: ', ({ mixed: 'Mixed (TCP çekirdek + UDP hev)', tun: 'TUN (hepsi hev-socks5-tunnel)', tproxy: 'TPROXY', redirect: 'Redirect (sadece TCP)', own: 'Dosyadaki TUN / redirect girişi', native: 'mihomo yerel mod (TUN)' })[st.capture] || st.capture || '-',
-				st.running ? [' · Açık: ', live(st.uptime)] : '',
 				st.direct_dead ? ' · Direkt çıkış yok: "direkt" uygulamalar da VPN\'den çıkıyor' : ''
 			]),
 			cf.length ? h('div', { 'class': 'kr-warn' }, [
@@ -1144,19 +1152,19 @@ return view.extend({
 			st.last_error ? h('div', { 'class': 'kr-errs' }, [
 				h('b', {}, 'Yapılandırma hatası — VPN başlatılamadı'),
 				h('pre', { 'style': 'white-space:pre-wrap;margin:6px 0 0;font-size:.85em' }, st.last_error)
-			]) : '',
-			h('div', { 'class': 'kr-row' }, [
-				cf.length && !st.enabled
-					? btn.call(this, '⇄ Güvenli geçiş', 'cbi-button-positive', () => this.doTakeover(st))
-					: btn.call(this, st.enabled ? 'Durdur' : 'Başlat', st.enabled ? 'cbi-button-negative' : 'cbi-button-positive', () => this.doToggle(st)),
-				btn.call(this, 'Yeniden başlat', 'cbi-button-action', () => this.doRestart()),
-				btn.call(this, 'Teşhis', '', () => this.doCheck()),
-				btn.call(this, '✓ Ayarları denetle', '', () => this.doValidate(), 'Yazım/alan hatası ve Xray testi'),
-				btn.call(this, '⏱ Hız testi', '', () => this.doSpeed(), 'Direkt ve VPN hızını karşılaştır'),
-				btn.call(this, '🐢 Sayfa gecikmesi', '', () => this.doWebtest(), 'Sayfa neden geç açılıyor: DNS mi, tünel mi?'),
-				btn.call(this, '🔎 Takılma avı', '', () => this.doHunt(), 'Tarayıcıda takılan adresleri arka arkaya dener: takılma DNS\'te mi bağlantıda mı?'),
-				btn.call(this, '🤝 Sunucu el sıkışması', '', () => this.doDial(), 'Sunucu bağlantıyı kaç kez düşürüyor (günlükteki EOF hatası)'),
-				btn.call(this, '{ } ' + (st.engine || 'Xray') + ' yapılandırması', '', () => this.showConfig(), 'Üretilen tam config.json')
+			]) : ''
+		]);
+		const tool = (label, desc, fn) => h('button', { 'class': 'kk-tool', 'type': 'button', 'title': desc, 'click': ui.createHandlerFn(this, fn) }, [h('b', {}, label), h('span', {}, desc)]);
+		dom.content(this.elTools, [
+			h('h3', { 'class': 'kk-h' }, 'Araçlar'),
+			h('div', { 'class': 'kk-toolgrid' }, [
+				tool('Teşhis', 'İnternet gitmişse buna bas, çıkan metni olduğu gibi gönder.', () => this.doCheck()),
+				tool('✓ Ayarları denetle', 'Yazım/alan hatası ve Xray testi', () => this.doValidate()),
+				tool('⏱ Hız testi', 'Direkt ve VPN hızını karşılaştır', () => this.doSpeed()),
+				tool('🐢 Sayfa gecikmesi', 'Sayfa neden geç açılıyor: DNS mi, tünel mi?', () => this.doWebtest()),
+				tool('🔎 Takılma avı', 'Tarayıcıda takılan adresleri arka arkaya dener: takılma DNS\'te mi bağlantıda mı?', () => this.doHunt()),
+				tool('🤝 Sunucu el sıkışması', 'Sunucu bağlantıyı kaç kez düşürüyor (günlükteki EOF hatası)', () => this.doDial()),
+				tool('{ } ' + (st.engine || 'Xray') + ' yapılandırması', 'Üretilen tam config.json', () => this.showConfig())
 			])
 		]);
 		if (st.own) {
@@ -1732,18 +1740,22 @@ return view.extend({
 		lb.rsw = h('div', { 'class': 'krl-rsw' }, [rmk('io', 'İndirme / Yükleme'), h('i', {}, '·'), rmk('vd', 'VPN / Direkt')]);
 		rpaint();
 		lb.pct = h('div', { 'class': 'krl-sub' }, 'Henüz veri yok');
-		return h('div', { 'class': 'krl-band kr-traffic' }, [
-			speed('d', 'krl-down', 'İndirme'),
-			speed('u', 'krl-up', 'Yükleme'),
-			sess('sd', 'krl-sdown', 'Oturum indirilen'),
-			sess('su', 'krl-sup', 'Oturum yüklenen'),
-			h('div', { 'class': 'krl-tile krl-info' }, [
-				h('div', { 'class': 'krl-val' }, lb.up),
-				h('div', { 'class': 'krl-rrow' }, [lb.ring, lb.pct]),
-				lb.rsw,
-				h('div', { 'class': 'krl-lbl' }, 'Modem açık')
+		// parçalar render() içinde yerleştirilir: bağlantı kartı (hız), oturum şeridi, halka kartı
+		lb.parts = {
+			down: speed('d', 'krl-down', 'İndirme'),
+			up: speed('u', 'krl-up', 'Yükleme'),
+			sdown: sess('sd', 'krl-sdown', 'Oturum indirilen'),
+			sup: sess('su', 'krl-sup', 'Oturum yüklenen'),
+			upc: h('div', { 'class': 'krl-tile krl-upc' }, [
+				h('div', { 'class': 'krl-lbl' }, 'Modem açık'),
+				h('div', { 'class': 'krl-val' }, lb.up)
+			]),
+			ring: h('div', { 'class': 'kr-card krl-ringcard kr-traffic' }, [
+				h('div', { 'class': 'krl-ringhd' }, [h('h3', {}, 'Trafik dağılımı'), lb.rsw]),
+				h('div', { 'class': 'krl-rrow' }, [lb.ring, lb.pct])
 			])
-		]);
+		};
+		return null;
 	},
 
 	ringMode() { return this.rm || 'io'; },   // her açılışta İndirme / Yükleme
@@ -1816,7 +1828,9 @@ return view.extend({
 	render(data) {
 		const [st, nodes, apps, devs] = data;
 		this.nodes = nodes || [];
-		this.elStatus = h('div', { 'class': 'kr-card' });
+		this.buildLiveBand();
+		this.elStatus = h('div', { 'class': 'kk-hero-top' });
+		this.elTools = h('div', { 'class': 'kk-tools' });
 		this.elNode = h('div', { 'class': 'kr-card' });
 		this.elApps = h('div', { 'class': 'kr-card' });
 		this.elNodes = h('div', { 'class': 'kr-card', 'style': 'margin-bottom:14px' });
@@ -1849,9 +1863,14 @@ return view.extend({
 			h('style', {}, CSS),
 			h('h2', {}, [h('img', { 'src': '/luci-static/kedi-logo.svg', 'style': 'height:1.3em;vertical-align:-0.25em;margin-right:8px;border-radius:6px' }), 'KediRay VPN']),
 			krLicBanner(),
-			// başlığa tıklayınca küçülür/açılır; tercih tarayıcıda saklanır (diğer kartlarla aynı sistem)
-			h('div', { 'style': 'margin:0 0 6px' }, this.fold('live', 'Canlı trafik', h('div', {}, [this.buildRateSeg(), this.buildLiveBand()]))),
-			h('div', { 'class': 'kr-grid' }, [this.elStatus, this.elNode, this.elApps]),
+			h('div', { 'class': 'kk-hero kr-traffic' }, [
+				this.elStatus,
+				h('div', { 'class': 'kk-live' }, [this.buildRateSeg(), this.lb.parts.down, this.lb.parts.up])
+			]),
+			h('div', { 'class': 'krl-strip kr-traffic' }, [this.lb.parts.sdown, this.lb.parts.sup, this.lb.parts.upc]),
+			h('div', { 'class': 'kr-grid kk-two' }, [this.elNode, this.elApps]),
+			this.lb.parts.ring,
+			this.elTools,
 			this.elNodes,
 			this.elDevs
 		]);
