@@ -44,7 +44,7 @@ OpenWrt için Xray tabanlı VPN. LuCI arayüzü ve `kediray` komut satırı arac
 
 *VPN Ayırma: VPN motoru, Cloudflare WARP ve uygulama bazında VPN / Direkt / Parçala / WARP seçimi.*
 
-<p align="center"><img src="docs/ayarlar.png" alt="KediRay Ayarlar" width="560">
+<p align="center"><img src="docs/ayarlar.png" alt="KediRay Ayarlar" width="560"></p>
 
 <p align="center"><img src="docs/cekirdekler.png" alt="KediRay Çekirdekler" width="560"></p>
 
@@ -160,7 +160,7 @@ Xray-based VPN for OpenWrt, with a LuCI interface and the `kediray` command-line
 
 *VPN split: VPN engine, Cloudflare WARP and per-app VPN / Direct / Fragment / WARP choice.*
 
-<p align="center"><img src="docs/ayarlar.png" alt="KediRay Settings" width="560">
+<p align="center"><img src="docs/ayarlar.png" alt="KediRay Settings" width="560"></p>
 
 <p align="center"><img src="docs/cekirdekler.png" alt="KediRay Cores" width="560"></p>
 
