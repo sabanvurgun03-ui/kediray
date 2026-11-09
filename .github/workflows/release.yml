@@ -1,0 +1,54 @@
+name: Release yayınla
+
+# main'e her yüklemede: VERSION'daki sürümün (vX.Y.Z) release'i yoksa
+# ./build.sh ile dosyaları üretir ve GitHub release'ini açar.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Sürümü oku
+        id: ver
+        run: |
+          v=$(tr -d ' \r\n' < VERSION)
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v$v zaten yayında, atlanıyor."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Derle
+        if: steps.ver.outputs.exists == 'false'
+        run: ./build.sh --out dist
+
+      - name: Release aç
+        if: steps.ver.outputs.exists == 'false'
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --title "${{ steps.ver.outputs.tag }}" \
+            --notes "KediRay ${{ steps.ver.outputs.tag }} — kurulum: kediray-install.sh. Doğrulama: sha256sum -c sha256sums" \
+            --target "${{ github.sha }}" \
+            dist/kediray-install.sh dist/kediray-all.tar.gz dist/kediray-src.tar.gz dist/sha256sums
+        env:
+          GH_TOKEN: ${{ github.token }}
