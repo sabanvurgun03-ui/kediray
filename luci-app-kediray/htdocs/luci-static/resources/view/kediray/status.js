@@ -1657,12 +1657,12 @@ return view.extend({
 	renderDevices(devs) {
 		if (this.ownHide(this.elDevs)) return;
 		const on = devs.filter(d => d.online).length;
-		// Yön: dört buton — Varsayılan / VPN / Direkt / Engelle (engelli kırmızı)
+		// Yön: dört buton — Varsayılan / VPN / Direkt / İnternet kapalı (kırmızı)
 		const MODES = [
 			['default', 'Varsayılan', '', 'Varsayılan: Bu cihaza özel kural yok, genel ayara uyar.'],
 			['vpn', 'VPN', '', 'VPN: Bu cihazın tüm trafiği VPN tünelinden çıkar; siteler VPN sunucusunun IP\'sini görür.'],
 			['direct', 'Direkt', 'kr-direct', 'Direkt: Bu cihaz tüneli hiç kullanmaz, doğrudan hattan çıkar (en düşük ping; IP\'si operatörün IP\'si olur).'],
-			['block', 'Engelle', 'kr-block', 'Engelle: Bu cihaz internete hiç çıkamaz (ne VPN ne direkt).']
+			['block', 'İnternet kapalı', 'kr-block', 'İnternet kapalı: Cihaz Wi-Fi\'ye bağlı kalır ama internete hiç çıkamaz (ne VPN ne direkt).']
 		];
 		const mkRow = (d, off) => {
 			const cur = d.mode || 'default';
@@ -1676,7 +1676,7 @@ return view.extend({
 				h('td', { 'class': 'td' }, [
 					h('span', { 'class': 'kr-dot ' + (cur === 'block' ? 'kr-err' : d.online ? 'kr-on' : 'kr-off') }),
 					d.name || '(adsız)',
-					cur === 'block' ? h('span', { 'class': 'kr-tag kr-tag-red' }, 'ENGELLİ') : ''
+					cur === 'block' ? h('span', { 'class': 'kr-tag kr-tag-red' }, 'İNTERNET KAPALI') : ''
 				]),
 				h('td', { 'class': 'td' }, d.ip || '-'),
 				h('td', { 'class': 'td kr-hide-sm' }, d.mac),
@@ -1704,7 +1704,7 @@ return view.extend({
 			h('tr', { 'class': 'tr table-titles' }, ['Cihaz', 'IP', 'MAC', 'Bağlı süre', 'Yön', ''].map((x, i) =>
 				h('th', { 'class': 'th' + (i === 2 || i === 3 ? ' kr-hide-sm' : '') }, x))),
 			...rows, ...offRows
-		]), offBar]));
+		]), h('div', { 'class': 'kr-hint', 'style': 'margin-top:8px;font-size:12px' }, "Yön: VPN = tünelden çıkar · Direkt = VPN'siz, kendi hattından çıkar · İnternet kapalı = Wi-Fi'ye bağlı kalır ama internete çıkamaz · Varsayılan = genel ayara uyar"), offBar]));
 	},
 
 	/* Canlı trafik şeridi: anlık hız (çizgili), VPN/Direkt anlık hız ve oturum toplamı (modem açılışından beri; modem kapanınca sıfırlanır).
