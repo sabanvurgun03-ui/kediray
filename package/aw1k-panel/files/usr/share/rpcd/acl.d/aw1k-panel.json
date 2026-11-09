@@ -13,7 +13,10 @@
                     "guest_get",
                     "guest_set",
                     "wan_info",
-                    "bandpw_write"
+                    "bandpw_write",
+                    "sms_rules",
+                    "sms_rules_set",
+                    "sms_filter_run"
                 ],
                 "file": [
                     "exec"
@@ -34,7 +37,9 @@
                     "kediray_ctl",
                     "kediray_device",
                     "guest_set",
-                    "bandpw_write"
+                    "bandpw_write",
+                    "sms_rules_set",
+                    "sms_filter_run"
                 ]
             }
         }

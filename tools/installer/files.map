@@ -27,5 +27,6 @@ luci-app-kediray/root/usr/share/rpcd/acl.d/luci-app-kediray.json	/usr/share/rpcd
 luci-app-kediray/htdocs/luci-static/kedi-logo.svg	/www/luci-static/kedi-logo.svg	KEDIRAY_EOF_19
 luci-app-kediray/htdocs/luci-static/kedi.css	/www/luci-static/kedi.css	KEDIRAY_EOF_29
 package/aw1k-panel/files/usr/bin/aw1k-usage	/usr/bin/aw1k-usage	KEDIRAY_EOF_20
+package/aw1k-panel/files/usr/bin/aw1k-smsfilter	/usr/bin/aw1k-smsfilter	KEDIRAY_EOF_30
 package/aw1k-panel/files/usr/libexec/rpcd/aw1k	/usr/libexec/rpcd/aw1k	KEDIRAY_EOF_21
 package/aw1k-panel/files/usr/share/rpcd/acl.d/aw1k-panel.json	/usr/share/rpcd/acl.d/aw1k-panel.json	KEDIRAY_EOF_22

@@ -1,0 +1,174 @@
+#!/usr/bin/ucode
+'use strict';
+// AW1K Panel: istenmeyen SMS filtresi (cron her 2 dakikada çalıştırır).
+//   aw1k-smsfilter          kurallar açıksa SIM'deki uyan SMS'leri siler, kelimeyle yakalananın göndereni engellenir
+//   aw1k-smsfilter --dry    hiçbir şey silmez; neyin silineceğini JSON olarak yazar (kurallar kapalı olsa da çalışır)
+//   aw1k-smsfilter --run    şimdi uygula ve sonucu JSON olarak yaz
+// Kurallar: /etc/aw1k-sms.json   Silinenlerin kaydı: /tmp/aw1k-sms-log.json (son 50)
+// SMS'i modemdeki qmodem eklentisinden okur/siler (ubus: qmodem get_sms / delete_sms).
+
+import { connect } from 'ubus';
+import { readfile, writefile, rename, unlink, stat } from 'fs';
+
+const RULES = '/etc/aw1k-sms.json';
+const LOG = '/tmp/aw1k-sms-log.json';
+const LOCK = '/tmp/aw1k-sms.lock';
+const DRY = index(ARGV, '--dry') >= 0;
+const SHOW = DRY || index(ARGV, '--run') >= 0;
+
+// Türkçe harfleri sadeleştir: "Doğrulama" / "DOGRULAMA" / "dogrulama" aynı sayılır
+const MAP = { 'ı': 'i', 'İ': 'i', 'ş': 's', 'Ş': 's', 'ğ': 'g', 'Ğ': 'g', 'ü': 'u', 'Ü': 'u', 'ö': 'o', 'Ö': 'o', 'ç': 'c', 'Ç': 'c' };
+
+function fold(s) {
+	s = lc('' + (s ?? ''));
+	for (let k in MAP)
+		s = join(MAP[k], split(s, k));
+	return trim(replace(s, /\s+/g, ' '));
+}
+
+function list_of(v) {
+	return type(v) == 'array' ? v : [];
+}
+
+function load_rules() {
+	let r = null;
+	try { r = json(readfile(RULES) ?? '{}'); } catch (e) { r = null; }
+	if (type(r) != 'object') r = {};
+	r.enabled = r.enabled === true;
+	r.auto_block = r.auto_block !== false;
+	r.keywords = list_of(r.keywords);
+	r.blocked = list_of(r.blocked);
+	r.allow = list_of(r.allow);
+	return r;
+}
+
+function save_rules(r) {
+	writefile(RULES + '.new', sprintf('%J', r) + '\n');
+	rename(RULES + '.new', RULES);
+}
+
+function find_section(bus) {
+	let r = bus.call('uci', 'get', { config: 'qmodem' });
+	let vals = r?.values ?? {};
+	for (let k in vals)
+		if (vals[k]['.type'] == 'modem-device')
+			return k;
+	return null;
+}
+
+// Uzun mesajlar parça parça gelir: aynı gönderen ve saatteki parçaları tek mesajda birleştir
+function inbox(bus, sec) {
+	let r = bus.call('qmodem', 'get_sms', { config_section: sec });
+	if (r == null) return null;
+	let rows = sort(list_of(r.msg), (a, b) => a.index - b.index);
+	let groups = {}, order = [];
+	for (let m in rows) {
+		let key = m.sender + '|' + m.timestamp;
+		if (!groups[key]) {
+			groups[key] = { sender: m.sender, timestamp: m.timestamp, text: '', indexes: [] };
+			push(order, key);
+		}
+		groups[key].text += m.content ?? '';
+		push(groups[key].indexes, m.index);
+	}
+	return map(order, k => groups[k]);
+}
+
+// Silinmeli mi? Silinmeyecek liste her şeyden önce gelir; engelli gönderen; sonra kelimeler (en az 3 harf).
+function classify(g, rules) {
+	let s = fold(g.sender);
+	for (let a in rules.allow)
+		if (fold(a) == s) return null;
+	for (let b in rules.blocked)
+		if (fold(b) == s) return { reason: 'engelli gönderen', block: false };
+	let t = fold(g.text);
+	for (let k in rules.keywords) {
+		let kw = fold(k);
+		if (length(kw) >= 3 && index(t, kw) >= 0)
+			return { reason: 'kelime: ' + k, block: true };
+	}
+	return null;
+}
+
+function add_log(hits) {
+	let old = [];
+	try { old = list_of(json(readfile(LOG) ?? '[]')); } catch (e) { old = []; }
+	let now = time(), out = [];
+	for (let h in hits)
+		push(out, { t: now, sender: h.sender, reason: h.reason, text: h.text });
+	for (let o in old)
+		push(out, o);
+	writefile(LOG, sprintf('%J', slice(out, 0, 50)));
+}
+
+function run() {
+	let rules = load_rules();
+	if (!rules.enabled && !DRY)
+		return { ok: true, skipped: 'kapalı' };
+	let bus = connect();
+	if (!bus) return { ok: false, error: 'ubus bağlantısı kurulamadı' };
+	let sec = find_section(bus);
+	if (!sec) return { ok: false, error: 'qmodem modem bölümü bulunamadı' };
+	let list = inbox(bus, sec);
+	if (list == null) return { ok: false, error: 'SMS okunamadı' };
+
+	let hits = [];
+	for (let g in list) {
+		let c = classify(g, rules);
+		if (c) push(hits, { sender: g.sender, reason: c.reason, block: c.block, text: g.text, indexes: g.indexes, timestamp: g.timestamp });
+	}
+	let res = {
+		ok: true, dry: DRY, scanned: length(list), deleted: 0, blocked: [],
+		matched: map(hits, h => ({ sender: h.sender, reason: h.reason, text: h.text, timestamp: h.timestamp })),
+	};
+	if (DRY || !length(hits)) return res;
+
+	let idx = [];
+	for (let h in hits)
+		for (let i in h.indexes)
+			push(idx, i);
+	let r = bus.call('qmodem', 'delete_sms', { config_section: sec, index: join(' ', idx) });
+	if (r == null) {
+		res.ok = false;
+		res.error = 'SMS silinemedi';
+		return res;
+	}
+	res.deleted = length(hits);
+
+	// Kelimeyle yakalanan gönderen sonraki mesajlar için engellenir
+	if (rules.auto_block) {
+		let changed = false;
+		for (let h in hits) {
+			if (!h.block) continue;
+			let s = fold(h.sender);
+			let known = false;
+			for (let b in rules.blocked)
+				if (fold(b) == s) known = true;
+			if (!known && s != '') {
+				push(rules.blocked, h.sender);
+				push(res.blocked, h.sender);
+				changed = true;
+			}
+		}
+		if (changed) save_rules(rules);
+	}
+	add_log(hits);
+	return res;
+}
+
+if (!DRY) {
+	// Üst üste çalışmasın (önceki çalışma 90 sn'den eskiyse takılmıştır, devam et)
+	let st = stat(LOCK);
+	if (st && time() - st.mtime < 90)
+		exit(0);
+	writefile(LOCK, '' + time());
+}
+
+let res = null;
+try {
+	res = run();
+} catch (e) {
+	res = { ok: false, error: '' + (e.message ?? e) };
+}
+if (!DRY) unlink(LOCK);
+if (SHOW) print(sprintf('%J', res), '\n');

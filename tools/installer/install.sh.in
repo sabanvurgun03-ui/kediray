@@ -260,6 +260,7 @@ write_files() {
 @@KR_FILE luci-app-kediray/htdocs/luci-static/kedi.css@@
 mkdir -p /usr/libexec/rpcd
 @@KR_FILE package/aw1k-panel/files/usr/bin/aw1k-usage@@
+@@KR_FILE package/aw1k-panel/files/usr/bin/aw1k-smsfilter@@
 @@KR_FILE package/aw1k-panel/files/usr/libexec/rpcd/aw1k@@
 @@KR_FILE package/aw1k-panel/files/usr/share/rpcd/acl.d/aw1k-panel.json@@
 }
@@ -278,7 +279,7 @@ write_ui() {
 AW_OLD=$(md5sum /usr/libexec/rpcd/aw1k 2>/dev/null)
 write_files
 write_ui
-chmod 755 /usr/bin/aw1k-usage /usr/libexec/rpcd/aw1k 2>/dev/null
+chmod 755 /usr/bin/aw1k-usage /usr/bin/aw1k-smsfilter /usr/libexec/rpcd/aw1k 2>/dev/null
 [ "$AW_OLD" != "$(md5sum /usr/libexec/rpcd/aw1k 2>/dev/null)" ] && AW_RESTART=1
 chmod 755 /usr/bin/kediray /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray /etc/hotplug.d/firewall/99-kediray
 # Güncelleme rpcd/arka plan üzerinden çalışırsa umask 077 olabilir: web'in sunduğu dosyalar 403 verir. Okunur yap.
@@ -565,6 +566,7 @@ echo '* * * * * /usr/bin/kediray watchdog >/dev/null 2>&1' >> /etc/crontabs/root
 sed -i '/kediray update auto/d' /etc/crontabs/root
 echo '0 1 * * * /usr/bin/kediray update auto >/dev/null 2>&1' >> /etc/crontabs/root
 grep -q '/usr/bin/aw1k-usage' /etc/crontabs/root || echo '*/2 * * * * /usr/bin/aw1k-usage >/dev/null 2>&1' >> /etc/crontabs/root
+grep -q '/usr/bin/aw1k-smsfilter' /etc/crontabs/root || echo '*/2 * * * * /usr/bin/aw1k-smsfilter >/dev/null 2>&1' >> /etc/crontabs/root
 /etc/init.d/cron enable >/dev/null 2>&1
 # crond crontab değişikliğini kendisi okur; çalışıyorsa YENİDEN BAŞLATMA: gece otomatik güncelleme cron'dan başladığında
 # restart, kurulumu yarıda öldürüyordu (menü yolu/servis adımları atlanıyor, VPN bir dakika kapalı kalıyordu)

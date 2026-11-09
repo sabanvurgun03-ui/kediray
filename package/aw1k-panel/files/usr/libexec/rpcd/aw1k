@@ -10,7 +10,7 @@ aw1k_wandev() {
 }
 case "$1" in
 list)
-    echo '{ "usage": {}, "kediray": {}, "kediray_ctl": { "action": "str" }, "kediray_devices": {}, "wifi_clients": {}, "guest_get": {}, "guest_set": { "enabled": true, "ssid": "str", "key": "str" }, "wan_info": {}, "bandpw_write": { "pw": "str" }, "kediray_device": { "mac": "str", "mode": "str", "name": "str" } }'
+    echo '{ "usage": {}, "kediray": {}, "kediray_ctl": { "action": "str" }, "kediray_devices": {}, "wifi_clients": {}, "guest_get": {}, "guest_set": { "enabled": true, "ssid": "str", "key": "str" }, "wan_info": {}, "bandpw_write": { "pw": "str" }, "sms_rules": {}, "sms_rules_set": { "rules": "str" }, "sms_filter_run": { "mode": "str" }, "kediray_device": { "mac": "str", "mode": "str", "name": "str" } }'
     ;;
 call)
     case "$2" in
@@ -194,6 +194,31 @@ call)
         case "$mode" in vpn|direct|block|default) ;; *) printf '{"ok":false}'; exit 0 ;; esac
         /usr/bin/kediray device "$mac" "$mode" "$name" >/dev/null 2>&1
         printf '{"ok":true}'
+        ;;
+    sms_rules)
+        # Spam filtresi kuralları (/etc/aw1k-sms.json) ve silinenlerin kaydı (/tmp/aw1k-sms-log.json)
+        r=$(cat /etc/aw1k-sms.json 2>/dev/null); [ -n "$r" ] || r='{"enabled":false,"auto_block":true,"keywords":[],"blocked":[],"allow":[]}'
+        l=$(cat /tmp/aw1k-sms-log.json 2>/dev/null); [ -n "$l" ] || l='[]'
+        uc=false; [ -x /usr/bin/ucode ] && uc=true
+        printf '{"rules":%s,"log":%s,"ucode":%s}' "$r" "$l" "$uc"
+        ;;
+    sms_rules_set)
+        read -r input
+        r=$(echo "$input" | jsonfilter -e '@.rules')
+        if [ -z "$r" ] || [ ${#r} -gt 30000 ]; then printf '{"ok":false,"error":"Kurallar boş ya da çok büyük"}'; exit 0; fi
+        echo "$r" | jsonfilter -e '@.enabled' >/dev/null 2>&1 || { printf '{"ok":false,"error":"Kurallar okunamadı"}'; exit 0; }
+        printf '%s\n' "$r" > /etc/aw1k-sms.json.new && mv /etc/aw1k-sms.json.new /etc/aw1k-sms.json
+        printf '{"ok":true}'
+        ;;
+    sms_filter_run)
+        read -r input
+        mode=$(echo "$input" | jsonfilter -e '@.mode')
+        arg=--dry; [ "$mode" = run ] && arg=--run
+        out=$(/usr/bin/aw1k-smsfilter $arg 2>&1)
+        case "$out" in
+        "{"*) printf '%s' "$out" ;;
+        *) printf '{"ok":false,"error":"Filtre çalışmadı (ucode ya da ubus modülü yok olabilir)"}' ;;
+        esac
         ;;
     kediray_ctl)
         read -r input

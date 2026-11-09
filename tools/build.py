@@ -41,7 +41,7 @@ ASSETS = ('kediray-install.sh', 'kediray-all.tar.gz', 'kediray-src.tar.gz')
 TREES = ('package/kediray/files', 'package/aw1k-panel/files', 'luci-app-kediray/htdocs', 'luci-app-kediray/root')
 EXTRA = {'package/kediray/files/etc/uci-defaults/99-kediray'}   # ilk açılış betiği: yalnızca firmware paketinde
 EXEC = {
-    '/usr/bin/kediray', '/usr/bin/aw1k-usage', '/usr/libexec/rpcd/aw1k', '/etc/init.d/kediray',
+    '/usr/bin/kediray', '/usr/bin/aw1k-usage', '/usr/bin/aw1k-smsfilter', '/usr/libexec/rpcd/aw1k', '/etc/init.d/kediray',
     '/etc/hotplug.d/iface/80-kediray', '/etc/hotplug.d/firewall/99-kediray', '/etc/uci-defaults/99-kediray',
 }
 PRIVATE = {'/etc/config/kediray'}
