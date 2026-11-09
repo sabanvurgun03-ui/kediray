@@ -609,7 +609,7 @@ function krTheme() {
 		/* Kedi tasarım sistemi: ortak stil dosyası + koyu/açık tema (Otomatik = sistem teması) */
 		if (!document.getElementById('kedi-css') && document.head) {
 			const lk = document.createElement('link');
-			lk.id = 'kedi-css'; lk.rel = 'stylesheet'; lk.href = '/luci-static/kedi.css?v=1.19.90';
+			lk.id = 'kedi-css'; lk.rel = 'stylesheet'; lk.href = '/luci-static/kedi.css?v=1.19.93';
 			document.head.appendChild(lk);
 		}
 		const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -1949,12 +1949,12 @@ return view.extend({
 
 	renderDevices(devs) {
 		const on = devs.filter(d => d.online).length;
-		// Yön: dört buton — Varsayılan / VPN / Direkt / İnternet kapalı (kırmızı)
+		// Yön: dört buton — Varsayılan / VPN / Direkt / İnternetsiz (kırmızı)
 		const MODES = [
 			['default', 'Varsayılan', '', 'Varsayılan: Bu cihaza özel kural yok, genel ayara uyar.'],
 			['vpn', 'VPN', '', 'VPN: Bu cihazın tüm trafiği VPN tünelinden çıkar; siteler VPN sunucusunun IP\'sini görür.'],
 			['direct', 'Direkt', 'kr-direct', 'Direkt: Bu cihaz tüneli hiç kullanmaz, doğrudan hattan çıkar (en düşük ping; IP\'si operatörün IP\'si olur).'],
-			['block', 'İnternet kapalı', 'kr-block', 'İnternet kapalı: Cihaz Wi-Fi\'ye bağlı kalır ama internete hiç çıkamaz (ne VPN ne direkt).']
+			['block', 'İnternetsiz', 'kr-block', 'İnternetsiz: Cihaz Wi-Fi\'ye bağlı kalır ama internete hiç çıkamaz (ne VPN ne direkt).']
 		];
 		const mkRow = (d, off) => {
 			const cur = d.mode || 'default';
@@ -1968,7 +1968,7 @@ return view.extend({
 				h('td', { 'class': 'td' }, [
 					h('span', { 'class': 'kr-dot ' + (cur === 'block' ? 'kr-err' : d.online ? 'kr-on' : 'kr-off') }),
 					d.name || '(adsız)',
-					cur === 'block' ? h('span', { 'class': 'kr-tag kr-tag-red' }, 'İNTERNET KAPALI') : ''
+					cur === 'block' ? h('span', { 'class': 'kr-tag kr-tag-red' }, 'İNTERNETSİZ') : ''
 				]),
 				h('td', { 'class': 'td' }, d.ip || '-'),
 				h('td', { 'class': 'td kr-hide-sm' }, d.mac),
@@ -1996,7 +1996,7 @@ return view.extend({
 			h('tr', { 'class': 'tr table-titles' }, ['Cihaz', 'IP', 'MAC', 'Bağlı süre', 'Yön', ''].map((x, i) =>
 				h('th', { 'class': 'th' + (i === 2 || i === 3 ? ' kr-hide-sm' : '') }, x))),
 			...rows, ...offRows
-		]), h('div', { 'class': 'kr-hint', 'style': 'margin-top:8px;font-size:12px' }, "Yön: VPN = tünelden çıkar · Direkt = VPN'siz, kendi hattından çıkar · İnternet kapalı = Wi-Fi'ye bağlı kalır ama internete çıkamaz · Varsayılan = genel ayara uyar"), offBar]));
+		]), h('div', { 'class': 'kr-hint', 'style': 'margin-top:8px;font-size:12px' }, "Yön: VPN = tünelden çıkar · Direkt = VPN'siz, kendi hattından çıkar · İnternetsiz = Wi-Fi'ye bağlı kalır ama internete çıkamaz · Varsayılan = genel ayara uyar"), offBar]));
 	},
 
 	render() {

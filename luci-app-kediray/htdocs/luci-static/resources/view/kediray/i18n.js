@@ -22,10 +22,10 @@ const LANG = curLang();
 const LI = LANG === 'fr' ? 1 : 0;
 
 const DICT = {
-	"İnternet kapalı": ["Internet off", "Internet coupé"],
-	"İNTERNET KAPALI": ["INTERNET OFF", "INTERNET COUPÉ"],
-	"İnternet kapalı: Cihaz Wi-Fi'ye bağlı kalır ama internete hiç çıkamaz (ne VPN ne direkt).": ["Internet off: The device stays on Wi-Fi but can't reach the internet at all (neither VPN nor direct).", "Internet coupé : l'appareil reste connecté au Wi-Fi mais ne peut pas accéder à Internet (ni VPN ni direct)."],
-	"Yön: VPN = tünelden çıkar · Direkt = VPN'siz, kendi hattından çıkar · İnternet kapalı = Wi-Fi'ye bağlı kalır ama internete çıkamaz · Varsayılan = genel ayara uyar": ["Direction: VPN = goes out through the tunnel · Direct = no VPN, goes out your own line · Internet off = stays on Wi-Fi but can't reach the internet · Default = follows the general setting", "Direction : VPN = sort par le tunnel · Direct = sans VPN, sort par votre ligne · Internet coupé = reste sur le Wi-Fi mais sans Internet · Par défaut = suit le réglage général"],
+	"İnternetsiz": ["No internet", "Sans Internet"],
+	"İNTERNETSİZ": ["NO INTERNET", "SANS INTERNET"],
+	"İnternetsiz: Cihaz Wi-Fi'ye bağlı kalır ama internete hiç çıkamaz (ne VPN ne direkt).": ["No internet: The device stays on Wi-Fi but can't reach the internet at all (neither VPN nor direct).", "Sans Internet : l'appareil reste connecté au Wi-Fi mais ne peut pas accéder à Internet (ni VPN ni direct)."],
+	"Yön: VPN = tünelden çıkar · Direkt = VPN'siz, kendi hattından çıkar · İnternetsiz = Wi-Fi'ye bağlı kalır ama internete çıkamaz · Varsayılan = genel ayara uyar": ["Direction: VPN = goes out through the tunnel · Direct = no VPN, goes out your own line · No internet = stays on Wi-Fi but can't reach the internet · Default = follows the general setting", "Direction : VPN = sort par le tunnel · Direct = sans VPN, sort par votre ligne · Sans Internet = reste sur le Wi-Fi mais sans Internet · Par défaut = suit le réglage général"],
 	"Çekirdekler": ["Cores", "Cœurs"],
 	"Ana çekirdek": ["Main core", "Cœur principal"],
 	"Ana çekirdek: VPN şu an bununla çalışıyor.": ["Main core: the VPN is currently running on it.", "Cœur principal : le VPN fonctionne actuellement avec lui."],

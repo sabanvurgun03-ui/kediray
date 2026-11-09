@@ -180,3 +180,4 @@ html[data-kedi] body .cbi-dropdown[class*="cbi-button"],html[data-kedi] body .cb
 html[data-kedi] body .cbi-dropdown[class*="cbi-button"] > ul,html[data-kedi] body .cbi-dropdown.btn > ul,html[data-kedi] body .cbi-dropdown[class*="cbi-button"] > ul > li,html[data-kedi] body .cbi-dropdown.btn > ul > li{background:transparent!important;color:#fff!important}
 html[data-kedi] body .cbi-dropdown[class*="cbi-button"] > .open,html[data-kedi] body .cbi-dropdown.btn > .open{background:transparent!important;border-left:1px solid rgba(255,255,255,.35)!important;color:#fff!important}
 html[data-kedi] body .cbi-dropdown[class*="cbi-button"] > ul > li button,html[data-kedi] body .cbi-dropdown.btn > ul > li button{background:transparent!important;border:0!important;box-shadow:none!important;color:#fff!important}
+@media (max-width:600px){html[data-kedi] .kr-seg-sm button{padding:5px 10px}}
