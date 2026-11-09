@@ -127,11 +127,14 @@ function run() {
 	for (let h in hits)
 		for (let i in h.indexes)
 			push(idx, i);
-	let r = bus.call('qmodem', 'delete_sms', { config_section: sec, index: join(' ', idx) });
-	// qmodem her numara için status yazar: '1' başarılı, '0' modem silmeyi reddetti
-	if (r == null || r.status == '0') {
+	// qmodem'in delete_sms'i bu modemde silmiyor: aw1k-smsdel (sms_tool) ile sil; 0 = SIM'deki mesaj sayısı azaldı
+	// (aw1k-smsdel JSON yazar; --run çıktısına karışmasın diye sh -c ile susturulur)
+	let args = ['/bin/sh', '-c', '/usr/bin/aw1k-smsdel "$@" >/dev/null 2>&1', 'sh'];
+	for (let i in idx)
+		push(args, '' + i);
+	if (system(args, 30000) != 0) {
 		res.ok = false;
-		res.error = 'SMS silinemedi (modem reddetti)';
+		res.error = 'SMS silinemedi (modem silmedi)';
 		return res;
 	}
 	res.deleted = length(hits);

@@ -10,7 +10,7 @@ aw1k_wandev() {
 }
 case "$1" in
 list)
-    echo '{ "usage": {}, "kediray": {}, "kediray_ctl": { "action": "str" }, "kediray_devices": {}, "wifi_clients": {}, "guest_get": {}, "guest_set": { "enabled": true, "ssid": "str", "key": "str" }, "wan_info": {}, "bandpw_write": { "pw": "str" }, "sms_rules": {}, "sms_rules_set": { "rules": "str" }, "sms_filter_run": { "mode": "str" }, "kediray_device": { "mac": "str", "mode": "str", "name": "str" } }'
+    echo '{ "usage": {}, "kediray": {}, "kediray_ctl": { "action": "str" }, "kediray_devices": {}, "wifi_clients": {}, "guest_get": {}, "guest_set": { "enabled": true, "ssid": "str", "key": "str" }, "wan_info": {}, "bandpw_write": { "pw": "str" }, "sms_rules": {}, "sms_delete": { "index": "str" }, "sms_rules_set": { "rules": "str" }, "sms_filter_run": { "mode": "str" }, "kediray_device": { "mac": "str", "mode": "str", "name": "str" } }'
     ;;
 call)
     case "$2" in
@@ -194,6 +194,16 @@ call)
         case "$mode" in vpn|direct|block|default) ;; *) printf '{"ok":false}'; exit 0 ;; esac
         /usr/bin/kediray device "$mac" "$mode" "$name" >/dev/null 2>&1
         printf '{"ok":true}'
+        ;;
+    sms_delete)
+        # SIM'den SMS siler (aw1k-smsdel: sms_tool); index = boşlukla ayrılmış numaralar
+        read -r input
+        idx=$(echo "$input" | jsonfilter -e '@.index' | tr -cd '0-9 ')
+        out=$(/usr/bin/aw1k-smsdel $idx 2>&1)
+        case "$out" in
+        "{"*) printf '%s' "$out" ;;
+        *) printf '{"ok":false,"error":"Silme çalışmadı"}' ;;
+        esac
         ;;
     sms_rules)
         # Spam filtresi kuralları (/etc/aw1k-sms.json) ve silinenlerin kaydı (/tmp/aw1k-sms-log.json)

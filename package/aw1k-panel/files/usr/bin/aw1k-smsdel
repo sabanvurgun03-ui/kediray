@@ -1,0 +1,41 @@
+#!/bin/sh
+# aw1k-smsdel <numara>...: SIM'den SMS siler (sms_tool ile) ve sonucu JSON yazar.
+# qmodem'in delete_sms komutu AW1000'de mesajı silmiyor (SIM doluluğu değişmiyor); sms_tool ile doğrudan silmek çalışıyor.
+# SMS portunu kendisi bulur (sms_tool status cevap veren ilk port) ve /tmp/aw1k-sms-port'ta saklar.
+# Silmeden sonra qmodem'in get_sms önbelleğini (/tmp/cache_sms_*) temizler; başarı = SIM'deki mesaj sayısı azaldı.
+PORTF=/tmp/aw1k-sms-port
+T=""; command -v timeout >/dev/null 2>&1 && T="timeout 8"
+
+used_of() { $T sms_tool -d "$1" status 2>/dev/null | sed -n 's/.*used: *\([0-9][0-9]*\).*/\1/p' | head -n1; }
+
+find_port() {
+    local p sec cand
+    p=$(cat "$PORTF" 2>/dev/null)
+    if [ -n "$p" ] && [ -c "$p" ] && [ -n "$(used_of "$p")" ]; then echo "$p"; return 0; fi
+    sec=$(uci -q show qmodem | sed -n 's/^qmodem\.\([^.=]*\)=modem-device$/\1/p' | head -n1)
+    cand="$(uci -q get qmodem.$sec.sms_at_port) /dev/ttyUSB2 /dev/ttyUSB3 /dev/ttyUSB1 /dev/ttyUSB4 $(uci -q get qmodem.$sec.at_port)"
+    for p in $cand; do
+        [ -c "$p" ] || continue
+        if [ -n "$(used_of "$p")" ]; then echo "$p" > "$PORTF"; echo "$p"; return 0; fi
+    done
+    return 1
+}
+
+[ $# -gt 0 ] || { echo '{"ok":false,"error":"Numara verilmedi"}'; exit 2; }
+command -v sms_tool >/dev/null 2>&1 || { echo '{"ok":false,"error":"sms_tool kurulu değil"}'; exit 1; }
+port=$(find_port) || { echo '{"ok":false,"error":"SMS portu bulunamadı"}'; exit 1; }
+before=$(used_of "$port")
+n=0
+for i in "$@"; do
+    case "$i" in ''|*[!0-9]*) continue ;; esac
+    $T sms_tool -d "$port" delete "$i" >/dev/null 2>&1
+    n=$((n + 1))
+done
+rm -f /tmp/cache_sms_*
+after=$(used_of "$port")
+if [ -n "$before" ] && [ -n "$after" ] && [ "$after" -lt "$before" ]; then
+    printf '{"ok":true,"deleted":%s,"port":"%s","used":%s}\n' "$((before - after))" "$port" "$after"
+else
+    printf '{"ok":false,"error":"Modem silmedi (SIM doluluğu değişmedi)","port":"%s"}\n' "$port"
+    exit 1
+fi

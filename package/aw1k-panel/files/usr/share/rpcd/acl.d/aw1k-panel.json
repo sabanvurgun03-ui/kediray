@@ -15,6 +15,7 @@
                     "wan_info",
                     "bandpw_write",
                     "sms_rules",
+                    "sms_delete",
                     "sms_rules_set",
                     "sms_filter_run"
                 ],
@@ -39,7 +40,8 @@
                     "guest_set",
                     "bandpw_write",
                     "sms_rules_set",
-                    "sms_filter_run"
+                    "sms_filter_run",
+                    "sms_delete"
                 ]
             }
         }
