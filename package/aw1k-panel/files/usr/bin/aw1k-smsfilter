@@ -128,9 +128,10 @@ function run() {
 		for (let i in h.indexes)
 			push(idx, i);
 	let r = bus.call('qmodem', 'delete_sms', { config_section: sec, index: join(' ', idx) });
-	if (r == null) {
+	// qmodem her numara için status yazar: '1' başarılı, '0' modem silmeyi reddetti
+	if (r == null || r.status == '0') {
 		res.ok = false;
-		res.error = 'SMS silinemedi';
+		res.error = 'SMS silinemedi (modem reddetti)';
 		return res;
 	}
 	res.deleted = length(hits);
