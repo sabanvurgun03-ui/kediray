@@ -585,6 +585,27 @@ upd_rev() { # <kurulu sürüm> -> depoda kurulu koddan farklı commit varsa onun
 }
 UPD_CACHE=/etc/kediray.upd.json   # günde bir kez yazılır; yeniden başlatmada kaybolmasın
 UPD_LAST=/tmp/kediray.upd.last    # son başarılı denetim: "epoch|kaynak|en_son_sürüm|depodaki_yeni_commit" (RAM'de; flash'ı yıpratmaz)
+upd_main_bg() { # depodaki son kodu arka planda indirip kurar: indirme+birleştirme dakikalar sürebilir, panel/uygulama 30 sn'den fazla bekleyemez
+	local L=/tmp/kediray-update.log
+	upd_busy && { echo "Bir güncelleme zaten sürüyor; bitmesini bekle."; return 1; }
+	rm -f /tmp/kediray-update.rc /tmp/kediray-main.sh
+	echo "==> Depodan son kod indiriliyor" > "$L"
+	(
+		( while :; do sleep 15; touch "$L"; done ) &   # indirme sürerken kurulum "çalışıyor" görünsün (günlük 1 dk güncellenmezse bitti sayılır)
+		hb=$!
+		upd_main_build /tmp/kediray-main.sh >> "$L" 2>&1; rc=$?
+		kill "$hb" 2>/dev/null
+		if [ $rc = 0 ]; then
+			export KR_DEV=1 KR_BUILD="$(upd_sha "$(upd_branch)")"
+			rm -f "$L"
+			cmd_selfupdate /tmp/kediray-main.sh   # kurulumu kendi günlüğüyle başlatır
+		else
+			echo "$rc" > /tmp/kediray-update.rc    # hata: izleyen panel "DONE" görsün, günlükte nedeni yazar
+		fi
+	) >/dev/null 2>&1 </dev/null &
+	echo "Kurulum başlatıldı: depodaki son kod indiriliyor (arka planda)"
+	return 0
+}
 cmd_update() { # check [--json] | install | auto | cached
 	case "$1" in
 		auto) # cron: günde bir kez sessizce denetle (update_check=0 ise yapmaz); sonuç önbelleğe yazılır
@@ -663,9 +684,9 @@ cmd_update() { # check [--json] | install | auto | cached
 				# Denetim az önce "değişiklik var" dediyse (RAM kaydındaki rev, kurulu build'den farklı) API'ye bir daha sormadan kur
 				local rv0 rc0
 				rv0=$(cut -d'|' -f4 "$UPD_LAST" 2>/dev/null)
-				if [ -n "$rv0" ] && [ "$rv0" != "$(cat "$UPD_BUILD" 2>/dev/null)" ]; then cmd_update main; return $?; fi
+				if [ -n "$rv0" ] && [ "$rv0" != "$(cat "$UPD_BUILD" 2>/dev/null)" ]; then if [ -t 1 ]; then cmd_update main; else upd_main_bg; fi; return $?; fi
 				upd_rev "$cur" >/dev/null; rc0=$?
-				[ $rc0 = 0 ] && { cmd_update main; return $?; }
+				[ $rc0 = 0 ] && { if [ -t 1 ]; then cmd_update main; else upd_main_bg; fi; return $?; }
 				if [ $rc0 = 2 ]; then
 					echo "GitHub'a (api.github.com) ulaşılamadı; depoda yeni değişiklik olup olmadığı bilinemedi. Doğrudan kurmak için: kediray update main" >&2; return 1
 				fi
