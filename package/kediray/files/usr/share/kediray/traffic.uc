@@ -110,6 +110,10 @@ if (CMD == 'sample') {
 		add(s.months[mk], { vr: n(s.days[k]?.vr), vt: n(s.days[k]?.vt), dr: n(s.days[k]?.dr), dt: n(s.days[k]?.dt) });
 		delete s.days[k];
 	}
+	// 12 aydan eski ay toplamlarını sil (bu ay dahil son 12 ay kalır)
+	let lt0 = localtime(c.t), cur0 = lt0.year * 12 + lt0.mon - 1;
+	for (let mk in keys(s.months ?? {}))
+		if (int(substr(mk, 0, 4)) * 12 + int(substr(mk, 5, 2)) - 1 < cur0 - 11) delete s.months[mk];
 	fs.mkdir(RUN);
 	writej(RAMF, s);
 	if (ARGV[1] == 'save' || time() - n(s.saved) >= 3600) { s.saved = time(); writej(RAMF, s); writej(FLASHF, s); }
