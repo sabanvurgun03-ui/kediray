@@ -311,6 +311,7 @@ const CSS = `
 .kr-seg button.kr-blockbtn:hover{background:rgba(210,63,63,.15)}
 .kr-seg-sm button{padding:4px 10px;font-size:.92em}
 @media (max-width:700px){.kr-seg-sm{display:grid;grid-template-columns:1fr 1fr}.kr-seg-sm button{padding:6px 8px;border-top:1px solid rgba(128,128,128,.25)}.kr-seg-sm button:nth-child(-n+2){border-top:0}.kr-seg-sm button:nth-child(odd){border-right:1px solid rgba(128,128,128,.25)}}
+.kr-wn{border:1px solid rgba(60,190,110,.55);background:rgba(60,190,110,.12);border-radius:10px;padding:10px 14px;margin:0 0 12px}.kr-wn b{display:block;margin-bottom:4px}.kr-wn ul{margin:4px 0 8px 18px;padding:0}.kr-wn li{margin:2px 0}
 .kr-warn{border:1px solid #e0a100;background:rgba(224,161,0,.12);border-radius:8px;padding:8px 10px;margin:0 0 10px;font-size:.92em}
 .kr-seg.kr-dim{opacity:.4}
 .kr-seg.kr-dim button.kr-act{background:transparent;color:inherit}
@@ -1825,6 +1826,19 @@ return view.extend({
 		}
 	},
 
+	/* Kurulumdan sonra bir kez: "Güncelleme yüklendi" (sürüm + varsa değişiklikler); Tamam'a basınca bir daha gösterilmez */
+	showWhatsNew(w) {
+		if (!w || !w.pending) return;
+		const same = w.from === w.to;
+		const ch = (w.changes || []).filter(Boolean);
+		const ok = h('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, () => run(['update', 'whatsnew', 'ack']).then(() => dom.content(this.elWn, []))) }, 'Tamam');
+		dom.content(this.elWn, h('div', { 'class': 'kr-wn' }, [
+			h('b', {}, same ? 'Güncelleme yüklendi (' + w.to + ')' : 'Güncelleme yüklendi: ' + w.from + ' → ' + w.to),
+			ch.length ? [h('div', {}, 'Değişiklikler:'), h('ul', {}, ch.map(c => h('li', {}, c)))] : h('div', { 'class': 'kr-sub' }, 'Değişiklik notu alınamadı.'),
+			ok
+		]));
+	},
+
 	render(data) {
 		const [st, nodes, apps, devs] = data;
 		this.nodes = nodes || [];
@@ -1835,6 +1849,7 @@ return view.extend({
 		this.elApps = h('div', { 'class': 'kr-card' });
 		this.elNodes = h('div', { 'class': 'kr-card', 'style': 'margin-bottom:14px' });
 		this.elDevs = h('div', { 'class': 'kr-card' });
+		this.elWn = h('div', {});
 
 		this.renderStatus(st);
 		this.renderApps(apps || []);
@@ -1857,11 +1872,13 @@ return view.extend({
 			this.renderDevices(d);
 		}), 30);
 
+		runJson(['update', 'whatsnew']).then(w => this.showWhatsNew(w));
 		setTimeout(() => run(['count', 'status']).then(r => { if ((r.stdout || '').trim() === 'unset') askStats(); }), 1200);
 
 		return h('div', {}, [
 			h('style', {}, CSS),
 			h('h2', {}, [h('img', { 'src': '/luci-static/kedi-logo.svg', 'style': 'height:1.3em;vertical-align:-0.25em;margin-right:8px;border-radius:6px' }), 'KediRay VPN']),
+			this.elWn,
 			krLicBanner(),
 			h('div', { 'class': 'kk-hero kr-traffic' }, [
 				this.elStatus,

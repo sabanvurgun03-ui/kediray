@@ -463,6 +463,7 @@ cmd_selfupdate() { # <dosya> | log  — panelden yüklenen kurulum dosyasıyla k
 	head -c 600 "$f" | grep -q 'KediRay' && grep -q '^KR_VERSION="' "$f" || { echo "Bu dosya bir KediRay kurulum dosyası gibi görünmüyor."; return 1; }
 	sh -n "$f" 2>/dev/null || { echo "Dosyada sözdizimi hatası var (yükleme yarım kalmış olabilir). Yeniden dene."; return 1; }
 	ver=$(sed -n 's/^KR_VERSION="\(.*\)"/\1/p' "$f" | head -1)
+	wn_record "$ver"
 	rm -f /tmp/kediray-update.rc /tmp/kediray-update.log
 	cp "$f" /tmp/kediray-update.run.sh 2>/dev/null && rm -f "$f"
 	echo "Kurulum başlatıldı: $(kr_version) -> $ver"
@@ -606,6 +607,43 @@ upd_main_bg() { # depodaki son kodu arka planda indirip kurar: indirme+birleşti
 	echo "Kurulum başlatıldı: depodaki son kod indiriliyor (arka planda)"
 	return 0
 }
+# ---- "Güncelleme yüklendi" bilgisi: kurulum başlarken kaydedilir, panel/uygulama kurulumdan sonra bir kez gösterir ----
+WN=/etc/kediray.whatsnew   # from= to= rf= rt= at= (c=değişiklik satırları, chg=1: değişiklikler bir kez alındı)
+wn_record() { # <yeni sürüm>  neyden neye geçildi (aynı sürüm ve aynı kod ise kaydetmez)
+	local from rf rt="${KR_BUILD:-}"
+	from=$(kr_version); rf=$(cat "$UPD_BUILD" 2>/dev/null)
+	if [ "$from" = "$1" ] && { [ -z "$rt" ] || [ "$rt" = "$rf" ]; }; then return 0; fi
+	printf 'from=%s\nto=%s\nrf=%s\nrt=%s\nat=%s\n' "$from" "$1" "$rf" "$rt" "$(date +%s)" > "$WN" 2>/dev/null
+	return 0
+}
+upd_whatsnew() { # [ack]  kurulum bittiyse {"pending":true,from,to,at,changes[]} yazar; ack = gördüm, bir daha gösterme
+	local from to rf rt at cur r tmp
+	[ "$1" = ack ] && { rm -f "$WN"; echo '{"pending":false}'; return 0; }
+	[ -s "$WN" ] || { echo '{"pending":false}'; return 0; }
+	from=$(sed -n 's/^from=//p' "$WN" | head -n1); to=$(sed -n 's/^to=//p' "$WN" | head -n1)
+	rf=$(sed -n 's/^rf=//p' "$WN" | head -n1); rt=$(sed -n 's/^rt=//p' "$WN" | head -n1); at=$(sed -n 's/^at=//p' "$WN" | head -n1)
+	# kurulum yarım kalıp bayat kayıt kalmasın
+	[ $(( $(date +%s) - ${at:-0} )) -gt 172800 ] && { rm -f "$WN"; echo '{"pending":false}'; return 0; }
+	cur=$(kr_version)
+	if [ -n "$rt" ]; then
+		[ "$(cat "$UPD_BUILD" 2>/dev/null)" = "$rt" ] || { echo '{"pending":false,"installing":true}'; return 0; }
+	else
+		[ "$cur" = "$to" ] || { echo '{"pending":false,"installing":true}'; return 0; }
+	fi
+	if ! grep -q '^chg=' "$WN"; then
+		# değişiklikler: iki kod arasındaki commit başlıkları (GitHub); alınamazsa boş geçilir
+		[ -n "$rt" ] || rt=$(upd_sha "v$to" 2>/dev/null)
+		[ -n "$rf" ] || rf=$(upd_sha "v$from" 2>/dev/null)
+		r=$(uget main.update_repo); r=${r:-$UPD_REPO_DEF}; tmp="/tmp/kediray-wn.$$"
+		if [ -n "$rf" ] && [ -n "$rt" ] && [ "$rf" != "$rt" ] && ufetch "https://api.github.com/repos/$r/compare/$rf...$rt" "$tmp" 8; then
+			sed -n '/^  "commits": *\[/,$p' "$tmp" | sed -n 's/^ *"message": *"\(.*\)",*$/\1/p' | sed 's/\\n.*//; s/\\"/"/g' | head -n 12 | sed 's/^/c=/' >> "$WN"
+		fi
+		echo 'chg=1' >> "$WN"; rm -f "$tmp"
+	fi
+	printf '{"pending":true,"from":"%s","to":"%s","at":%s,"changes":[' "$from" "$to" "${at:-0}"
+	sed -n 's/^c=//p' "$WN" | awk 'BEGIN { ORS = "" } { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); printf "%s\"%s\"", (NR > 1 ? "," : ""), $0 }'
+	echo ']}'
+}
 cmd_update() { # check [--json] | install | auto | cached
 	case "$1" in
 		auto) # cron: günde bir kez sessizce denetle (update_check=0 ise yapmaz); sonuç önbelleğe yazılır
@@ -624,6 +662,7 @@ cmd_update() { # check [--json] | install | auto | cached
 			export KR_DEV=1 KR_BUILD="$(upd_sha "$(upd_branch)")"   # kurulan kodun commit'i (alınamazsa boş: sonraki denetim yeniden karşılaştırır)
 			cmd_selfupdate /tmp/kediray-main.sh
 			return $? ;;
+		whatsnew) upd_whatsnew "$2"; return $? ;;   # panel/uygulama: kurulumdan sonra "güncelleme yüklendi" bilgisi (ack = tamam)
 		cached) # panel: son denetimin sonucu — elle ya da otomatik, hangisi daha yeniyse (yoksa boş)
 			local latest cur ts src rv=""
 			[ "$(uget main.update_check)" = 0 ] && return 0
