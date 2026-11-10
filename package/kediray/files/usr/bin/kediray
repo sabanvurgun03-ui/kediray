@@ -457,14 +457,16 @@ cmd_selfupdate() { # <dosya> | log  — panelden yüklenen kurulum dosyasıyla k
 	fi
 	[ -f "$f" ] || { echo "Dosya bulunamadı: $f"; return 1; }
 	# Başka bir kurulum sürüyorsa ikincisini başlatma (sık denetimde ya da çift tıklamada iki kurulum üst üste biniyordu)
-	if upd_busy; then
+	if [ -z "${KR_BG:-}" ] && upd_busy; then
 		echo "Bir güncelleme zaten sürüyor; bitmesini bekle."; rm -f "$f"; return 1
 	fi
+	[ -n "${KR_BG:-}" ] && touch /tmp/kediray-update.log   # arka plan kurulumu: günlük hiç silinmez, izleyen panel "DONE 1" görmesin
 	head -c 600 "$f" | grep -q 'KediRay' && grep -q '^KR_VERSION="' "$f" || { echo "Bu dosya bir KediRay kurulum dosyası gibi görünmüyor."; return 1; }
 	sh -n "$f" 2>/dev/null || { echo "Dosyada sözdizimi hatası var (yükleme yarım kalmış olabilir). Yeniden dene."; return 1; }
 	ver=$(sed -n 's/^KR_VERSION="\(.*\)"/\1/p' "$f" | head -1)
 	wn_record "$ver"
-	rm -f /tmp/kediray-update.rc /tmp/kediray-update.log
+	rm -f /tmp/kediray-update.rc
+	[ -n "${KR_BG:-}" ] || rm -f /tmp/kediray-update.log
 	cp "$f" /tmp/kediray-update.run.sh 2>/dev/null && rm -f "$f"
 	echo "Kurulum başlatıldı: $(kr_version) -> $ver"
 	( $(command -v setsid) sh -c 'sh /tmp/kediray-update.run.sh -y; echo $? > /tmp/kediray-update.rc; rm -f /tmp/kediray-update.run.sh' >/tmp/kediray-update.log 2>&1 </dev/null & )   # setsid varsa panel servisi yeniden başlasa da kurulum yaşar; nohup BusyBox'ta yok
@@ -597,8 +599,7 @@ upd_main_bg() { # depodaki son kodu arka planda indirip kurar: indirme+birleşti
 		upd_main_build /tmp/kediray-main.sh >> "$L" 2>&1; rc=$?
 		kill "$hb" 2>/dev/null
 		if [ $rc = 0 ]; then
-			export KR_DEV=1 KR_BUILD="$(upd_sha "$(upd_branch)")"
-			rm -f "$L"
+			export KR_DEV=1 KR_BG=1 KR_BUILD="$(upd_sha "$(upd_branch)")"
 			cmd_selfupdate /tmp/kediray-main.sh   # kurulumu kendi günlüğüyle başlatır
 		else
 			echo "$rc" > /tmp/kediray-update.rc    # hata: izleyen panel "DONE" görsün, günlükte nedeni yazar
