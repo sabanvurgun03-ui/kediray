@@ -2829,6 +2829,19 @@ ufetch() { # url dosya [saniye]
 	curl -fsSL --noproxy '' -m "$t" -A "v2rayNG/1.10" -o "$2" "$1" 2>/dev/null
 }
 
+cmd_theme() { # install|update  — Kedi LuCI temasını GitHub'dan indirip kurar/günceller (sabanvurgun03-ui/luci-theme-kedi)
+	local f="/tmp/luci-theme-kedi-install.sh" url="https://raw.githubusercontent.com/sabanvurgun03-ui/luci-theme-kedi/main/luci-theme-kedi-install.sh" ver
+	rm -f "$f"
+	ufetch "$url" "$f" 40 && [ -s "$f" ] || { echo "Tema indirilemedi (GitHub'a ulaşılamadı)."; rm -f "$f"; return 1; }
+	head -c 600 "$f" | grep -q 'luci-theme-kedi' && grep -q '^KT_VERSION="' "$f" || { echo "İndirilen dosya Kedi teması kurulum dosyası gibi görünmüyor."; rm -f "$f"; return 1; }
+	ver=$(sed -n 's/^KT_VERSION="\(.*\)"/\1/p' "$f" | head -n1)
+	echo "Kedi teması $ver kuruluyor…"
+	sh "$f" 2>&1; local rc=$?
+	rm -f "$f"
+	[ $rc = 0 ] && echo "Tamam. Sayfayı yenile (Ctrl+F5)."
+	return $rc
+}
+
 cmd_sub() {
 	local url id f n total=0 fail=0
 	mkdir -p "$RUN"
@@ -4204,6 +4217,7 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray app-add <ad> <vpn|direct> <portlar> <alan adları> <IP'ler>   Uygulama kuralı ekle
   kediray app-del <app>              Uygulama kuralını sil
   kediray selfupdate <dosya>         Kurulum dosyasıyla güncelle (panel: Hakkında > Güncelle)
+  kediray theme                      Kedi LuCI temasını GitHub'dan indirip kur / güncelle
   kediray update check [--json]      GitHub'da yeni sürüm var mı
   kediray update install             GitHub Release'ten indir (sha256sums doğrulamalı) ve kur
   kediray update main                Sürümü artırmadan depodaki son kodu kur (Release gerekmez, SHA256 doğrulaması yok)
@@ -4307,6 +4321,7 @@ case "$cmd" in
 	fixboot) cmd_fixboot "$@" ;;
 	selfupdate) cmd_selfupdate "$@" ;;
 	update) cmd_update "$@" ;;
+	theme) cmd_theme "$@" ;;
 	count) cmd_count "$@" ;;
 	repostats) cmd_repostats "$@" ;;
 	backup) cmd_backup "$@" ;;

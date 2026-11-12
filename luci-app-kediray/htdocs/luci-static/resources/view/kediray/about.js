@@ -250,6 +250,11 @@ return view.extend({
 				h('div', { 'id': 'ka-upd-last', 'class': 'ka-k', 'style': 'margin-top:10px' }, '')
 			]),
 			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
+				title('update', 'Kedi LuCI teması'),
+				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, 'Tüm OpenWrt arayüzünün mor Kedi teması (luci-theme-kedi). En son sürüm GitHub\'dan indirilip kurulur ya da güncellenir; sayfa sonra yenilenir.'),
+				h('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, 'doTheme') }, 'Temayı kur / güncelle')
+			]),
+			h('div', { 'class': 'ka-card', 'style': 'margin-top:14px' }, [
 				title('update', 'Sıfırdan kur / Kaldır'),
 				h('div', { 'class': 'ka-k', 'style': 'margin-bottom:10px' }, 'Sıfırdan kur: ayarların yedeklenip silinir, GitHub deposundaki son kod baştan kurulur. Kaldır: KediRay modemden kaldırılır. İkisi de iki kez onay ister.'),
 				h('button', { 'class': 'btn cbi-button cbi-button-negative', 'click': ui.createHandlerFn(this, 'doFresh') }, 'Sıfırdan kur'),
@@ -428,6 +433,20 @@ return view.extend({
 			if (!ok) return;
 			ui.showModal('KediRay kaldırılıyor', [h('p', {}, 'Kaldırılıyor… sayfa birazdan yenilenecek.')]);
 			return fs.exec(CLI, ['uninstall']).catch(() => null).then(() => setTimeout(() => location.assign('/cgi-bin/luci/'), 5000));
+		});
+	},
+
+	doTheme() {
+		ui.showModal('Kedi teması', [h('p', { 'class': 'spinning' }, 'GitHub\'dan indiriliyor ve kuruluyor…')]);
+		return fs.exec(CLI, ['theme']).catch(e => ({ code: 1, stdout: '', stderr: (e && e.message) || String(e || '') })).then(r => {
+			const out = ((r.stdout || '') + (r.stderr || '')).trim() || (r.code === 0 ? 'Tamam.' : 'Kurulamadı.');
+			ui.showModal('Kedi teması', [
+				h('pre', { 'style': 'max-height:260px;overflow:auto;white-space:pre-wrap;font-size:.85em' }, out),
+				h('div', { 'class': 'right' }, [
+					h('button', { 'class': 'btn cbi-button', 'click': ui.hideModal }, 'Kapat'), ' ',
+					r.code === 0 ? h('button', { 'class': 'btn cbi-button cbi-button-action', 'click': () => location.reload() }, 'Sayfayı yenile') : ''
+				])
+			]);
 		});
 	},
 
