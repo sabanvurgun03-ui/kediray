@@ -235,7 +235,10 @@ call)
         action=$(echo "$input" | jsonfilter -e '@.action')
         case "$action" in
         start|stop|restart)
-            ( /etc/init.d/kediray "$action" >/dev/null 2>&1 & )
+            # init.d doğrudan çağrılırsa main.enabled=0 iken (LuCI'den Durdur sonrası) "start" hiçbir şey yapmaz;
+            # /usr/bin/kediray start|stop enabled bayrağını da ayarlar, restart kapalıyken de başlatır.
+            [ "$action" = restart ] && [ "$(uci -q get kediray.main.enabled)" != 1 ] && action=start
+            ( /usr/bin/kediray "$action" >/dev/null 2>&1 & )
             printf '{"ok":true}'
             ;;
         *) printf '{"ok":false}' ;;
