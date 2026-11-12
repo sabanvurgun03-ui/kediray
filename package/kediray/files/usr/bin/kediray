@@ -416,6 +416,23 @@ direct_watch() { # dakikada bir: iki ardışık aynı sonuç gelirse durumu değ
 		echo "$new" > "$RUN/direct.cand"
 	fi
 }
+devip_watch() { # mihomo yerel mod: Direkt/engelli cihazların DHCP IP'si değişirse kuralları yeniden üret (kural IP'ye bağlı)
+	[ "$(engine)" = mihomo ] && [ "$(uget main.mihomo_native)" = 1 ] || return 0
+	local sig="" i=0 mac mode ip
+	while mac=$(uci -q get "$CONF.@device[$i].mac"); do
+		mode=$(uci -q get "$CONF.@device[$i].mode")
+		case "$mode" in direct|block)
+			ip=$(awk -v m="$(echo "$mac" | tr 'A-F' 'a-f')" 'tolower($2) == m { print $3; exit }' /tmp/dhcp.leases 2>/dev/null)
+			sig="$sig $mac=$ip" ;;
+		esac
+		i=$((i + 1))
+	done
+	[ -f "$RUN/devip.sig" ] || { echo "$sig" > "$RUN/devip.sig"; return 0; }
+	[ "$sig" = "$(cat "$RUN/devip.sig" 2>/dev/null)" ] && return 0
+	echo "$sig" > "$RUN/devip.sig"
+	log "cihaz IP'si değişti: Direkt/engelli kuralları yenileniyor"
+	apply_changes
+}
 cmd_fixboot() { # QModem açılışta USB kök hub'larını (usbN) modem diye deniyor ve açılışı ~40 sn geciktiriyor; hub'ları atla
 	local f=/usr/share/qmodem/modem_scan.sh t
 	[ -f "$f" ] || return 0
@@ -3875,7 +3892,7 @@ cmd_watchdog() {
 	fi
 	dns_guard
 	band_tick
-	running && { direct_watch; mvpn_watch; }
+	running && { direct_watch; mvpn_watch; devip_watch; }
 	iv=$(uget main.sub_interval); iv=${iv:-0}
 	if [ "$iv" -gt 0 ] 2>/dev/null && [ -n "$(uget main.sub_url)" ]; then
 		now=$(date +%s); last=$(cat /etc/kediray.sub_last 2>/dev/null || echo 0)

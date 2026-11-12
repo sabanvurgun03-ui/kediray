@@ -1385,13 +1385,24 @@ function mh_dns(addr, via) {
 // Cihaz kuralları (nft() ile aynı mantık): VPN / direkt / engelli
 function devices() {
 	let dev = { vpn: { mac: [], ip: [] }, direct: { mac: [], ip: [] }, block: { mac: [], ip: [] } };
+	// MAC -> güncel DHCP kira IP'si: mihomo yerel modda TUN'un MAC listesi her sürümde çalışmıyor; cihaz kaynak IP kuralıyla da ayrılır
+	let lease = {};
+	for (let l in split(fs.readfile('/tmp/dhcp.leases') ?? '', '\n')) {
+		let f = split(l, ' ');
+		if (length(f) >= 3 && is_v4(f[2])) lease[lc(f[1])] = f[2];
+	}
 	for (let d in of('device')) {
 		let m = d.mode;
 		if (m != 'vpn' && m != 'direct' && m != 'block') continue;
 		if (DIRECT_DEAD && m == 'direct') m = 'vpn';
-		if (d.mac && match(d.mac, /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/)) push(dev[m].mac, lc(d.mac));
+		if (d.mac && match(d.mac, /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/)) {
+			push(dev[m].mac, lc(d.mac));
+			let li = lease[lc(d.mac)];
+			if (li) push(dev[m].ip, li);
+		}
 		for (let x in L(d.ip)) if (is_v4(x)) push(dev[m].ip, x);
 	}
+	for (let m in ['vpn', 'direct', 'block']) dev[m].ip = uniq(dev[m].ip);
 	return dev;
 }
 
@@ -1505,6 +1516,7 @@ function mihomo() {
 	let DV = devices(), defdev = DIRECT_DEAD ? 'vpn' : opt('default_device', 'vpn');
 	if (NATIVE) {
 		let pre = [];
+		for (let x in DV.block.ip) push(pre, 'SRC-IP-CIDR,' + x + (index(x, '/') >= 0 ? '' : '/32') + ',REJECT,no-resolve');
 		for (let x in DV.direct.ip) push(pre, 'SRC-IP-CIDR,' + x + (index(x, '/') >= 0 ? '' : '/32') + ',DIRECT,no-resolve');
 		if (defdev == 'direct' && length(DV.vpn.ip))
 			cwarn('varsayılan cihaz "direkt" iken yalnızca IP ile tanımlı VPN cihazları yerel modda desteklenmez (MAC kullanın)');
