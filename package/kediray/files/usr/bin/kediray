@@ -416,21 +416,37 @@ direct_watch() { # dakikada bir: iki ardışık aynı sonuç gelirse durumu değ
 		echo "$new" > "$RUN/direct.cand"
 	fi
 }
-devip_watch() { # mihomo yerel mod: Direkt/engelli cihazların DHCP IP'si değişirse kuralları yeniden üret (kural IP'ye bağlı)
+# mihomo yerel mod: TUN'a girmeden önce NAT kaynak IP'yi 198.18.0.1 yapıyor, mihomo kuralları cihazı göremez ve TUN'un MAC listesi çalışmıyor.
+# Bu yüzden Direkt cihaz çekirdekte kaynak IP'ye göre ana tabloya (modemin kendi hattı) yönlenir, İnternetsiz cihaz reddedilir.
+dev_lease_ip() { awk -v m="$(echo "$1" | tr 'A-F' 'a-f')" 'tolower($2) == m { print $3; exit }' /tmp/dhcp.leases 2>/dev/null; }
+dev_route_sync() {
 	[ "$(engine)" = mihomo ] && [ "$(uget main.mihomo_native)" = 1 ] || return 0
-	local sig="" i=0 mac mode ip
+	local i=0 n=0 mac mode ip
+	while ip -4 rule del pref 8990 2>/dev/null; do n=$((n + 1)); [ $n -gt 64 ] && break; done
+	while mac=$(uci -q get "$CONF.@device[$i].mac"); do
+		i=$((i + 1))
+		mode=$(uci -q get "$CONF.@device[$((i - 1))].mode")
+		if [ "$mode" = direct ] && direct_auto && [ "$(direct_state)" = dead ]; then mode=vpn; fi
+		ip=$(dev_lease_ip "$mac"); [ -n "$ip" ] || continue
+		case "$mode" in
+			direct) ip -4 rule add from "$ip/32" lookup main pref 8990 2>/dev/null; conntrack -D -s "$ip" >/dev/null 2>&1 ;;
+			block) ip -4 rule add from "$ip/32" prohibit pref 8990 2>/dev/null; conntrack -D -s "$ip" >/dev/null 2>&1 ;;
+		esac
+	done
+}
+devip_watch() { # dakikada bir: Direkt/engelli cihazın DHCP IP'si ya da modu değiştiyse kuralları yenile
+	[ "$(engine)" = mihomo ] && [ "$(uget main.mihomo_native)" = 1 ] || return 0
+	local sig="" i=0 mac mode
 	while mac=$(uci -q get "$CONF.@device[$i].mac"); do
 		mode=$(uci -q get "$CONF.@device[$i].mode")
-		case "$mode" in direct|block)
-			ip=$(awk -v m="$(echo "$mac" | tr 'A-F' 'a-f')" 'tolower($2) == m { print $3; exit }' /tmp/dhcp.leases 2>/dev/null)
-			sig="$sig $mac=$ip" ;;
-		esac
+		case "$mode" in direct|block) sig="$sig $mac=$mode=$(dev_lease_ip "$mac")" ;; esac
 		i=$((i + 1))
 	done
-	[ -f "$RUN/devip.sig" ] || { echo "$sig" > "$RUN/devip.sig"; return 0; }
+	sig="$sig dead=$(direct_state)"
 	[ "$sig" = "$(cat "$RUN/devip.sig" 2>/dev/null)" ] && return 0
 	echo "$sig" > "$RUN/devip.sig"
-	log "cihaz IP'si değişti: Direkt/engelli kuralları yenileniyor"
+	log "cihaz yönlendirme kuralları yenileniyor"
+	dev_route_sync
 	apply_changes
 }
 cmd_fixboot() { # QModem açılışta USB kök hub'larını (usbN) modem diye deniyor ve açılışı ~40 sn geciktiriyor; hub'ları atla
@@ -1934,6 +1950,7 @@ fw_down_real() {
 	nft delete table inet kediray 2>/dev/null
 	nft delete table inet kediray_out 2>/dev/null
 	rules_down
+	while ip -4 rule del pref 8990 2>/dev/null; do :; done
 	dns_down
 	rm -f "$RUN/fw"
 }
@@ -2131,6 +2148,7 @@ apply_changes() {
 		fi
 	fi
 	rm -f "$RUN"/*.old
+	dev_route_sync
 }
 
 active_tag() {
