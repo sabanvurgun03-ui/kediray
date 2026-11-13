@@ -83,15 +83,21 @@ while [ $i -lt $N ]; do
 	(
 		while [ "$(date +%s)" -lt "$END" ]; do
 			rem=$(( END - $(date +%s) )); [ $rem -lt 1 ] && break
-			curl -s -o /dev/null -m $rem --noproxy '' -w '%{size_download}\n' "$HOST/__down?bytes=25000000" >> $W.d$i 2>/dev/null || sleep 1
+			o=$(curl -s -o /dev/null -m $rem --noproxy '' -w '%{size_download} %{http_code}' "$HOST/__down?bytes=25000000" 2>/dev/null); rc=$?
+			echo "$o $rc" >> $W.d$i
+			case "$o" in *" 200 "*|*" 200") ;; *) sleep 1 ;; esac
 		done
 	) &
 	i=$((i+1))
 done
 sample down rx_bytes
 wait
-DOWN=$(total $W.d*)
-[ "${DOWN%%.*}" = 0 ] && [ "$DOWN" = "0.00" ] && fail "İndirme ölçülemedi"
+# yalnızca HTTP 200 yanıtların baytları sayılır (hata sayfaları hıza katılmaz)
+DOWN=$(cat $W.d* 2>/dev/null | awk -v d=$DUR '$2==200{s+=$1} END{printf "%.2f", s*8/1000000/d}')
+if [ "$DOWN" = "0.00" ]; then
+	why=$(cat $W.d* 2>/dev/null | awk '{c[$2"/"$3]++} END{for(k in c) printf "%s x%d ", k, c[k]}')
+	fail "İndirme ölçülemedi (HTTP/curl: ${why:-istek yok})"
+fi
 write up 0
 
 # --- yükleme ---
