@@ -76,6 +76,13 @@ PING=$1; JIT=$2
 write down 0
 
 # --- indirme ---
+# Cloudflare 429 (istek sınırı) verirse Hetzner'in herkese açık test dosyasına geçilir.
+DURL="$HOST/__down?bytes=25000000"
+pc=$(curl -s -o /dev/null -m 6 --noproxy '' -w '%{http_code}' "$HOST/__down?bytes=100000" 2>/dev/null)
+if [ "$pc" != 200 ]; then
+	DURL="https://fsn1-speed.hetzner.com/100MB.bin"
+	SRV="Hetzner (Falkenstein)"
+fi
 rm -f $W.d*
 END=$(( $(date +%s) + DUR ))
 i=0
@@ -83,9 +90,9 @@ while [ $i -lt $N ]; do
 	(
 		while [ "$(date +%s)" -lt "$END" ]; do
 			rem=$(( END - $(date +%s) )); [ $rem -lt 1 ] && break
-			o=$(curl -s -o /dev/null -m $rem --noproxy '' -w '%{size_download} %{http_code}' "$HOST/__down?bytes=25000000" 2>/dev/null); rc=$?
+			o=$(curl -s -o /dev/null -m $rem --noproxy '' -w '%{size_download} %{http_code}' "$DURL" 2>/dev/null); rc=$?
 			echo "$o $rc" >> $W.d$i
-			case "$o" in *" 200 "*|*" 200") ;; *) sleep 1 ;; esac
+			case "$o" in *" 200") ;; *) sleep 1 ;; esac
 		done
 	) &
 	i=$((i+1))
