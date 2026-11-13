@@ -17,7 +17,9 @@
                     "sms_rules",
                     "sms_delete",
                     "sms_rules_set",
-                    "sms_filter_run"
+                    "sms_filter_run",
+                    "speedtest_start",
+                    "speedtest_status"
                 ],
                 "file": [
                     "exec"
@@ -41,7 +43,9 @@
                     "bandpw_write",
                     "sms_rules_set",
                     "sms_filter_run",
-                    "sms_delete"
+                    "sms_delete",
+                    "speedtest_start",
+                    "speedtest_status"
                 ]
             }
         }

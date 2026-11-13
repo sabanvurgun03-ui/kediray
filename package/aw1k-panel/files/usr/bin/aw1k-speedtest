@@ -1,0 +1,113 @@
+#!/bin/sh
+# AW1K Panel: modemden internet hız testi (Cloudflare speed.cloudflare.com uçları, curl ile).
+# rpcd "speedtest_start" arka planda çalıştırır; ilerleme /tmp/aw1k-speedtest.json dosyasına yazılır
+# (phase: ping | down | up | done | error). Anlık hız WAN arayüzü sayaçlarından, sonuç curl'ün bayt sayımından hesaplanır.
+# Copyright (C) 2026 Şaban Vurgun — SPDX-License-Identifier: GPL-3.0-or-later
+S=/tmp/aw1k-speedtest.json
+W=/tmp/aw1k-st
+UPF=/tmp/aw1k-st-up.bin
+DUR=8      # her yön için süre (sn)
+N=4        # paralel bağlantı
+HOST=https://speed.cloudflare.com
+PING=""; JIT=""; DOWN=""; UP=""; ISP=""; SRV=""; IP=""
+
+cleanup() { kill $(jobs -p) 2>/dev/null; rm -f $W.d* $W.u* $UPF $S.tmp; }
+trap cleanup EXIT
+
+num() { [ -n "$1" ] && printf '%s' "$1" || printf 'null'; }
+clean() { printf '%s' "$1" | tr -d '"\\\n\r' | cut -c1-60; }
+write() { # faz canlı_hız [hata]
+	printf '{"phase":"%s","live":%s,"ping":%s,"jitter":%s,"down":%s,"up":%s,"isp":"%s","server":"%s","ip":"%s","error":"%s","ts":%s}' \
+		"$1" "${2:-0}" "$(num "$PING")" "$(num "$JIT")" "$(num "$DOWN")" "$(num "$UP")" \
+		"$(clean "$ISP")" "$(clean "$SRV")" "$(clean "$IP")" "$(clean "$3")" "$(date +%s)" > $S.tmp && mv $S.tmp $S
+}
+fail() { write error 0 "$1"; exit 0; }
+
+wandev() {
+	d=wwan0_1
+	if ubus call network.device status "{\"name\":\"$d\"}" >/dev/null 2>&1; then echo "$d"; return; fi
+	d=$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.l3_device')
+	[ -n "$d" ] && { echo "$d"; return; }
+	echo wan
+}
+DEV=$(wandev)
+cnt() { cat /sys/class/net/$DEV/statistics/$1 2>/dev/null || echo 0; }
+
+# Bir yönü ölçer: dir=rx|tx, dosya öneki; her saniye anlık hızı yazar
+sample() { # faz sayaç
+	prev=$(cnt $2); t0=$(date +%s)
+	while [ "$(date +%s)" -lt "$END" ]; do
+		sleep 1
+		cur=$(cnt $2)
+		live=$(awk -v a="$prev" -v b="$cur" 'BEGIN{ d=b-a; if (d<0) d=0; printf "%.2f", d*8/1000000 }')
+		prev=$cur
+		write "$1" "$live"
+	done
+}
+total() { cat "$@" 2>/dev/null | awk -v d=$DUR '{s+=$1} END{printf "%.2f", s*8/1000000/d}'; }
+
+write ping 0
+# --- sunucu / ISS bilgisi ---
+m=$(curl -s -m 6 --noproxy '' "$HOST/meta" 2>/dev/null)
+if [ -n "$m" ]; then
+	ISP=$(echo "$m" | jsonfilter -e '@.asOrganization' 2>/dev/null)
+	IP=$(echo "$m" | jsonfilter -e '@.clientIp' 2>/dev/null)
+	SRV=$(echo "$m" | jsonfilter -e '@.colo.city' 2>/dev/null)
+	[ -n "$SRV" ] || SRV=$(echo "$m" | jsonfilter -e '@.colo.iata' 2>/dev/null)
+fi
+[ -n "$SRV" ] || SRV="Cloudflare"
+write ping 0
+
+# --- gecikme + titreşim: önce ICMP, olmazsa curl TCP bağlantı süresi ---
+ms=$(ping -c 6 -W 2 1.1.1.1 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p')
+if [ -z "$ms" ]; then
+	ms=""
+	for k in 1 2 3 4 5; do
+		t=$(curl -s -o /dev/null -m 4 --noproxy '' -w '%{time_connect}' "$HOST/__down?bytes=0" 2>/dev/null)
+		ms="$ms
+$(awk -v t="$t" 'BEGIN{ if (t+0 > 0) printf "%.1f", t*1000 }')"
+	done
+fi
+echo "$ms" | grep -q '[0-9]' || fail "Cloudflare'a ulaşılamadı (internet/VPN kontrol edin)"
+set -- $(echo "$ms" | awk 'NF{ n++; s+=$1; if (n>1) { d=$1-p; if (d<0) d=-d; j+=d } p=$1; if (min==""||$1<min) min=$1 }
+	END{ printf "%.1f %.1f", s/n, (n>1 ? j/(n-1) : 0) }')
+PING=$1; JIT=$2
+write down 0
+
+# --- indirme ---
+rm -f $W.d*
+END=$(( $(date +%s) + DUR ))
+i=0
+while [ $i -lt $N ]; do
+	(
+		while [ "$(date +%s)" -lt "$END" ]; do
+			rem=$(( END - $(date +%s) )); [ $rem -lt 1 ] && break
+			curl -s -o /dev/null -m $rem --noproxy '' -w '%{size_download}\n' "$HOST/__down?bytes=25000000" >> $W.d$i 2>/dev/null || sleep 1
+		done
+	) &
+	i=$((i+1))
+done
+sample down rx_bytes
+wait
+DOWN=$(total $W.d*)
+[ "${DOWN%%.*}" = 0 ] && [ "$DOWN" = "0.00" ] && fail "İndirme ölçülemedi"
+write up 0
+
+# --- yükleme ---
+dd if=/dev/zero of=$UPF bs=1024 count=4096 2>/dev/null
+rm -f $W.u*
+END=$(( $(date +%s) + DUR ))
+i=0
+while [ $i -lt $N ]; do
+	(
+		while [ "$(date +%s)" -lt "$END" ]; do
+			rem=$(( END - $(date +%s) )); [ $rem -lt 1 ] && break
+			curl -s -o /dev/null -m $rem --noproxy '' -X POST --data-binary @$UPF -w '%{size_upload}\n' "$HOST/__up" >> $W.u$i 2>/dev/null || sleep 1
+		done
+	) &
+	i=$((i+1))
+done
+sample up tx_bytes
+wait
+UP=$(total $W.u*)
+write done 0

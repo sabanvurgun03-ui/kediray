@@ -10,7 +10,7 @@ aw1k_wandev() {
 }
 case "$1" in
 list)
-    echo '{ "usage": {}, "kediray": {}, "kediray_ctl": { "action": "str" }, "kediray_devices": {}, "wifi_clients": {}, "guest_get": {}, "guest_set": { "enabled": true, "ssid": "str", "key": "str" }, "wan_info": {}, "bandpw_write": { "pw": "str" }, "sms_rules": {}, "sms_delete": { "index": "str" }, "sms_rules_set": { "rules": "str" }, "sms_filter_run": { "mode": "str" }, "kediray_device": { "mac": "str", "mode": "str", "name": "str" } }'
+    echo '{ "usage": {}, "kediray": {}, "kediray_ctl": { "action": "str" }, "kediray_devices": {}, "wifi_clients": {}, "guest_get": {}, "guest_set": { "enabled": true, "ssid": "str", "key": "str" }, "wan_info": {}, "bandpw_write": { "pw": "str" }, "sms_rules": {}, "sms_delete": { "index": "str" }, "sms_rules_set": { "rules": "str" }, "sms_filter_run": { "mode": "str" }, "speedtest_start": {}, "speedtest_status": {}, "kediray_device": { "mac": "str", "mode": "str", "name": "str" } }'
     ;;
 call)
     case "$2" in
@@ -204,6 +204,26 @@ call)
         "{"*) printf '%s' "$out" ;;
         *) printf '{"ok":false,"error":"Silme çalışmadı"}' ;;
         esac
+        ;;
+    speedtest_start)
+        # Modemden hız testi (aw1k-speedtest, arka planda); sonuç speedtest_status ile okunur
+        pf=/tmp/aw1k-speedtest.pid; p=$(cat $pf 2>/dev/null)
+        if [ -z "$p" ] || ! kill -0 "$p" 2>/dev/null; then
+            printf '{"phase":"starting"}' > /tmp/aw1k-speedtest.json
+            ( /usr/bin/aw1k-speedtest >/dev/null 2>&1 & echo $! > $pf )
+        fi
+        printf '{"ok":true}'
+        ;;
+    speedtest_status)
+        f=/tmp/aw1k-speedtest.json; p=$(cat /tmp/aw1k-speedtest.pid 2>/dev/null)
+        if [ -s $f ]; then
+            case "$(jsonfilter -i $f -e '@.phase')" in
+            done|error|idle) cat $f ;;
+            *) if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then cat $f; else printf '{"phase":"error","error":"Test yarıda kesildi"}'; fi ;;
+            esac
+        else
+            printf '{"phase":"idle"}'
+        fi
         ;;
     sms_rules)
         # Spam filtresi kuralları (/etc/aw1k-sms.json) ve silinenlerin kaydı (/tmp/aw1k-sms-log.json)

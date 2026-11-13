@@ -2,7 +2,7 @@
 # KediRay ilk açılış kurulumu (uci-defaults). Bir kez çalışır; başarılı biterse OpenWrt dosyayı siler.
 # Copyright (C) 2026 Şaban Vurgun — SPDX-License-Identifier: GPL-3.0-or-later
 
-chmod 755 /usr/bin/kediray /usr/bin/aw1k-usage /usr/libexec/rpcd/aw1k /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray /etc/hotplug.d/firewall/99-kediray 2>/dev/null
+chmod 755 /usr/bin/kediray /usr/bin/aw1k-usage /usr/bin/aw1k-speedtest /usr/libexec/rpcd/aw1k /etc/init.d/kediray /etc/hotplug.d/iface/80-kediray /etc/hotplug.d/firewall/99-kediray 2>/dev/null
 chmod 600 /etc/config/kediray 2>/dev/null
 chmod 755 /www/luci-static/resources/view/kediray /usr/share/kediray 2>/dev/null
 chmod 644 /www/luci-static/resources/view/kediray/*.js /usr/share/kediray/*.uc /usr/share/rpcd/acl.d/aw1k-panel.json /usr/share/rpcd/acl.d/luci-app-kediray.json 2>/dev/null
