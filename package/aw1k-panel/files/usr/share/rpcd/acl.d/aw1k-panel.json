@@ -19,7 +19,8 @@
                     "sms_rules_set",
                     "sms_filter_run",
                     "speedtest_start",
-                    "speedtest_status"
+                    "speedtest_status",
+                    "speedtest_stop"
                 ],
                 "file": [
                     "exec"
@@ -45,7 +46,8 @@
                     "sms_filter_run",
                     "sms_delete",
                     "speedtest_start",
-                    "speedtest_status"
+                    "speedtest_status",
+                    "speedtest_stop"
                 ]
             }
         }

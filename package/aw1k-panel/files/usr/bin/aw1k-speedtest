@@ -13,6 +13,7 @@ PING=""; JIT=""; DOWN=""; UP=""; ISP=""; SRV=""; IP=""
 
 cleanup() { kill $(jobs -p) 2>/dev/null; rm -f $W.d* $W.u* $UPF $S.tmp; }
 trap cleanup EXIT
+trap "exit 0" TERM INT
 
 num() { [ -n "$1" ] && printf '%s' "$1" || printf 'null'; }
 clean() { printf '%s' "$1" | tr -d '"\\\n\r' | cut -c1-60; }

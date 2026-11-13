@@ -10,7 +10,7 @@ aw1k_wandev() {
 }
 case "$1" in
 list)
-    echo '{ "usage": {}, "kediray": {}, "kediray_ctl": { "action": "str" }, "kediray_devices": {}, "wifi_clients": {}, "guest_get": {}, "guest_set": { "enabled": true, "ssid": "str", "key": "str" }, "wan_info": {}, "bandpw_write": { "pw": "str" }, "sms_rules": {}, "sms_delete": { "index": "str" }, "sms_rules_set": { "rules": "str" }, "sms_filter_run": { "mode": "str" }, "speedtest_start": {}, "speedtest_status": {}, "kediray_device": { "mac": "str", "mode": "str", "name": "str" } }'
+    echo '{ "usage": {}, "kediray": {}, "kediray_ctl": { "action": "str" }, "kediray_devices": {}, "wifi_clients": {}, "guest_get": {}, "guest_set": { "enabled": true, "ssid": "str", "key": "str" }, "wan_info": {}, "bandpw_write": { "pw": "str" }, "sms_rules": {}, "sms_delete": { "index": "str" }, "sms_rules_set": { "rules": "str" }, "sms_filter_run": { "mode": "str" }, "speedtest_start": {}, "speedtest_status": {}, "speedtest_stop": {}, "kediray_device": { "mac": "str", "mode": "str", "name": "str" } }'
     ;;
 call)
     case "$2" in
@@ -212,6 +212,15 @@ call)
             printf '{"phase":"starting"}' > /tmp/aw1k-speedtest.json
             ( /usr/bin/aw1k-speedtest >/dev/null 2>&1 & echo $! > $pf )
         fi
+        printf '{"ok":true}'
+        ;;
+    speedtest_stop)
+        # Çalışan hız testini durdurur
+        pf=/tmp/aw1k-speedtest.pid; p=$(cat $pf 2>/dev/null)
+        [ -n "$p" ] && kill "$p" 2>/dev/null
+        pkill -f 'speed.cloudflare.com/__' 2>/dev/null
+        rm -f $pf
+        printf '{"phase":"idle"}' > /tmp/aw1k-speedtest.json
         printf '{"ok":true}'
         ;;
     speedtest_status)
