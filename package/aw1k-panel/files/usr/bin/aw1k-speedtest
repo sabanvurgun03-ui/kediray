@@ -77,7 +77,7 @@ write down 0
 
 # --- indirme ---
 # Cloudflare 429 (istek sınırı) verirse Hetzner'in herkese açık test dosyasına geçilir.
-DURL="$HOST/__down?bytes=25000000"
+DURL="$HOST/__down?bytes=5000000"
 pc=$(curl -s -o /dev/null -m 6 --noproxy '' -w '%{http_code}' "$HOST/__down?bytes=100000" 2>/dev/null)
 if [ "$pc" != 200 ]; then
 	DURL="https://fsn1-speed.hetzner.com/100MB.bin"

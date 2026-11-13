@@ -17,6 +17,7 @@ Düğüm: `package/kediray/files/usr/bin/kediray` (shell), `.../usr/share/kedira
 - Tema CSS: `html[data-kedi] body button.cbi-button` genel kuralı yüksek özgüllükte; renkli düğme kuralları ona göre yazılmalı.
 
 ## Yapılanlar (yeniden eskiye)
+- 1.20.6: Hız testi indirme: Cloudflare `__down` bu modemde bytes>=10000000 için 429 veriyor (5000000 ve altı 200; modemde ölçüldü) → istek 5 MB.
 - 1.20.5: Hız testi indirmesinde Cloudflare 429 (istek sınırı) verirse Hetzner `fsn1-speed.hetzner.com/100MB.bin` yedeği (`aw1k-speedtest`). Yükleme hâlâ Cloudflare.
 - 1.20.4: Hız testi indirme 0.00 çıkıyordu: her istekte HTTP kodu + curl çıkış kodu kaydedilir, yalnızca HTTP 200 baytları sayılır, hata kutusunda neden yazar (`aw1k-speedtest`).
 - 1.20.3: Hız testini durdurma: rpcd `speedtest_stop` (betiği ve curl'leri sonlandırır, durumu idle yapar).
