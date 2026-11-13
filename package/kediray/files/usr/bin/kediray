@@ -1093,6 +1093,7 @@ cmd_core_use() { # <xray|sing-box|mihomo>  etkin çekirdeği değiştirir (mihom
 		else say "uyarı: $id için yapılandırma dosyası hazırlanamadı; KediRay sunucu listesiyle çalışılacak"; fi
 	fi
 	uci set "$CONF.main.own_config=$own_new" && uci commit "$CONF"
+	if [ "$own_new" = 1 ]; then own_ra_dns on; else own_ra_dns off; fi
 	rm -f /etc/kediray.tested "$RUN/core.ver" "$RUN/core.ver.sz"
 	echo "etkin çekirdek: $id"
 	if [ "$(uget main.enabled)" = 1 ]; then
@@ -1105,6 +1106,7 @@ cmd_core_use() { # <xray|sing-box|mihomo>  etkin çekirdeği değiştirir (mihom
 		if [ $ok = 0 ]; then
 			sayerr "$id çekirdeği başlamadı; önceki çekirdeğe ($prev) dönülüyor: $(sed -n '1,3p' "$RUN/last_error" 2>/dev/null | tr '\n' ' ')"
 			uci set "$CONF.main.core=$prev"; uci set "$CONF.main.own_config=$prev_own"; uci commit "$CONF"
+			if [ "$prev_own" = 1 ]; then own_ra_dns on; else own_ra_dns off; fi
 			rm -f /etc/kediray.tested "$RUN/core.ver" "$RUN/core.ver.sz"
 			/etc/init.d/kediray restart >/dev/null 2>&1
 			echo "$id başlatılamadı, $prev'e dönüldü" >&2
@@ -1414,6 +1416,24 @@ cmd_dash() { # on|off|info  — MetaCubeXD dashboard (mihomo / sing-box)
 	esac
 }
 
+own_ra_dns() { # on|off — kendi modda LAN'a IPv6 DNS duyurma (TUN IPv6 DNS'e cevap vermez; Windows 2 sn bekler). Eski değer saklanır, kapanınca geri gelir
+	local cur
+	command -v odhcpd >/dev/null 2>&1 || [ -x /etc/init.d/odhcpd ] || return 0
+	case "$1" in
+	on)
+		[ -n "$(uget main.ra_dns_prev)" ] && return 0
+		cur=$(uci -q get dhcp.lan.ra_dns); uci set "$CONF.main.ra_dns_prev=${cur:-unset}"; uci commit "$CONF"
+		uci set dhcp.lan.ra_dns='0'; uci commit dhcp
+		/etc/init.d/odhcpd restart >/dev/null 2>&1 ;;
+	off)
+		cur=$(uget main.ra_dns_prev); [ -n "$cur" ] || return 0
+		if [ "$cur" = unset ]; then uci -q delete dhcp.lan.ra_dns; else uci set dhcp.lan.ra_dns="$cur"; fi
+		uci commit dhcp; uci -q delete "$CONF.main.ra_dns_prev"; uci commit "$CONF"
+		/etc/init.d/odhcpd restart >/dev/null 2>&1 ;;
+	esac
+	return 0
+}
+
 cmd_core_own() { # on|off  — kendi yapılandırma modu
 	local v prev core
 	case "$1" in on) v=1 ;; off) v=0 ;; *) echo "kullanım: kediray core-own on|off" >&2; return 1 ;; esac
@@ -1429,10 +1449,12 @@ cmd_core_own() { # on|off  — kendi yapılandırma modu
 	uci set "$CONF.main.own_config=$v" && uci commit "$CONF"
 	rm -f /etc/kediray.tested
 	echo "kendi yapılandırma modu: $1"
+	if [ "$v" = 1 ]; then own_ra_dns on; else own_ra_dns off; fi
 	[ "$(uget main.enabled)" = 1 ] || return 0
 	restart_check && return 0
 	sayerr "kendi yapılandırma başlamadı, eski ayara dönülüyor: $(sed -n '1,3p' "$RUN/last_error" 2>/dev/null | tr '\n' ' ')"
 	uci set "$CONF.main.own_config=$prev" && uci commit "$CONF"
+	if [ "$prev" = 1 ]; then own_ra_dns on; else own_ra_dns off; fi
 	rm -f /etc/kediray.tested
 	/etc/init.d/kediray restart >/dev/null 2>&1
 	return 1
