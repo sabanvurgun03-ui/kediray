@@ -1605,6 +1605,7 @@ cmd_app_add() { # <ad> <vpn|direct> <portlar> <alan adları (virgüllü)> <IP'le
 	[ "$tdns" = dns ] && [ -n "$doms" ] && uci set "$CONF.$id.tunnel_dns=1"
 	[ -n "$expand" ] && uci set "$CONF.$id.expand=$expand"
 	for x in $(echo "$doms" | tr ',' ' '); do
+		while [ "${x%.}" != "$x" ]; do x=${x%.}; done; [ -n "$x" ] || continue
 		case "$x" in *:*) ;; *) x="domain:$x" ;; esac
 		uci add_list "$CONF.$id.domain=$x"
 	done
@@ -2902,7 +2903,8 @@ cmd_app() { # <app> <vpn|direct> | <app> add-ip <cidr> | <app> add-port <port|a-
 			esac ;;
 		add-domain)
 			echo "$3" | grep -qE '^[A-Za-z0-9._:-]+$' || { echo "geçersiz alan adı: $3" >&2; return 1; }
-			case "$3" in *:*) x="$3" ;; *) x="domain:$3" ;; esac
+			x=$3; while [ "${x%.}" != "$x" ]; do x=${x%.}; done; [ -n "$x" ] || { echo "geçersiz alan adı: $3" >&2; return 1; }
+			case "$x" in *:*) ;; *) x="domain:$x" ;; esac
 			uci -q get "$CONF.$1.domain" | tr ' ' '\n' | grep -qx "$x" && { echo "$nm: $3 zaten listede"; return 0; }
 			uci add_list "$CONF.$1.domain=$x" ;;
 		add-ip)

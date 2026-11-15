@@ -42,6 +42,9 @@ function L(v, sep) {
 function dom(d) {
 	d = trim(d);
 	if (!length(d)) return null;
+	// Sondaki nokta (googleusercontent.com.) mihomo'da 'trailing dot is not allowed' hatası verir; regexp dışında kırp
+	if (!match(d, /^regexp:/)) d = replace(d, /\.+$/, '');
+	if (!length(d)) return null;
 	if (index(d, ':') >= 0) return d;
 	d = replace(d, /^\*?\./, '');
 	return 'domain:' + d;
