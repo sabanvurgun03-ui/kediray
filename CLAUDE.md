@@ -17,6 +17,7 @@ Düğüm: `package/kediray/files/usr/bin/kediray` (shell), `.../usr/share/kedira
 - Tema CSS: `html[data-kedi] body button.cbi-button` genel kuralı yüksek özgüllükte; renkli düğme kuralları ona göre yazılmalı.
 
 ## Yapılanlar (yeniden eskiye)
+- 1.20.9: mihomo'da (kendi yapılandırma ve yerel mod) "QUIC'i reddet" çalışmıyordu: nft `quic_fwd` own/native'de kurulmuyor. Kendi modda çalıştırılan kopyanın `rules:` başına `AND,((NETWORK,UDP),(DST-PORT,443)),REJECT` eklenir (`mh_quic_inject`; kullanıcı dosyası değişmez, zaten varsa eklenmez, yapılandırma testi geçmezse kuralsız devam). Yerel modda gen.uc `R`'ye eklenir; şablona (MH_YAML) yazılmaz. Not: TCP Mux düğmesi mihomo'ya `smux` yazmıyor (yalnız Xray `mux_for`).
 - 1.20.8: Uygulama profilinde sonu noktalı alan adı (googleusercontent.com.) mihomo'da 'trailing dot is not allowed' ile yapılandırmayı bozuyor, VPN başlamıyordu. `dom()` (gen.uc) ve `app-add`/`add-domain` sondaki noktayı kırpar.
 - 1.20.7: Kendi modda LAN'a IPv6 DNS duyurulmaz (`dhcp.lan.ra_dns=0`, kapanınca eski değer); PC'de DNS 2 sn zaman aşımı biter.
 - 1.20.6: Hız testi indirme: Cloudflare `__down` bu modemde bytes>=10000000 için 429 veriyor (5000000 ve altı 200; modemde ölçüldü) → istek 5 MB.

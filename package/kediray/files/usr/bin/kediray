@@ -1185,9 +1185,23 @@ own_probe() { # <çekirdek> <dosya>
 	return 0
 }
 
+# mihomo YAML'ında rules listesinin en başına QUIC (UDP 443) reddi ekler (mihomo wiki'sinin önerdiği kural).
+# Dosyada zaten varsa (elle eklenmiş) ya da blok biçiminde "rules:" yoksa dokunmaz. 0 = eklendi
+mh_quic_inject() { # <dosya>
+	local f="$1"
+	grep -iE 'NETWORK,UDP' "$f" | grep -i 'DST-PORT,443' | grep -qi 'REJECT' && return 1
+	awk '
+		!done && /^rules:[ \t\r]*(#.*)?$/ { print; r = 1; next }
+		r && !done && /^[ \t]*-[ \t]/ { m = $0; sub(/-.*/, "", m); print m "- \"AND,((NETWORK,UDP),(DST-PORT,443)),REJECT\""; done = 1 }
+		r && !done && /^[^ \t#\r]/ { r = 0 }
+		{ print }
+		END { exit !done }
+	' "$f" > "$f.quic" && mv "$f.quic" "$f" || { rm -f "$f.quic"; return 1; }
+}
+
 # Kendi yapılandırmadan çalıştırma hazırlığı (cmd_gen yerine)
 own_gen() {
-	local core f sp
+	local core f sp quic=0
 	core=$(engine)
 	f=$(own_path "$core") || {
 		echo "$core için seçili yapılandırma dosyası yok (Çekirdek ayarı sayfasından dosya ekleyip seçin)" > "$RUN/last_error"
@@ -1212,10 +1226,23 @@ own_gen() {
 		grep -Ev '^(mixed-port|socks-port):[ \t]*["'"'"']?0?["'"'"']?[ \t\r]*(#.*)?$' "$RUN/config.new.json" > "$RUN/config.new.tmp" && mv "$RUN/config.new.tmp" "$RUN/config.new.json"
 		printf '\nsocks-port: %s\n' "$sp" >> "$RUN/config.new.json"
 	fi
-	if ! core_test "$core" "$RUN/config.new.json" > "$RUN/test.log" 2>&1; then
-		{ echo "$(engine_name) yapılandırma testi başarısız ($(basename "$f")):"; grep -iE 'fail|error|invalid|fatal' "$RUN/test.log" | tail -n 3; } > "$RUN/last_error"
-		sayerr "$(head -n1 "$RUN/last_error")"; rm -f "$RUN/config.new.json"; return 1
+	# QUIC'i reddet (Ayarlar, varsayılan açık): Xray modunda nftables ile yapılıyor; mihomo kendi TUN'unu kurduğu için
+	# çalıştırılan kopyanın kurallarının başına eklenir. QUIC tünelde UDP-over-TCP gidip videoyu/sayfayı takabiliyor;
+	# reddedilince tarayıcı TCP'ye geçer. Dosyanız değişmez.
+	if [ "$core" = mihomo ] && [ "$(uget main.block_quic)" != 0 ]; then
+		cp "$RUN/config.new.json" "$RUN/config.noquic.json" && mh_quic_inject "$RUN/config.new.json" && quic=1
 	fi
+	if ! core_test "$core" "$RUN/config.new.json" > "$RUN/test.log" 2>&1; then
+		# Eklenen kural yüzünden geçmediyse kuralsız kopyayla devam edilir: VPN yine açılsın
+		if [ "$quic" = 1 ] && core_test "$core" "$RUN/config.noquic.json" > "$RUN/test.log" 2>&1; then
+			mv -f "$RUN/config.noquic.json" "$RUN/config.new.json"
+			say "uyarı: QUIC reddi kuralı yapılandırmaya eklenemedi; kuralsız çalışıyor"
+		else
+			{ echo "$(engine_name) yapılandırma testi başarısız ($(basename "$f")):"; grep -iE 'fail|error|invalid|fatal' "$RUN/test.log" | tail -n 3; } > "$RUN/last_error"
+			sayerr "$(head -n1 "$RUN/last_error")"; rm -f "$RUN/config.new.json" "$RUN/config.noquic.json"; return 1
+		fi
+	fi
+	rm -f "$RUN/config.noquic.json"
 	mv "$RUN/config.new.json" "$RUN/config.json"
 	own_probe "$core" "$RUN/config.json"
 	echo "$OWN_TYPE:$OWN_VAL" > "$RUN/own.type"

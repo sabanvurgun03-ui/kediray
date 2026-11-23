@@ -1499,6 +1499,9 @@ function mihomo() {
 
 	let R = [];
 	if (DNS_MODE != 'off') push(R, 'DST-PORT,53,dns-out');
+	// Yerel modda nftables QUIC reddi (quic_fwd) kurulmuyor: aynı iş mihomo kuralıyla yapılır (mihomo wiki'sinin önerdiği kural).
+	// Şablona (MH_YAML) yazılmaz; kendi yapılandırma modunda kediray betiği çalıştırılan kopyaya ekler, ayar kapatılabilsin.
+	if (NATIVE && !MH_YAML && on(opt('block_quic'), true)) push(R, 'AND,((NETWORK,UDP),(DST-PORT,443)),REJECT');
 	if (on(opt('block_doh'), false))
 		for (let r in mh_match({ domain: DOH_DOMAINS }, 'block')) push(R, r);
 	for (let a in APPS)
