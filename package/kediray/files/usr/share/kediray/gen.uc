@@ -745,8 +745,9 @@ function nft() {
 		if (on(opt('block_quic'), true)) push(o, '\t\tudp dport 443 return');
 		push(o, '\t\tmeta l4proto { tcp, udp } socket transparent 1 meta mark set ' + MARK_TP + ' accept');
 		// TCP ve UDP ayrı portlara: UDP girişinde sniffing kapalı (her UDP oturumuna ~200 ms ekliyordu)
-		push(o, '\t\tmeta l4proto tcp meta mark set ' + MARK_TP + ' tproxy ip to :' + tp_port + ' accept');
-		push(o, '\t\tmeta l4proto udp meta mark set ' + MARK_TP + ' tproxy ip to :' + (tp_port + 1) + ' accept');
+		// ct mark: bağlantı testi (kediray conns) çekirdeğe giren bağlantıyı bununla tanır (mixed/tun'daki TUN işareti gibi)
+		push(o, '\t\tmeta l4proto tcp meta mark set ' + MARK_TP + ' ct mark set ' + MARK_TP + ' tproxy ip to :' + tp_port + ' accept');
+		push(o, '\t\tmeta l4proto udp meta mark set ' + MARK_TP + ' ct mark set ' + MARK_TP + ' tproxy ip to :' + (tp_port + 1) + ' accept');
 		push(o, '\t}');
 	} else if (!NOCAP) {
 		// TCP: çekirdekte NAT redirect. fw4'ün dstnat'ından (-100) önce.

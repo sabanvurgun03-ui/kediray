@@ -3,6 +3,15 @@
 [ "$ACTION" = ifup ] || exit 0
 [ "$(uci -q get kediray.main.enabled)" = 1 ] || exit 0
 [ -f /var/etc/kediray/fw ] || exit 0
-nft list table inet kediray >/dev/null 2>&1 && ip -4 rule | grep -q 'lookup 107' && exit 0
+# Kurallar yerindeyse dokunma. Yakalama moduna göre gereken ip rule farklıdır: önceden her modda TPROXY tablosuna (107)
+# bakılıyordu; varsayılan mixed modda o kural hiç olmadığı için her arayüz olayında kurallar söküp yeniden kuruluyordu
+# (bu arada UDP kısa süre tünel dışına düşebiliyordu).
+if nft list table inet kediray >/dev/null 2>&1; then
+	case "$(cat /var/etc/kediray/capture 2>/dev/null)" in
+		mixed|tun) ip -4 rule | grep -q 'lookup 108' && exit 0 ;;
+		tproxy) ip -4 rule | grep -q 'lookup 107' && exit 0 ;;
+		*) exit 0 ;;
+	esac
+fi
 logger -t kediray "arayüz $INTERFACE kalktı, kurallar yeniden uygulanıyor"
 /usr/bin/kediray fw-up >/dev/null 2>&1 &

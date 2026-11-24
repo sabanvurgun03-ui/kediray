@@ -1,6 +1,7 @@
 'use strict';
 'require view';
 'require view.kediray.i18n as i18n';
+'require view.kediray.conns as conns';
 'require fs';
 'require ui';
 'require poll';
@@ -1120,29 +1121,10 @@ return view.extend({
 			])
 		]);
 	},
-	async showConns(ip) {
-		const list = await this.busy('Bağlantılar okunuyor…', runJson(['conns', ip, '--json']));
-		const apps = (this.apps || []).filter(a => a.route === 'direct');
-		const sel = h('select', { 'class': 'cbi-input-select' }, apps.map(a => h('option', { 'value': a.sec }, a.name)));
-		const rows = (list || []).slice(0, 60).map(c => h('tr', { 'class': 'tr' }, [
-			h('td', { 'class': 'td' }, c.proto),
-			h('td', { 'class': 'td' }, c.dst), h('td', { 'class': 'td' }, String(c.port)),
-			h('td', { 'class': 'td' }, String(c.n)),
-			h('td', { 'class': 'td' }, h('span', { 'class': 'kr-ping ' + (c.vpn ? 'kr-mid' : 'kr-good') }, c.vpn ? 'VPN' : 'Direkt')),
-			h('td', { 'class': 'td' }, c.web ? h('span', { 'class': 'kr-sub' }, 'web') : h('b', {}, 'oyun/uygulama?')),
-			h('td', { 'class': 'td' }, c.vpn && apps.length
-				? btn.call(this, 'Direkt yap', 'cbi-button-action', () => this.doDirect(sel.value, c), 'Bu sunucuyu (ve komşularını) seçili uygulamaya ekler')
-				: '')
-		]));
-		ui.showModal('Aktif bağlantılar — ' + (ip || 'tüm cihazlar'), [
-			h('p', { 'class': 'kr-sub' }, 'Oyun açıkken bak. Oyunun satırlarında "VPN" yazıyorsa oyun tünelden geçiyor: ışınlanırken sunucu IP değişti sanıp atabilir. "Direkt yap" o sunucuyu (aynı /24 komşuları) ve portunu seçili uygulamaya ekler.'),
-			apps.length ? h('div', { 'class': 'kr-row', 'style': 'margin:0 0 8px' }, [h('label', {}, 'Eklenecek uygulama:'), sel]) : '',
-			h('table', { 'class': 'table kr-table' }, [
-				h('tr', { 'class': 'tr table-titles' }, ['Proto', 'Hedef', 'Port', 'Adet', 'Yol', '', ''].map(x => h('th', { 'class': 'th' }, x))),
-				...rows
-			]),
-			h('div', { 'class': 'right' }, h('button', { 'class': 'btn', 'click': ui.hideModal }, 'Kapat'))
-		], 'kr-wide');
+	showConns(ip) {
+		return conns.show({ ip: ip, title: 'Bağlantı testi',
+			directApps: (this.apps || []).filter(a => a.route === 'direct').map(a => ({ sec: a.sec, name: a.name })),
+			onDirect: (sec, c) => this.doDirect(sec, c) });
 	},
 
 	async doDirect(sec, c) {
@@ -1974,7 +1956,7 @@ return view.extend({
 				h('td', { 'class': 'td kr-hide-sm' }, d.mac),
 				h('td', { 'class': 'td kr-hide-sm krt-n' }, d.online && d.uptime != null ? live(d.uptime) : (d.off_for != null ? 'çevrimdışı ' + Math.max(1, Math.round(d.off_for / 60)) + ' dk' : '—')),
 				h('td', { 'class': 'td' }, seg),
-				h('td', { 'class': 'td' }, off ? (d.sec ? btn.call(this, 'Kaydı sil', '', () => this.doDevice(d, 'default'), 'Bu çevrimdışı cihazın kayıtlı yönünü sil') : '') : (d.ip ? btn.call(this, 'Bağlantılar', '', () => this.showConns(d.ip), 'Bu cihazın şu an açık olan bağlantılarını listeler: hangi adrese ve porta, VPN\'den mi direkt mi gittiği. Bir uygulamanın hangi adresi/portu kullandığını görüp yön kuralına eklemek için.') : ''))
+				h('td', { 'class': 'td' }, off ? (d.sec ? btn.call(this, 'Kaydı sil', '', () => this.doDevice(d, 'default'), 'Bu çevrimdışı cihazın kayıtlı yönünü sil') : '') : (d.ip ? btn.call(this, 'Bağlantılar', '', () => this.showConns(d.ip), 'Bağlantı testi: bu cihazın açık bağlantılarını ve her birinin gerçekte hangi yoldan (VPN / Direkt) gittiğini gösterir. Uygulama kuralına uymayan bağlantılar kırmızı işaretlenir.') : ''))
 			]);
 		};
 		// Çevrimdışı cihazlar (yalnızca kayıtlı yönü olanlar) varsayılan olarak gizli; istenirse açılır

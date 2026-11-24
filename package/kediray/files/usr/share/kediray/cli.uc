@@ -299,30 +299,190 @@ else if (CMD == 'webtest') {
 	out({ running: running, tests: tests, avg: avg, verdict: verdict });
 }
 else if (CMD == 'conns') {
-	// stdin: /proc/net/nf_conntrack ; ARGV[1] = istemci IP (boş = hepsi), ARGV[2] = TUN işareti (UDP tüneli)
+	// stdin: /proc/net/nf_conntrack ; ARGV[1] = istemci IP (boş = hepsi), ARGV[2] = TUN işareti (UDP tüneli), ARGV[3] = TPROXY işareti
+	// KR_CONNS_SRC=api: $RUN/conns.api (mihomo / sing-box /connections) asıl kaynak; conntrack yalnız cihazı bulmak için.
+	// Çıktı: [{ proto, dst, host, port, client, n, via: direct|vpn|block, vpn, out, rule, app, sec, want, bad, web, src }]
 	const ip = ARGV[1] || '';
-	const tunmark = int(ARGV[2] ?? 0) || 738;
-	let agg = {};
+	const tunmark = int(ARGV[2] ?? 0) || 738, tpmark = int(ARGV[3] ?? 0) || 737;
+	const SRC = getenv('KR_CONNS_SRC') == 'api' ? 'api' : 'ct';
+	const OWN = getenv('KR_OWN') == '1';
+	const DEAD = getenv('KR_DIRECT_DEAD') == '1';
+	const PRIV = /^(0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|22[4-9]\.|23[0-9]\.|24[0-9]\.|25[0-5]\.)/;
+	let lst = v => { let r = []; for (let x in (type(v) == 'array' ? v : [v ?? ''])) for (let y in split(trim('' + x), /[ \t\r\n,]+/)) if (length(y)) push(r, y); return r; };
+	let ip2n = s => { let p = match(s ?? '', /^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/); return p ? int(p[1]) * 16777216 + int(p[2]) * 65536 + int(p[3]) * 256 + int(p[4]) : null; };
+	let cidr = s => {
+		let m = match(trim(s ?? ''), /^([0-9.]+)(\/([0-9]+))?$/);
+		if (!m) return null;
+		let n = ip2n(m[1]), b = (m[3] != null) ? int(m[3]) : 32;
+		if (n == null || b < 0 || b > 32) return null;
+		let size = 1;
+		for (let i = 0; i < 32 - b; i++) size *= 2;
+		return [n - n % size, size];   // [ağın ilk adresi, adres sayısı] (bit işlemi yok: 32 bit taşmasına karşı)
+	};
+	let in_cidr = (n, c) => n != null && c != null && n >= c[0] && n < c[0] + c[1];
+	// LAN ağları ve modemin kendi LAN adresleri (192.168.1.1/24 -> ağ + kendi adresi)
+	let lan = [], self = {};
+	for (let x in lst(getenv('KR_LAN_NETS'))) { let c = cidr(x); if (c) { push(lan, c); self[split(x, '/')[0]] = true; } }
+	if (!length(lan)) push(lan, cidr('192.168.0.0/16'));
+	let is_client = s => !self[s] && length(filter(lan, c => in_cidr(ip2n(s), c))) > 0;
+	let srv = {};
+	for (let x in lst(getenv('KR_SERVER_IPS'))) srv[x] = true;
+
+	// --- conntrack ---
+	// orijinal yön: src0 -> dst0 (sport0 -> dport0); yanıt yönü: src1 -> dst1 (sport1 -> dport1)
+	let ct = [], cl1 = {}, cl2 = {}, rout = {};
 	for (let l in split(fs.stdin.read('all') ?? '', '\n')) {
-		let srcs = match(l, /src=([0-9.]+)/g), dst = match(l, /dst=([0-9.]+) /), dp = match(l, /dport=([0-9]+)/);
 		let pr = match(l, / (tcp|udp) /);
-		if (!srcs || !dst || !dp || !pr) continue;
-		let src = srcs[0][1];
-		if (length(ip) && src != ip) continue;
-		if (match(dst[1], /^(10\.|192\.168\.|127\.|172\.(1[6-9]|2[0-9]|3[01])\.|22[4-9]\.|23[0-9]\.|255\.)/)) continue;
-		let port = int(dp[1]);
-		if (port == 53 || port == 123) continue;
-		// Tünelden mi geçiyor? TCP: çekirdek 127.0.0.1'e yönlendirir (yanıt tarafının kaynağı 127.0.0.1)
-		//                       UDP: paket TUN işaretini taşır (mark=)
+		let s = match(l, /src=([0-9.]+)/g), d = match(l, /dst=([0-9.]+)/g), sp = match(l, /sport=([0-9]+)/g), dp = match(l, /dport=([0-9]+)/g);
+		if (!pr || !s || !d || !dp || !sp || length(s) < 2 || length(d) < 2 || length(dp) < 2 || length(sp) < 2) continue;
 		let mk = match(l, /mark=([0-9]+)/);
-		// Tünelden mi? NAT yönlendirmesi yanıt tarafının kaynağını değiştirir (127.0.0.1 ya da yönlendirici IP'si): yanıt kaynağı != asıl hedef
-		let vpn = (length(srcs) > 1 && srcs[1][1] != dst[1]) || (mk && int(mk[1]) == tunmark);
-		let k = pr[1] + ' ' + dst[1] + ':' + port;
-		agg[k] ??= { proto: pr[1], dst: dst[1], port: port, client: src, n: 0, web: (port == 80 || port == 443), vpn: false };
-		agg[k].n++;
-		if (vpn) agg[k].vpn = true;
+		let e = { p: pr[1], s0: s[0][1], d0: d[0][1], sp0: int(sp[0][1]), dp0: int(dp[0][1]), s1: s[1][1], dp1: int(dp[1][1]),
+			mark: mk ? int(mk[1]) : 0, unrep: index(l, '[UNREPLIED]') >= 0 };
+		if (match(e.d0, PRIV)) continue;
+		if (is_client(e.s0)) {
+			push(ct, e);
+			// Bağlantıyı açan cihaz: kaynak portu (NAT yoksa) ya da yanıt yönündeki hedef port (TUN'a girerken NAT'lanmışsa) ile
+			cl1[e.p + '|' + e.d0 + '|' + e.dp0 + '|' + e.sp0] = e.s0;
+			cl1[e.p + '|' + e.d0 + '|' + e.dp0 + '|' + e.dp1] ??= e.s0;
+			let k2 = e.p + '|' + e.d0 + '|' + e.dp0;
+			cl2[k2] ??= [];
+			if (index(cl2[k2], e.s0) < 0) push(cl2[k2], e.s0);
+		}
+		else if (e.s0 != '127.0.0.1' && !srv[e.d0])
+			rout[e.p + '|' + e.d0 + '|' + e.dp0] = true;   // modemin kendisinin (çekirdeğin direkt çıkışı) açtığı bağlantı
 	}
-	out(sort(values(agg), (a, b) => (a.web - b.web) || (b.n - a.n)));
+
+	// --- uygulama kuralları (kendi yapılandırma modunda KediRay uygulamaları kullanılmaz) ---
+	let c = cursor(), apps = [], devm = {};
+	let mainc = c.get_all('kediray', 'main') ?? {};
+	let defdev = DEAD ? 'vpn' : (mainc.default_device || 'vpn');
+	if (!OWN) {
+		c.foreach('kediray', 'app', s => {
+			if (s.enabled == '0') return;
+			let a = { sec: s['.name'], name: s.name || s['.name'], route: s.route || 'vpn', suf: [], full: [], kw: [], re: [], gs: [], gi: [], nets: [], ports: [] };
+			for (let x in lst(s.domain)) {
+				let m = match(x, /^([a-z]+):(.*)$/), t = m ? m[1] : 'domain', v = m ? m[2] : replace(x, /^\*?\./, '');
+				if (t == 'regexp') { try { push(a.re, regexp(v)); } catch (e) { } continue; }
+				v = lc(replace(v, /\.+$/, ''));
+				if (!length(v)) continue;
+				if (t == 'domain') push(a.suf, v);
+				else if (t == 'full') push(a.full, v);
+				else if (t == 'keyword') push(a.kw, v);
+				else if (t == 'geosite') push(a.gs, v);
+			}
+			for (let x in lst(s.ip)) {
+				let g = match(x, /^geoip:(.+)$/);
+				if (g) { push(a.gi, lc(g[1])); continue; }
+				if (int(s.expand ?? 0) == 24) {   // gen.uc app_ips ile aynı: tek IP'ler /24'e genişler
+					let p = split(x, '/');
+					if (!(length(p) > 1 && int(p[1]) <= 24) && match(p[0], /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/))
+						x = join('.', slice(split(p[0], '.'), 0, 3)) + '.0/24';
+				}
+				let cc = cidr(x);
+				if (cc) push(a.nets, cc);
+			}
+			for (let p in lst(s.ports)) {
+				let m = match(p, /^([0-9]+)(-([0-9]+))?$/);
+				if (m) { let x = int(m[1]), y = m[3] ? int(m[3]) : x; push(a.ports, x <= y ? [x, y] : [y, x]); }
+			}
+			push(apps, a);
+		});
+		// Cihaz yönleri: Direkt cihazın her bağlantısı direkt gider (uygulama kuralı uygulanmaz)
+		let lease = {};
+		for (let l in split(fs.readfile('/tmp/dhcp.leases') ?? '', '\n')) {
+			let f = split(l, ' ');
+			if (length(f) >= 3) lease[lc(f[1])] = f[2];
+		}
+		c.foreach('kediray', 'device', s => {
+			let m = s.mode;
+			if (m != 'vpn' && m != 'direct' && m != 'block') return;
+			if (DEAD && m == 'direct') m = 'vpn';
+			if (s.mac && lease[lc(s.mac)]) devm[lease[lc(s.mac)]] = m;
+			for (let x in lst(s.ip)) if (ip2n(x) != null) devm[x] = m;
+		});
+	}
+	let ends = (h, s) => h == s || (length(h) > length(s) && substr(h, length(h) - length(s) - 1) == '.' + s);
+	let app_of = (host, dst, port, rule, pl) => {
+		host = lc(host ?? ''); rule = lc(rule ?? ''); pl = lc(pl ?? '');
+		let n = ip2n(dst);
+		for (let a in apps) {
+			if (length(host)) {
+				for (let x in a.full) if (host == x) return a;
+				for (let x in a.suf) if (ends(host, x)) return a;
+				for (let x in a.kw) if (index(host, x) >= 0) return a;
+				for (let x in a.re) if (match(host, x)) return a;
+			}
+			// geosite/geoip listeleri burada açılamaz: çekirdeğin eşleştirdiği kural (GEOSITE,whatsapp) uygulamanınsa sayılır
+			if (rule == 'geosite' && index(a.gs, pl) >= 0) return a;
+			if (rule == 'geoip' && index(a.gi, pl) >= 0) return a;
+			for (let x in a.nets) if (in_cidr(n, x)) return a;
+			for (let x in a.ports) if (port >= x[0] && port <= x[1]) return a;
+		}
+		return null;
+	};
+
+	// --- bağlantıları topla ---
+	let agg = {};
+	let add = (o) => {
+		if (o.port == 53 || o.port == 123) return;
+		if (length(ip) && o.client != ip) return;
+		let a = OWN ? null : app_of(o.host, o.dst, o.port, o.rk, o.pl);
+		let dm = (!OWN && length(o.client)) ? (devm[o.client] ?? defdev) : null;
+		let want = null;
+		if (dm == 'direct') want = 'direct';
+		else if (a) want = (DEAD && a.route != 'warp') ? 'vpn' : a.route;
+		let bad = false;
+		if (want == 'direct' || want == 'frag') bad = (o.via == 'vpn');
+		else if (want == 'vpn' || want == 'warp') bad = (o.via == 'direct');
+		let k = join('|', [o.proto, o.host || o.dst, o.port, o.via, o.client]);
+		agg[k] ??= { proto: o.proto, dst: o.dst, host: o.host, port: o.port, client: o.client, n: 0, via: o.via, vpn: o.via == 'vpn',
+			out: o.out, rule: o.rule, app: a ? a.name : (dm == 'direct' ? 'Direkt cihaz' : ''), sec: a ? a.sec : '', want: want, bad: bad,
+			web: (o.port == 80 || o.port == 443), src: SRC, own: OWN };
+		agg[k].n++;
+	};
+
+	if (SRC == 'api') {
+		let api = {}, px = {};
+		try { api = json(fs.readfile(RUN + '/conns.api') ?? '{}') ?? {}; } catch (e) { api = {}; }
+		try { px = (json(fs.readfile(RUN + '/conns.px') ?? '{}') ?? {}).proxies ?? {}; } catch (e) { px = {}; }
+		let via_of = (nm) => {
+			let t = lc(px[nm]?.type ?? ''), n = lc(nm ?? '');
+			if (t == 'direct' || n == 'direct') return 'direct';
+			if (t == 'reject' || t == 'rejectdrop' || t == 'block' || n == 'reject' || n == 'reject-drop' || n == 'block') return 'block';
+			if (t == 'dns' || n == 'dns-out' || n == 'dns') return 'dns';
+			return 'vpn';
+		};
+		for (let cn in (api.connections ?? [])) {
+			let md = cn.metadata ?? {}, ch = cn.chains ?? [];
+			if (match(md.inboundName ?? '', /^t-node-/)) continue;   // KediRay'in kendi gecikme ölçümleri
+			let nm = ch[0] ?? '', via = via_of(nm);
+			if (via == 'dns') continue;
+			let p = lc(md.network ?? 'tcp'), dst = md.destinationIP ?? '', port = int(md.destinationPort ?? 0), sport = int(md.sourcePort ?? 0);
+			if (length(dst) && match(dst, PRIV)) continue;
+			let cli = '';
+			if (is_client(md.sourceIP ?? '')) cli = md.sourceIP;
+			else {
+				cli = cl1[p + '|' + dst + '|' + port + '|' + sport] ?? '';
+				if (!length(cli)) {
+					let cs = cl2[p + '|' + dst + '|' + port] ?? [];
+					cli = (length(ip) && index(cs, ip) >= 0) ? ip : (length(cs) == 1 ? cs[0] : '');
+				}
+			}
+			let host = md.host || md.sniffHost || '';
+			add({ proto: p, dst: dst, host: host, port: port, client: cli, via: via, out: via == 'vpn' ? nm : (via == 'direct' ? 'DIRECT' : 'REJECT'),
+				rule: (cn.rule ?? '') + (length(cn.rulePayload ?? '') ? ' ' + cn.rulePayload : ''), rk: cn.rule, pl: cn.rulePayload });
+		}
+	} else {
+		for (let e in ct) {
+			// Çekirdeğe girdi mi? TCP NAT yönlendirmesi yanıt kaynağını değiştirir; UDP (TUN) ve TPROXY işaretle tanınır
+			let core = (e.s1 != e.d0) || e.mark == tunmark || e.mark == tpmark;
+			let via = 'direct';
+			if (core) via = rout[e.p + '|' + e.d0 + '|' + e.dp0] ? 'direct' : 'vpn';   // çekirdek hedefe modemden bağlandıysa direkt
+			else if (e.unrep && e.p == 'udp' && e.dp0 == 443) via = 'block';               // QUIC reddi
+			add({ proto: e.p, dst: e.d0, host: '', port: e.dp0, client: e.s0, via: via, out: '', rule: '' });
+		}
+	}
+	out(sort(values(agg), (a, b) => (b.bad - a.bad) || ((b.app ? 1 : 0) - (a.app ? 1 : 0)) || (a.web - b.web) || (b.n - a.n)));
 }
 else {
 	warn('kullanım: cli.uc status|nodes|apps|devices|stats|conns\n');

@@ -7,7 +7,7 @@ Düğüm: `package/kediray/files/usr/bin/kediray` (shell), `.../usr/share/kedira
 - Cevaplar kısa; dosya yolunu tam yaz; sürümü kendin artır (`VERSION`; kurulum başlığı KR_VERSION ile senkron kalır).
 - Teslimde her zaman `/tmp/claude-0/out/kediray/kediray-install.sh` gönder.
 - Tahmin etme, araştır ve kaynak göster; karar veremezsen sor. İş bitince `/compact` hatırlat.
-- Bulutta ucode yok: kod çalıştırılamaz, modemde denenir.
+- Bulutta ucode yok: kod çalıştırılamaz, modemde denenir. nft kuralları bulutta `apt-get install nftables iproute2` + `unshare -rnm` ile yalıtılmış ağ alanında denenebilir.
 
 ## Derleme
 `./build.sh --out /tmp/claude-0/out/kediray`
@@ -17,6 +17,8 @@ Düğüm: `package/kediray/files/usr/bin/kediray` (shell), `.../usr/share/kedira
 - Tema CSS: `html[data-kedi] body button.cbi-button` genel kuralı yüksek özgüllükte; renkli düğme kuralları ona göre yazılmalı.
 
 ## Yapılanlar (yeniden eskiye)
+- 1.21.0: **Bağlantı testi** (`kediray conns`, `view/kediray/conns.js`; Kontrol paneli/Trafik cihaz "Bağlantılar", VPN Ayırma "Bağlantı testi" ve uygulama başına "Test"): her bağlantının gerçekte hangi yoldan gittiği. mihomo/sing-box: çekirdeğin `/connections` + `/proxies` (chains[0] = gerçek çıkış, rule/rulePayload), cihaz conntrack'ten (kaynak port / NAT'lı yanıt portu) bulunur. Xray: conntrack; çekirdeğe girip modemden aynı hedefe direkt bağlantı açıldıysa Direkt. Uygulama kuralıyla eşleşen (alan adı/IP/port; geosite/geoip çekirdeğin kuralından) ve yolu tutmayan bağlantı "Yanlış yol". Kendi modda denetim yok (KediRay uygulamaları kullanılmıyor). TPROXY'de `ct mark` eklendi (tanıma için). Bulutta node uyarlamasıyla örnek veride denendi; modemde doğrulanmadı.
+- 1.21.0 düzeltmeler: (1) `p_tcp` `|| [ $? = 22 ] || [ $? = 52 ]` zinciri 52/56'yı hiç başarılı saymıyordu. (2) DNS acil yedeğinde yoklama dnsmasq'a (operatör DNS) gidip yedeği bir dakikada kapatıyordu → yedekteyken çekirdek `127.0.0.1:dns_port` yoklanır (busybox nslookup host:port kabul eder, libbb str2sockaddr). (3) hotplug iface: kural denetimi her modda `lookup 107` (TPROXY) arıyordu; mixed'de (108) her ifup'ta kurallar söküp yeniden kuruluyordu. (4) Panel 5 sn'de bir mihomo/sing-box ikilisini sürüm için çalıştırıyordu → `$RUN/ver.<çekirdek>` önbelleği (yol+boyut). (5) Cihaz trafik sayacı: IP başına kural (128'e kadar, silinmiyordu, her paket hepsini geziyordu) → zincir başına tek kural + `ipv4_addr : counter` map (`u_`/`d_` + IP); eski tablo bir kez silinir. nft ile ağ ad alanında (unshare -rnm) denendi.
 - 1.20.9: mihomo'da (kendi yapılandırma ve yerel mod) "QUIC'i reddet" çalışmıyordu: nft `quic_fwd` own/native'de kurulmuyor. Kendi modda çalıştırılan kopyanın `rules:` başına `AND,((NETWORK,UDP),(DST-PORT,443)),REJECT` eklenir (`mh_quic_inject`; kullanıcı dosyası değişmez, zaten varsa eklenmez, yapılandırma testi geçmezse kuralsız devam). Yerel modda gen.uc `R`'ye eklenir; şablona (MH_YAML) yazılmaz. Not: TCP Mux düğmesi mihomo'ya `smux` yazmıyor (yalnız Xray `mux_for`).
 - 1.20.8: Uygulama profilinde sonu noktalı alan adı (googleusercontent.com.) mihomo'da 'trailing dot is not allowed' ile yapılandırmayı bozuyor, VPN başlamıyordu. `dom()` (gen.uc) ve `app-add`/`add-domain` sondaki noktayı kırpar.
 - 1.20.7: Kendi modda LAN'a IPv6 DNS duyurulmaz (`dhcp.lan.ra_dns=0`, kapanınca eski değer); PC'de DNS 2 sn zaman aşımı biter.

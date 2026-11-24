@@ -1,6 +1,7 @@
 'use strict';
 'require view';
 'require view.kediray.i18n as i18n';
+'require view.kediray.conns as conns';
 'require fs';
 'require ui';
 'require poll';
@@ -333,6 +334,7 @@ return view.extend({
 				]),
 				h('button', { 'class': 'btn cbi-button' + (a.tunnel_dns ? ' cbi-button-action' : ''), 'title': a.tunnel_dns ? 'DNS: tünel: Bu uygulamanın alan adları tünel içinden çözülür; yanlış ya da engelli adres geliyorsa işe yarar. Tıkla: normale döndür.' : 'DNS: normal: Bu uygulamanın alan adları normal DNS ayarınla çözülür. Tıkla: tünel DNS\'ine al (Discord gibi DNS\'i bozulan uygulamalar için).',
 					'click': ui.createHandlerFn(this, () => this.app(['app', a.sec, 'dns', a.tunnel_dns ? 'off' : 'on'])) }, a.tunnel_dns ? 'DNS: tünel ✔' : 'DNS: normal'),
+				h('button', { 'class': 'btn cbi-button', 'title': 'Test: Bu uygulamanın şu an açık bağlantılarını ve her birinin gerçekte hangi yoldan (VPN / Direkt) gittiğini gösterir. Önce uygulamayı aç ve kullan.', 'click': ui.createHandlerFn(this, () => conns.show({ sec: a.sec, appName: a.name, title: a.name + ' testi' })) }, 'Test'),
 				h('button', { 'class': 'btn cbi-button', 'title': 'Bir ad yaz (örn. discord.com): yönlendirici çözer, ilgili ve alt alan adlarını listeler, seçtiklerin bu uygulamaya eklenir. Uygulamanın bazı adresleri kurala girmiyorsa kullan.', 'click': ui.createHandlerFn(this, () => this.finder(a)) }, 'Alan adı bul'),
 				h('button', { 'class': 'btn cbi-button', 'title': a.enabled ? 'Kapat: Bu uygulama kuralını geçici kapatır (silinmez); trafik genel kurala göre gider.' : 'Aç: Bu uygulama kuralını yeniden etkinleştirir.', 'click': ui.createHandlerFn(this, () => this.app(['app', a.sec, a.enabled ? 'off' : 'on'])) }, a.enabled ? 'Kapat' : 'Aç'),
 				h('button', { 'class': 'btn cbi-button cbi-button-negative', 'title': 'Sil: Bu uygulama kuralını kalıcı olarak siler.', 'click': ui.createHandlerFn(this, () => this.delApp(a)) }, 'Sil')
@@ -342,7 +344,8 @@ return view.extend({
 		const chips = PRESETS.filter(p => !have.has(p.name.toLowerCase())).map(p =>
 			h('button', { 'class': 'btn cbi-button', 'click': ui.createHandlerFn(this, () => this.preset(p)) }, '+ ' + p.name));
 		dom.content(this.elApps, [
-			h('h3', {}, 'Uygulamalar (' + apps.length + ')'),
+			h('div', { 'style': 'display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap' }, [h('h3', { 'style': 'margin:0' }, 'Uygulamalar (' + apps.length + ')'),
+				h('button', { 'class': 'btn cbi-button cbi-button-action', 'title': 'Tüm cihazların açık bağlantılarını ve gerçekte hangi yoldan gittiklerini gösterir; uygulama kuralına uymayanlar kırmızı işaretlenir.', 'click': ui.createHandlerFn(this, () => conns.show({ title: 'Bağlantı testi' })) }, 'Bağlantı testi')]),
 			...rows,
 			chips.length ? h('div', { 'class': 'ka-sub', 'style': 'margin-top:10px' }, 'Hazır uygulamalar:') : '',
 			chips.length ? h('div', { 'class': 'ka-chips' }, chips) : '',

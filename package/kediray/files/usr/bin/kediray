@@ -945,11 +945,22 @@ core_find() { # <ad> → ikilinin yolu
 }
 
 core_ver_of() { # <ad> <ikili> → sürüm
+	# sing-box/mihomo sürümü de önbellekten (ikili dosyanın yolu+boyutu değişince yenilenir): panel durumu 5 sn'de bir
+	# sorarken her seferinde ~30 MB'lık Go ikilisi çalıştırılıyordu (modemde boşa işlemci ve bellek)
+	local c k v
 	case "$1" in
-		xray) core_ver ;;
-		sing-box) "$2" version 2>/dev/null | awk 'NR==1{print $3}' ;;
-		mihomo) "$2" -v 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if ($i ~ /^v?[0-9]+\.[0-9]+/) {sub(/^v/,"",$i); print $i; exit}}' ;;
+		xray) core_ver; return ;;
+		sing-box|mihomo) ;;
+		*) return 1 ;;
 	esac
+	c="$RUN/ver.$1"; k="$2 $(wc -c < "$2" 2>/dev/null)"
+	if [ -s "$c" ] && [ "$(sed -n 1p "$c")" = "$k" ]; then sed -n 2p "$c"; return 0; fi
+	case "$1" in
+		sing-box) v=$("$2" version 2>/dev/null | awk 'NR==1{print $3}') ;;
+		mihomo) v=$("$2" -v 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if ($i ~ /^v?[0-9]+\.[0-9]+/) {sub(/^v/,"",$i); print $i; exit}}') ;;
+	esac
+	[ -n "$v" ] && { mkdir -p "$RUN"; printf '%s\n%s\n' "$k" "$v" > "$c"; }
+	echo "$v"
 }
 
 cmd_cores() { # JSON: çekirdek ikilileri
@@ -992,6 +1003,7 @@ core_put() { # <ad> <kaynak ikili>  — çalıştığını doğrulayıp yerine k
 	mkdir -p "$SHARE/bin"
 	cp "$2" "$new" || { echo "kopyalanamadı (yer yok mu?)" >&2; rm -f "$new"; return 1; }
 	chmod 755 "$new"
+	rm -f "$RUN/ver.$1"   # sürüm önbelleği: yeni ikili gerçekten çalıştırılarak denensin
 	v=$(core_ver_of "$1" "$new")
 	[ -n "$v" ] || { rm -f "$new"; echo "$1: dosya çalışmadı ya da sürüm okunamadı (mimari uyuşmuyor olabilir)" >&2; return 1; }
 	mv -f "$new" "$SHARE/bin/$1"
@@ -1863,10 +1875,10 @@ dns_up() {
 # tarayıcıda sayfalar yarım kalır, "bağlanılıyor" yazıp bekler. Ölçüldü (webtest): iki adres de
 # ad çözümleme aşamasında zaman aşımına düştü. Bu yüzden tünel DNS'i yanıt vermediğinde
 # geçici olarak operatörün DNS'ine düşülür; tünel düzelince kendiliğinden geri alınır.
-dns_probe() { # çekirdeğin DNS'i (dnsmasq üzerinden) yanıt veriyor mu
+dns_probe() { # [sunucu]  çekirdeğin DNS'i yanıt veriyor mu (varsayılan: dnsmasq üzerinden; "127.0.0.1:port" doğrudan çekirdek)
 	local t=""
 	command -v timeout >/dev/null 2>&1 && t="timeout 6"
-	$t nslookup www.gstatic.com 127.0.0.1 2>/dev/null | awk '
+	$t nslookup www.gstatic.com "${1:-127.0.0.1}" 2>/dev/null | awk '
 		/^Name:/ { f = 1 }
 		f && /^Address/ { for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { print $i; exit } }' | grep -q .
 }
@@ -1898,7 +1910,11 @@ dns_rescue_off() { # normal (tünel) DNS'ine dön
 dns_guard() { # watchdog'dan çağrılır
 	[ "$(uget main.dns_mode)" = private ] || { [ -f "$RUN/dns_rescue" ] && dns_rescue_off; return 0; }
 	[ -s "$RUN/dnsmasq.conf" ] || return 0
-	if dns_probe; then
+	# Acil yedekteyken dnsmasq operatör DNS'ine gider: onu yoklamak her zaman "çalışıyor" der, yedek bir dakika sonra kapanıp
+	# tünel DNS'i hâlâ ölüyse yeniden açılıyordu (dnsmasq her seferinde yeniden başlar). Yedekteyken çekirdeğin DNS'i doğrudan yoklanır.
+	local srv=127.0.0.1
+	[ -f "$RUN/dns_rescue" ] && srv="127.0.0.1:$(uget main.dns_port || echo 15353)"
+	if dns_probe "$srv"; then
 		[ -f "$RUN/dns_rescue" ] && dns_rescue_off
 		rm -f "$RUN/dns_fail"
 		return 0
@@ -2506,7 +2522,12 @@ p_doh_tun() { # <url> <ad>
 		-H 'accept: application/dns-json' "$1?name=$2&type=A" 2>/dev/null | grep -qE '"Answer" *:|"Status" *: *0'
 }
 p_tcp() { # <ip> <port>  düz erişilebilirlik
-	curl -s -m 5 --noproxy '*' -o /dev/null "http://$1:$2/" 2>/dev/null || [ $? = 22 ] || [ $? = 52 ] || [ $? = 56 ]
+	# 22/52/56: TCP bağlantısı kuruldu, yalnız HTTP yanıtı hatalı/boş (443'e düz HTTP). Önceki "|| [ $? = 22 ] || [ $? = 52 ]"
+	# zincirinde ikinci $? curl'ün değil ilk testin kodu olduğu için 52/56 hiç başarılı sayılmıyordu.
+	local rc
+	curl -s -m 5 --noproxy '*' -o /dev/null "http://$1:$2/" 2>/dev/null; rc=$?
+	case $rc in 0|22|52|56) return 0 ;; esac
+	return 1
 }
 
 doc_row() { # <etiket> <komut...>
@@ -3604,27 +3625,47 @@ dev_ips() { # LAN'daki cihazların IPv4 adresleri (DHCP kiraları + komşu tablo
 		done
 	} | awk '!s[$0]++ && $0 ~ /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/' | head -n 128
 }
+# 1.21.0: cihaz başına ayrı kural (en çok 128 IP x 2 zincir; hiç silinmiyordu) yerine her zincirde TEK kural + IP -> sayaç
+# eşlemesi: her paket 128 kuralı tek tek gezmek yerine tek aramayla sayılır (hızlı hatta işlemci yükü). Eski yapıdaki tablo
+# bir kez silinip yeniden kurulur; sayaçların sıfırlanmasını traffic.uc "sıfırlandı" sayar, trafik kaybolmaz.
 dev_acct_sync() {
-	local lanset i ip up dn
+	local lanset i ip have n
 	command -v nft >/dev/null 2>&1 || return 0
 	lanset=$(for i in $(lan_ifs); do printf '"%s",' "$i"; done | sed 's/,$//')
+	if nft list table inet kediray_acct >/dev/null 2>&1 && ! nft list map inet kediray_acct up_m >/dev/null 2>&1; then
+		nft delete table inet kediray_acct 2>/dev/null
+	fi
 	nft list table inet kediray_acct >/dev/null 2>&1 || nft -f - <<EOF 2>/dev/null
 table inet kediray_acct {
-	chain up { type filter hook prerouting priority raw; policy accept; }
-	chain dn { type filter hook postrouting priority 100; policy accept; }
+	map up_m { type ipv4_addr : counter; }
+	map dn_m { type ipv4_addr : counter; }
+	chain up { type filter hook prerouting priority raw; policy accept; iifname { $lanset } counter name ip saddr map @up_m; }
+	chain dn { type filter hook postrouting priority 100; policy accept; oifname { $lanset } counter name ip daddr map @dn_m; }
 }
 EOF
-	up=$(nft list chain inet kediray_acct up 2>/dev/null)
-	dn=$(nft list chain inet kediray_acct dn 2>/dev/null)
+	have=$(nft list map inet kediray_acct up_m 2>/dev/null)
 	for ip in $(dev_ips); do
-		echo "$up" | grep -q "saddr $ip counter" || nft add rule inet kediray_acct up iifname "{ $lanset }" ip saddr "$ip" counter 2>/dev/null
-		echo "$dn" | grep -q "daddr $ip counter" || nft add rule inet kediray_acct dn oifname "{ $lanset }" ip daddr "$ip" counter 2>/dev/null
+		n=$(echo "$ip" | tr . _)
+		case "$have" in *"\"u_$n\""*) continue ;; esac
+		nft -f - <<EOF 2>/dev/null
+add counter inet kediray_acct u_$n
+add counter inet kediray_acct d_$n
+add element inet kediray_acct up_m { $ip : "u_$n" }
+add element inet kediray_acct dn_m { $ip : "d_$n" }
+EOF
 	done
 	return 0
 }
-dev_read() { # "ip<TAB>rx|tx<TAB>bayt" (rx = cihaza gelen/indirme, tx = cihazdan giden/yükleme)
-	nft list chain inet kediray_acct up 2>/dev/null | awk '/saddr/ && /bytes/ { ip = ""; b = ""; for (i = 1; i <= NF; i++) { if ($i == "saddr") ip = $(i + 1); if ($i == "bytes") b = $(i + 1) } if (ip != "" && b != "") print ip "\ttx\t" b }'
-	nft list chain inet kediray_acct dn 2>/dev/null | awk '/daddr/ && /bytes/ { ip = ""; b = ""; for (i = 1; i <= NF; i++) { if ($i == "daddr") ip = $(i + 1); if ($i == "bytes") b = $(i + 1) } if (ip != "" && b != "") print ip "\trx\t" b }'
+dev_read() { # "ip<TAB>rx|tx<TAB>bayt" (rx = cihaza gelen/indirme, tx = cihazdan giden/yükleme); sayaç adı u_/d_ + IP (noktalar _)
+	nft list counters table inet kediray_acct 2>/dev/null | awk '
+		$1 == "counter" { n = $2; next }
+		n != "" && $1 == "packets" {
+			b = ""; for (i = 1; i <= NF; i++) if ($i == "bytes") b = $(i + 1)
+			ip = substr(n, 3); gsub(/_/, ".", ip)
+			if (b != "" && substr(n, 1, 2) == "u_") print ip "\ttx\t" b
+			else if (b != "" && substr(n, 1, 2) == "d_") print ip "\trx\t" b
+			n = ""
+		}'
 }
 traffic_env() { # sayaçları ortam değişkeni olarak ver
 	local dev
@@ -3897,13 +3938,42 @@ cmd_watch() { # [ip] [saniye] [--json]  -> bağlantıları kaydet: hangi yoldan 
 	return 0
 }
 
-cmd_conns() { # [ip] [--json]  -> oyun/uygulama portlarını bulmak için
-	local ip="" json=0 a
+lan_nets() { # LAN arayüzlerinin IPv4 adresleri (adres/önek), boşlukla ayrılmış
+	local i
+	for i in $(lan_ifs); do ip -4 -o addr show dev "$i" 2>/dev/null | awk '{ print $4 }'; done | tr '\n' ' '
+}
+
+# Bağlantı testi: cihazların açık bağlantıları ve her birinin GERÇEKTE hangi yoldan çıktığı (Direkt / VPN / Engel).
+# mihomo ve sing-box: çekirdeğin kendi bağlantı listesi (/connections: alan adı, eşleşen kural, çıkış) asıl kaynaktır;
+# modemin bağlantı tablosu (conntrack) yalnız bağlantıyı hangi cihazın açtığını bulmak için okunur.
+# Xray: bağlantı listesi API'si yok; conntrack'ten çekirdeğe girip girmediğine ve çekirdeğin hedefe modemden direkt
+# bağlanıp bağlanmadığına bakılır (alan adı görünmez). Uygulama kuralıyla eşleşen bağlantının yolu kurala uymuyorsa "bad".
+cmd_conns() { # [ip] [--json]
+	local ip="" json=0 a src=ct hdr="" own=0 dead=0
 	for a in "$@"; do case "$a" in --json) json=1 ;; *) ip="$a" ;; esac; done
-	{ cat /proc/net/nf_conntrack 2>/dev/null || conntrack -L 2>/dev/null; } | ucode "$SHARE/cli.uc" conns "$ip" "$((MARK_TUN))" > "$RUN/conns.json"
+	mkdir -p "$RUN"
+	rm -f "$RUN/conns.api" "$RUN/conns.px"
+	own_on && own=1
+	if [ "$(engine)" != xray ] && running; then
+		if [ $own = 1 ]; then
+			own_api GET /connections > "$RUN/conns.api" 2>/dev/null
+			own_api GET /proxies > "$RUN/conns.px" 2>/dev/null
+		else
+			hdr=$(api_hdr)
+			curl -s -m 5 --noproxy '' ${hdr:+-H "$hdr"} "http://$(api_addr)/connections" > "$RUN/conns.api" 2>/dev/null
+			curl -s -m 5 --noproxy '' ${hdr:+-H "$hdr"} "http://$(api_addr)/proxies" > "$RUN/conns.px" 2>/dev/null
+		fi
+		grep -q '"connections"' "$RUN/conns.api" 2>/dev/null && src=api
+	fi
+	[ "$(cat "$RUN/direct" 2>/dev/null)" = dead ] && direct_auto && dead=1
+	{ cat /proc/net/nf_conntrack 2>/dev/null || conntrack -L 2>/dev/null; } | \
+		KR_CONNS_SRC=$src KR_OWN=$own KR_DIRECT_DEAD=$dead KR_ENGINE="$(engine)" KR_LAN_NETS="$(lan_nets)" \
+		KR_SERVER_IPS="$(cat "$RUN/server_ips" 2>/dev/null)" \
+		ucode "$SHARE/cli.uc" conns "$ip" "$((MARK_TUN))" "$((MARK_TP))" > "$RUN/conns.json"
+	rm -f "$RUN/conns.api" "$RUN/conns.px"
 	if [ $json = 1 ]; then cat "$RUN/conns.json"; else
-		ucode -e 'for (let c in json(require("fs").readfile(ARGV[0]))) print(sprintf("%-4s %-15s %5d  x%-3d %-7s %s\n", c.proto, c.dst, c.port, c.n, c.vpn ? "VPN" : "DIREKT", c.web ? "(web)" : "<- oyun/uygulama olabilir"));' "$RUN/conns.json"
-		echo "İpucu: oyunu açıkken çalıştır; çıkan portu Uygulamalar > Metin2 > Portlar'a ekle." >&2
+		ucode -e 'for (let c in json(require("fs").readfile(ARGV[0]))) print(sprintf("%-4s %-30s %5d x%-3d %-6s %-15s %s%s\n", c.proto, substr(c.host || c.dst, 0, 30), c.port, c.n, c.via == "vpn" ? "VPN" : c.via == "block" ? "ENGEL" : "DIREKT", c.client || "modem", c.app ? c.app + (c.bad ? " YANLIŞ YOL (" + (c.want == "direct" ? "Direkt" : "VPN") + " olmalı)" : " doğru") : "", c.rule ? " [" + c.rule + "]" : ""));' "$RUN/conns.json"
+		echo "Kaynak: $([ $src = api ] && echo "$(engine_name) bağlantı listesi" || echo "modemin bağlantı tablosu (Xray: alan adı görünmez)")" >&2
 	fi
 }
 
@@ -4232,7 +4302,7 @@ KediRay - OpenWrt Xray VPN yöneticisi
   kediray show-config       Üretilen tam Xray yapılandırmasını göster
   kediray app <ad> vpn|direct        Uygulama yönü (whatsapp, metin2, teams...)
   kediray device <mac> vpn|direct|block|default [ad]   (block = ağdan engelle)
-  kediray conns [ip]        Aktif bağlantılar (oyun portu bulmak için)
+  kediray conns [ip]        Bağlantı testi: açık bağlantılar ve gerçekte hangi yoldan (Direkt/VPN) gittikleri
   kediray watch <ip> [sn]   Bağlantı kaydı: hangi yoldan gitti, ne zaman koptu (kopma teşhisi)
   kediray hunt              Takılan adresleri defalarca çek: hangi aşamada takılıyor (DNS mi bağlantı mı)
   kediray dialtest          Sunucu el sıkışmayı kaç kez düşürüyor (IP IP ölçer; günlükteki EOF'un kaynağı)
