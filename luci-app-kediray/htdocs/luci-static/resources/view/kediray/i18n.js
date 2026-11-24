@@ -471,6 +471,8 @@ const DICT = {
 	"Sayfayı yenile": ["Refresh page", "Actualiser la page"],
 	"Sertifikayı otomatik sabitle": ["Pin the certificate automatically", "Épingler automatiquement le certificat"],
 	"Seçilenleri listeye ekle": ["Add selected to the list", "Ajouter la sélection à la liste"],
+	"Seçimi kaldır": ["Deselect all", "Tout désélectionner"],
+	"Tümünü seç": ["Select all", "Tout sélectionner"],
 	"Seçtiğin bantları tek tek kilitler, her birinde gerçek hız (speedtest) ve sinyali ölçer, en hızlısını seçer. 5G kilidi internetini düşürmez: NSA seçiliyken 4G çapa açık kalır.": ["Locks the bands you choose one by one, measures real speed (speedtest) and signal on each, and picks the fastest. A 5G lock doesn't drop your internet: with NSA selected the 4G anchor stays on.", "Verrouille une à une les bandes choisies, mesure la vitesse réelle (speedtest) et le signal sur chacune, puis choisit la plus rapide. Un verrouillage 5G ne coupe pas votre Internet : avec NSA sélectionné, l'ancrage 4G reste actif."],
 	"Seçtiğin uygulamaların çıkışı Cloudflare WARP olur: site seni VPN sunucusunun değil Cloudflare'in IP'si olarak görür. Her uygulamanın yanındaki \"WARP\" düğmesiyle seçilir.": ["The selected apps exit through Cloudflare WARP: sites see you as Cloudflare's IP, not the VPN server's. Selected with the \"WARP\" button next to each app.", "Les applis sélectionnées sortent par Cloudflare WARP : les sites vous voient avec l'IP de Cloudflare, et non celle du serveur VPN. Sélection avec le bouton « WARP » à côté de chaque appli."],
 	"Sil: Bu uygulama kuralını kalıcı olarak siler.": ["Delete: Permanently deletes this app rule.", "Supprimer : supprime définitivement cette règle d'application."],

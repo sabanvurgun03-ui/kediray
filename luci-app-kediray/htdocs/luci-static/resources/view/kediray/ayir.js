@@ -374,17 +374,33 @@ return view.extend({
 	// Alan adı bulucu: adı yaz -> yönlendirici çözer, ilgili/alt alan adlarını listeler -> seçilenler eklenir.
 	// onAdd(seçilen alan adları dizisi) -> Promise
 	finder(a, onAdd) {
-		const inp = h('input', { 'type': 'text', 'placeholder': 'ör. discord.com', 'style': 'width:100%' });
-		const res = h('div', { 'style': 'margin:10px 0;max-height:300px;overflow:auto' });
+		const inp = h('input', { 'type': 'text', 'placeholder': 'ör. discord.com', 'style': 'flex:1 1 auto;min-width:0;width:auto' });
+		const res = h('div', { 'style': 'margin:6px 0 10px;max-height:min(300px,50vh);overflow:auto' });
+		// Tümünü seç / Seçimi kaldır: yalnızca seçilebilir (çözülen, listede olmayan) satırlar
+		const boxes = () => Array.from(res.querySelectorAll('input[type=checkbox]')).filter(c => !c.disabled);
+		const add = h('button', { 'class': 'btn cbi-button cbi-button-positive', 'disabled': true });
+		const all = h('button', { 'class': 'btn cbi-button', 'style': 'display:none' });
+		const sync = () => {
+			const b = boxes(), on = b.filter(c => c.checked).length;
+			all.style.display = b.length ? '' : 'none';
+			all.textContent = b.length && on === b.length ? 'Seçimi kaldır' : 'Tümünü seç';
+			add.disabled = !on;
+		};
+		all.addEventListener('click', ev => {
+			ev.preventDefault();
+			const b = boxes(), to = !(b.length && b.every(c => c.checked));
+			b.forEach(c => { c.checked = to; });
+			sync();
+		});
+		res.addEventListener('change', sync);
 		const have = new Set(a ? (a.domain_list || []).map(x => x.replace(/^domain:/, '')) : []);
 		let found = [];
-		const add = h('button', { 'class': 'btn cbi-button cbi-button-positive', 'disabled': true });
 		const search = () => {
 			const v = inp.value.trim();
 			if (!v) return;
-			res.textContent = 'Aranıyor…'; add.disabled = true;
+			res.textContent = 'Aranıyor…'; add.disabled = true; all.style.display = 'none';
 			return run(['domain-find', v]).then(r => {
-				if (r.code !== 0) { res.textContent = outOf(r) || 'Hata'; return; }
+				if (r.code !== 0) { res.textContent = outOf(r) || 'Hata'; sync(); return; }
 				found = (r.stdout || '').split('\n').map(l => l.split('\t')).filter(x => x[0]);
 				const rows = found.map((f, i) => {
 					const ok = f[1] !== 'yok';
@@ -395,7 +411,7 @@ return view.extend({
 						h('span', { 'class': 'ka-tag' }, have.has(f[0]) ? 'listede' : f[1] === 'ana' ? 'ana alan adı' : f[1] === 'ilgili' ? 'ilgili hizmet' : f[1] === 'yok' ? 'çözülemedi' : 'alt alan adı')]);
 				});
 				dom.content(res, rows.length ? rows : 'Sonuç yok');
-				add.disabled = !found.some(f => f[1] !== 'yok');
+				sync();
 			});
 		};
 		add.textContent = 'Seçilenleri listeye ekle';
@@ -409,7 +425,8 @@ return view.extend({
 		inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); search(); } });
 		ui.showModal('Alan adı bul' + (a ? ' — ' + a.name : ''), [
 			h('p', { 'class': 'ka-sub' }, 'Uygulamanın bilinen bir adresini yaz; ana alan adı, yaygın alt alan adları ve (biliniyorsa) ilgili hizmetlerin adları aranır. "domain:" kaydı alt alan adlarını da kapsar.'),
-			h('div', { 'style': 'display:flex;gap:8px' }, [inp, h('button', { 'class': 'btn cbi-button cbi-button-action', 'click': ui.createHandlerFn(this, search) }, 'Bul')]),
+			h('div', { 'style': 'display:flex;gap:8px;align-items:stretch' }, [inp, h('button', { 'class': 'btn cbi-button cbi-button-action', 'style': 'flex:0 0 auto;white-space:nowrap;min-width:auto;width:auto', 'click': ui.createHandlerFn(this, search) }, 'Bul')]),
+			h('div', { 'style': 'margin-top:10px' }, [all]),
 			res,
 			h('div', { 'class': 'right' }, [h('button', { 'class': 'btn', 'click': ui.hideModal }, 'Vazgeç'), ' ', add])
 		]);
