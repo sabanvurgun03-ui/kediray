@@ -397,6 +397,53 @@ function ownNote(box, pos, dim) {
 		(dim || []).forEach(el => { if (el) { el.style.opacity = '.45'; el.style.pointerEvents = 'none'; } });
 	}).catch(() => {});
 }
+
+/* Çekirdek mihomo iken hangi ayarın kullanılmadığı (kod incelemesinden: gen.uc mihomo()/nft(), kediray own_gen/fw_up_real).
+   Sütunlar: [Çekirdek ayarı modu (kendi YAML), yerel mod (mihomo_native), KediRay yönetimli mihomo]
+   1 = kullanılmıyor, metin = kısmen (ne kadarı), 0 = kullanılıyor */
+const MH_P = {
+	dev: 'Cihazlar yapılandırma dosyasındaki TUN\'dan geçer; bu ayar yalnızca IPv6 sızıntı korumasını etkiler.',
+	doh: 'Yalnızca IP adresiyle yazılmış DoH sunucuları engellenir; alan adıyla gidenler yapılandırma dosyasına bağlı.',
+	v6: 'Yalnızca IPv6 sızıntı korumasını açıp kapatır; DNS\'teki IPv6 yapılandırma dosyasına bağlı.',
+	hev: 'Yalnızca mixed/tun yakalamada UDP tüneline (hev) uygulanır.',
+	spd: 'Yalnızca modemin TCP tamponları büyütülür; Xray tamponu kullanılmaz.',
+	prb: 'Sunucu ölçümü ve otomatik sunucu geçişi yok; yalnızca tünel denetimlerinde kullanılır.'
+};
+const MH_USE = {
+	mode: [1, 0, 0], node: [1, 0, 0], connect_ip: [1, 0, 0], capture: [1, 1, 0], default_device: [MH_P.dev, 0, 0],
+	dns_mode: [1, 0, 0], dns_remote: [1, 0, 0], dns_direct: [1, 0, 0], dns_direct2: [1, 0, 0], dns_hijack: [1, 1, 0],
+	block_doh: [MH_P.doh, 0, 0], dns_stale: [1, 1, 1], dns_bootstrap: [1, 0, 0], ipv6: [MH_P.v6, 0, 0],
+	push_fix: [1, 0, 0], conn_idle: [1, 1, MH_P.hev], ws_heartbeat: [1, 1, 1], tcp_keepalive: [1, 0, 0],
+	sniff_mode: [1, 1, 1], sniff_override: [1, 1, 1], speed_tune: [MH_P.spd, MH_P.spd, MH_P.spd], buffer_size: [1, 1, 1],
+	mux: [1, 1, 1], ws_early: [1, 0, 0], ad_block: [1, 0, 0], sub_url: [1, 0, 0], sub_interval: [1, 0, 0],
+	log_level: [1, 0, 0], probe_url: [MH_P.prb, 0, 0], probe_url2: [MH_P.prb, 0, 0], probe_interval: [1, 1, 1],
+	tproxy_port: [1, 1, 0], dns_port: [1, 0, 0], tun_mtu: [1, 0, 0], hev_bin: [1, 1, 0], api_port: [1, 0, 0], xray_bin: [1, 1, 1]
+};
+function mhMark(box, before) {
+	if (uci.get('kediray', 'main', 'core') !== 'mihomo') return;
+	const own = uci.get('kediray', 'main', 'own_config') === '1';
+	const col = own ? 0 : (uci.get('kediray', 'main', 'mihomo_native') === '1' ? 1 : 2);
+	const tag = (txt, c) => E('span', { 'style': 'display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600;line-height:1.5;vertical-align:middle;white-space:nowrap;color:' + c + ';border:1px solid ' + c + ';background:color-mix(in srgb,' + c + ' 12%,transparent)' }, txt);
+	let n = 0;
+	Object.keys(MH_USE).forEach(k => {
+		const v = MH_USE[k][col], row = box.querySelector('#cbi-kediray-main-' + k);
+		if (!v || !row) return;
+		const lab = row.querySelector('.cbi-value-title');
+		if (v === 1) {
+			if (lab) lab.appendChild(tag('mihomo\'da kullanılmıyor', '#9a8fb0'));
+			row.style.opacity = '.7';
+		} else {
+			if (lab) lab.appendChild(tag('mihomo\'da kısmen', '#e0a82e'));
+			(row.lastChild || row).appendChild(E('div', { 'class': 'cbi-value-description', 'style': 'color:#e0a82e' }, v));
+		}
+		n++;
+	});
+	if (!n) return;
+	const mod = own ? 'Çekirdek ayarı modu' : (col === 1 ? 'yerel mod' : 'KediRay yönetiminde');
+	const legend = E('div', { 'style': 'border:1px solid rgba(154,143,176,.45);border-left:4px solid #9a8fb0;border-radius:8px;padding:8px 14px;margin:0 0 14px;max-width:900px;line-height:1.5' },
+		[E('b', {}, ['Çekirdek: mihomo', ' (', mod, ')']), ' ', 'Etiketli ayarlar şu an kullanılmıyor ya da kısmen kullanılıyor; Xray\'e dönünce yeniden geçerli olur.']);
+	box.insertBefore(legend, before);
+}
 return view.extend({
 	load() {
 		return Promise.all([uci.load('kediray'), L.resolveDefault(callHostHints(), {})]);
@@ -690,7 +737,7 @@ return view.extend({
 			return root;
 		};
 
-		return m.render().then(n => { const w = document.createElement('div'); w.appendChild(krLicBanner()); w.appendChild(n); ownNote(w, 1, []); return w; });
+		return m.render().then(n => { const w = document.createElement('div'); w.appendChild(krLicBanner()); w.appendChild(n); mhMark(w, n); ownNote(w, 1, []); return w; });
 	},
 
 	handleSave: function () {
